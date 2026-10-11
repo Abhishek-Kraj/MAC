@@ -536,6 +536,13 @@ func testTranscriptLanguageLock() throws {
     try assertEq(TranscriptionLanguage.defaultLanguage(for: Locale(identifier: "fr_FR")).id, "en-US", "the default is still English")
 }
 
+/// Muse Spark thinks for ~6 s at its usual level, too slow mid-interview;
+/// it's asked to think minimally. Other models get no reasoning setting.
+func testMuseSparkThinksMinimally() throws {
+    try assertEq(AIManager.reasoning(for: "meta/muse-spark-1.3")?["effort"] as? String, "minimal", "Muse Spark")
+    try assertTrue(AIManager.reasoning(for: "anthropic/claude-sonnet-5") == nil, "others unchanged")
+}
+
 // MARK: - TheCloser Pro
 
 /// Must match the server's expectations (api/_lib/config.js DEVICE_PATTERN)
@@ -676,6 +683,7 @@ struct TestsMain {
         TestRunner.run("Answer keywords are highlighted", testAnswerKeywordsAreHighlighted)
         TestRunner.run("Keyword styles pick the prompt's formatting rule", testKeywordStylePromptRules)
         TestRunner.run("Transcripts in another language are ignored", testTranscriptLanguageLock)
+        TestRunner.run("Muse Spark thinks minimally", testMuseSparkThinksMinimally)
         TestRunner.run("Pro fingerprint matches the server's formula", testProFingerprint)
         TestRunner.run("Pro usage decodes from the server", testProUsageFromServer)
         TestRunner.run("Pro limits the model pickers to the plan", testProLimitsModelPickers)
