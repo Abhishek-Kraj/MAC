@@ -32,6 +32,7 @@ final class OverlayViewModel {
         ("openrouter/google/gemini-3.8-flash",     "Gemini 3.8 Flash",      "Google"),
         ("openrouter/google/gemini-3.5-flash-lite","Gemini 3.5 Flash Lite", "Google"),
         ("openrouter/x-ai/grok-4.7",               "Grok 4.7",              "xAI"),
+        ("openrouter/meta/muse-spark-1.3",         "Muse Spark 1.3",        "Meta"),
         ("openrouter/moonshotai/kimi-k2.6",        "Kimi K2.6",             "Kimi"),
     ]
 
