@@ -44,6 +44,15 @@ class AIManager {
         AIManager.moonshotPrefixes.contains { model.hasPrefix($0) }
     }
 
+    /// OpenRouter's `reasoning` setting for models that think before they
+    /// answer. Muse Spark thinks for about 6 s at its usual level; "minimal"
+    /// starts the answer in about 1.5 s, just as good for interview answers
+    /// (measured 2026-10-11; it can't turn thinking off). `model` is the
+    /// OpenRouter id, without the app's "openrouter/" prefix.
+    static func reasoning(for model: String) -> [String: Any]? {
+        model.hasPrefix("meta/muse-spark") ? ["effort": "minimal", "exclude": true] : nil
+    }
+
     func isGrokModel(_ model: String) -> Bool {
         AIManager.grokPrefixes.contains { model.hasPrefix($0) }
     }
@@ -178,6 +187,7 @@ class AIManager {
             "model": model, tokenField: maxTokens,
             "messages": messages
         ]
+        if let reasoning = AIManager.reasoning(for: model) { body["reasoning"] = reasoning }
         // Strict JSON output — supported by OpenAI / DeepSeek / Moonshot / Grok.
         // Forces a parseable JSON object instead of prose/markdown-wrapped text.
         if jsonMode { body["response_format"] = ["type": "json_object"] }
@@ -999,12 +1009,14 @@ class AIManager {
 
         // `max_completion_tokens` for OpenAI; Moonshot's compatible API wants
         // `max_tokens` (caller supplies the field name).
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
+        var body: [String: Any] = [
             "model": model, tokenField: 2048,
             "messages": messages,
             "stream": true,
             "stream_options": ["include_usage": true]
-        ])
+        ]
+        if let reasoning = AIManager.reasoning(for: model) { body["reasoning"] = reasoning }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: req)
         guard let http = response as? HTTPURLResponse else { throw AIError.invalidResponse }
