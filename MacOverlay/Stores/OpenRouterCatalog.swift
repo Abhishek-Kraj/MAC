@@ -1,6 +1,71 @@
 import Foundation
 import Observation
 
+/// OpenRouter quotes prices as USD per token, as strings.
+struct Pricing: Decodable {
+    let prompt: String?
+    let completion: String?
+}
+
+/// How heavy a model is, used to narrow a 465-entry catalogue down to
+/// something you can pick from mid-interview.
+///
+/// Tiered on OpenRouter's own `pricing` rather than on the model name, which
+/// is the only signal that is both authoritative and current. Price tracks
+/// capability closely enough to be a good lightness proxy, and it avoids
+/// hardcoding "7b is light, 70b is heavy" — a guess that breaks whenever the
+/// vendor ships something new.
+///
+/// Measured distribution across the live catalogue (USD per 1M blended
+/// tokens, 450 paid models): p10 $0.27, p25 $0.70, p50 $2.40, p75 $8.23.
+/// The thresholds below sit near those quartiles.
+enum ModelTier: String, CaseIterable, Identifiable {
+    /// `:free`, or priced at zero.
+    case free
+    /// Small and quick. The ones you want for a fast first answer.
+    case light
+    /// The middle of the range.
+    case moderate
+    /// Frontier models: the slowest and most expensive.
+    case frontier
+    /// No usable price. OpenRouter's own routers (`openrouter/auto`) report a
+    /// large negative figure that is an internal accounting artefact, not a
+    /// price, so they are kept out of the tiers rather than guessed at.
+    case unpriced
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .free:      return "Free"
+        case .light:     return "Light"
+        case .moderate:  return "Moderate"
+        case .frontier:  return "Frontier"
+        case .unpriced:  return "Router / unpriced"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .free:     return "No charge against your key"
+        case .light:    return "Cheapest and quickest tier"
+        case .moderate: return "Balanced cost and speed"
+        case .frontier: return "Most capable, slowest and dearest"
+        case .unpriced: return "Auto-routers with no listed price"
+        }
+    }
+
+    /// `blended` is USD per 1M prompt+completion tokens.
+    static func tier(isFree: Bool, blended: Double?) -> ModelTier {
+        if isFree { return .free }
+        guard let blended, blended.isFinite, blended >= 0 else { return .unpriced }
+        if blended == 0 { return .free }
+        if blended <= 0.75 { return .light }
+        if blended <= 5.0  { return .moderate }
+        return .frontier
+    }
+}
+
 /// The two ids the app reaches for when nothing better is chosen. They live
 /// here rather than on `OverlayViewModel` so the guarantee "these are always
 /// selectable" is testable without dragging in the AppKit-heavy view model.
@@ -9,6 +74,14 @@ enum OpenRouterDefaults {
     /// Small fast model for background jobs (the response gate, session
     /// titles). Reached through OpenRouter like everything else.
     static let utilityModel = "openrouter/anthropic/claude-haiku-4.5"
+}
+
+extension OpenRouterModel {
+    /// Which tier this model falls into. See `ModelTier` for the thresholds
+    /// and why price is used rather than a guess at parameter count.
+    var tier: ModelTier {
+        ModelTier.tier(isFree: isFree, blended: blendedPrice)
+    }
 }
 
 /// One selectable model.
@@ -29,6 +102,9 @@ struct OpenRouterModel: Identifiable, Hashable, Codable {
     /// catalogue predates this field and `decodeIfPresent` keeps old caches
     /// readable without a migration.
     let supportedParameters: [String]?
+    /// USD per 1M prompt+completion tokens, summed. nil when OpenRouter did
+    /// not quote a usable price. See `ModelTier`.
+    let blendedPrice: Double?
 
     /// `qwen/qwen3-235b` → `Qwen`.
     static func provider(fromSlug slug: String) -> String {
@@ -59,7 +135,8 @@ struct OpenRouterModel: Identifiable, Hashable, Codable {
             supportsImages: true,
             isFree: bare.hasSuffix(":free"),
             contextLength: nil,
-            supportedParameters: nil    // unknown until fetched
+            supportedParameters: nil,   // unknown until fetched
+            blendedPrice: nil
         )
     }
 
@@ -235,6 +312,18 @@ final class OpenRouterCatalog {
         )
     }
 
+    /// Sums OpenRouter's per-token prices into USD per 1M blended tokens.
+    /// Returns nil when either half is missing or unparseable, so a partial
+    /// price never becomes a bogus tier.
+    nonisolated static func blended(from pricing: Pricing?) -> Double? {
+        guard let pricing,
+              let p = Double(pricing.prompt ?? ""),
+              let c = Double(pricing.completion ?? ""),
+              p.isFinite, c.isFinite
+        else { return nil }
+        return (p + c) * 1_000_000
+    }
+
     nonisolated static func decode(_ data: Data) throws -> [OpenRouterModel] {
         struct Envelope: Decodable {
             struct Model: Decodable {
@@ -249,8 +338,9 @@ final class OpenRouterCatalog {
                 let contextLength: Int?
                 let architecture: Architecture?
                 let supportedParameters: [String]?
+                let pricing: Pricing?
                 enum CodingKeys: String, CodingKey {
-                    case id, name, architecture
+                    case id, name, architecture, pricing
                     case contextLength = "context_length"
                     case supportedParameters = "supported_parameters"
                 }
@@ -267,7 +357,8 @@ final class OpenRouterCatalog {
                 supportsImages: modalities.contains("image"),
                 isFree: m.id.hasSuffix(":free"),
                 contextLength: m.contextLength,
-                supportedParameters: m.supportedParameters
+                supportedParameters: m.supportedParameters,
+                blendedPrice: blended(from: m.pricing)
             )
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }

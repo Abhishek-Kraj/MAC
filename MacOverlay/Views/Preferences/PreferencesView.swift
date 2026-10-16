@@ -12,7 +12,8 @@ struct PreferencesView: View {
     // several hundred entries, so this list needs narrowing controls or it
     // is unusable.
     @State private var modelSearch = ""
-    @State private var freeOnly = false
+    /// nil = no tier filter, i.e. everything.
+    @State private var tierFilter: ModelTier? = nil
     @State private var imageOnly = false
     @State private var customModelDraft = ""
     @AppStorage(KeywordStyle.defaultsKey) private var keywordStyle = KeywordStyle.standard
@@ -582,7 +583,7 @@ struct PreferencesView: View {
 
         let query = modelSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let matches: (OpenRouterModel) -> Bool = { m in
-            if freeOnly && !m.isFree { return false }
+            if let tierFilter, m.tier != tierFilter { return false }
             if imageOnly && !m.supportsImages { return false }
             guard !query.isEmpty else { return true }
             return m.name.lowercased().contains(query)
@@ -613,7 +614,7 @@ struct PreferencesView: View {
             }
 
             if filtered.isEmpty {
-                Text(query.isEmpty && !freeOnly && !imageOnly
+                Text(query.isEmpty && tierFilter == nil && !imageOnly
                      ? "No models available."
                      : "No models match these filters.")
                     .font(.system(size: 11))
@@ -702,13 +703,45 @@ struct PreferencesView: View {
                 TextField("Search models", text: $modelSearch)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11))
-                Toggle("Free only", isOn: $freeOnly)
-                    .toggleStyle(.checkbox)
-                    .font(.system(size: 11))
+
+                Picker("", selection: $tierFilter) {
+                    Text("All tiers").tag(ModelTier?.none)
+                    ForEach(ModelTier.allCases) { t in
+                        Text(t.label).tag(ModelTier?.some(t))
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 130)
+                .help("Narrow by price tier. Light models answer fastest.")
+
                 Toggle("Images", isOn: $imageOnly)
                     .toggleStyle(.checkbox)
                     .font(.system(size: 11))
-                    .help("Only models that accept image input, so ⌘⇧⏎ screenshots work")
+                    .help("Only models that accept image input, so ⌘⇧⌏ screenshots work")
+            }
+
+            // Tier counts, so the numbers are visible before choosing.
+            HStack(spacing: 10) {
+                ForEach(ModelTier.allCases) { t in
+                    let n = OverlayViewModel.availableModels.filter { $0.tier == t }.count
+                    if n > 0 {
+                        Button {
+                            tierFilter = (tierFilter == t) ? nil : t
+                        } label: {
+                            Text("\(t.label) \(n)")
+                                .font(.system(size: 10, weight: tierFilter == t ? .semibold : .regular))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(tierFilter == t ? Color.accentColor.opacity(0.25)
+                                              : Color.white.opacity(0.05))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+                        .buttonStyle(.plain)
+                        .help(t.help)
+                    }
+                }
+                Spacer()
             }
         }
     }
@@ -717,6 +750,28 @@ struct PreferencesView: View {
         let draft = customModelDraft
         if OpenRouterCatalog.shared.addCustom(slug: draft) {
             customModelDraft = ""
+        }
+    }
+
+    /// Small coloured tier marker. Free is loudest because that is the one
+    /// people scan for; the paid tiers stay quiet.
+    private func tierBadge(_ tier: ModelTier) -> some View {
+        Text(tier == .unpriced ? "AUTO" : tier.label.uppercased())
+            .font(.system(size: 8, weight: .bold))
+            .padding(.horizontal, 3)
+            .padding(.vertical, 1)
+            .background(tierColor(tier).opacity(0.22))
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+            .help(tier.help)
+    }
+
+    private func tierColor(_ tier: ModelTier) -> Color {
+        switch tier {
+        case .free:     return .green
+        case .light:    return .teal
+        case .moderate: return .blue
+        case .frontier: return .orange
+        case .unpriced: return .secondary
         }
     }
 
@@ -738,14 +793,7 @@ struct PreferencesView: View {
                 Text(model.name)
                     .font(.system(size: 12))
                     .foregroundColor(.primary)
-                if model.isFree {
-                    Text("FREE")
-                        .font(.system(size: 8, weight: .bold))
-                        .padding(.horizontal, 3)
-                        .padding(.vertical, 1)
-                        .background(Color.green.opacity(0.22))
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                }
+                tierBadge(model.tier)
                 if model.supportsImages {
                     Image(systemName: "camera")
                         .font(.system(size: 9))

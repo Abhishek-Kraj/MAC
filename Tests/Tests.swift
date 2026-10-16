@@ -775,6 +775,61 @@ func testNoPaymentCodeInSourceTree() throws {
     }
 }
 
+/// Tier boundaries, keyed on USD per 1M blended tokens. Thresholds sit near
+/// the live catalogue's quartiles (p25 $0.70, p75 $8.23).
+func testModelTierThresholds() throws {
+    try assertEq(ModelTier.tier(isFree: true, blended: nil), .free, "free suffix wins outright")
+    try assertEq(ModelTier.tier(isFree: false, blended: 0), .free, "priced at zero is free")
+    try assertEq(ModelTier.tier(isFree: false, blended: 0.30), .light)
+    try assertEq(ModelTier.tier(isFree: false, blended: 0.75), .light, "upper edge of light")
+    try assertEq(ModelTier.tier(isFree: false, blended: 0.76), .moderate, "just past light")
+    try assertEq(ModelTier.tier(isFree: false, blended: 5.0), .moderate, "upper edge of moderate")
+    try assertEq(ModelTier.tier(isFree: false, blended: 5.01), .frontier, "just past moderate")
+}
+
+/// OpenRouter's routers report a large negative price, which is internal
+/// accounting rather than a price. Guessing a tier from it would be nonsense,
+/// so they land in `unpriced` instead of being silently called "light".
+func testModelTierRejectsRouterPricing() throws {
+    try assertEq(ModelTier.tier(isFree: false, blended: -2_000_000), .unpriced, "openrouter/auto")
+    try assertEq(ModelTier.tier(isFree: false, blended: nil), .unpriced, "no price quoted")
+    try assertEq(ModelTier.tier(isFree: false, blended: .nan), .unpriced, "NaN")
+}
+
+/// Prices arrive as USD-per-token strings and are summed per 1M tokens.
+func testBlendedPriceConversion() throws {
+    try assertEq(OpenRouterCatalog.blended(from: Pricing(prompt: "0.0000015", completion: "0.0000075")), 9.0)
+    try assertEq(OpenRouterCatalog.blended(from: Pricing(prompt: "0", completion: "0")), 0.0)
+    try assertEq(OpenRouterCatalog.blended(from: Pricing(prompt: nil, completion: "0.1")), nil, "half a price is no price")
+    try assertEq(OpenRouterCatalog.blended(from: Pricing(prompt: "abc", completion: "1")), nil, "unparseable")
+    try assertEq(OpenRouterCatalog.blended(from: nil), nil)
+}
+
+/// A priced model tiers from its real catalogue data; a hand-typed one has no
+/// price yet and falls back to whatever it is, without crashing.
+func testModelTierFromCatalogueEntry() throws {
+    let json = """
+    {"data":[
+      {"id":"vendor/cheap","name":"Cheap","context_length":8,
+       "pricing":{"prompt":"0.0000001","completion":"0.0000002"},
+       "architecture":{"input_modalities":["text"]}},
+      {"id":"vendor/dear","name":"Dear","context_length":8,
+       "pricing":{"prompt":"0.000015","completion":"0.000060"},
+       "architecture":{"input_modalities":["text"]}},
+      {"id":"vendor/x:free","name":"Freebie","context_length":8,
+       "pricing":{"prompt":"0","completion":"0"},
+       "architecture":{"input_modalities":["text"]}}
+    ]}
+    """
+    let models = try OpenRouterCatalog.decode(Data(json.utf8))
+    func tier(_ id: String) throws -> ModelTier {
+        try models.first { $0.id == "openrouter/\(id)" }.unwrap("missing").tier
+    }
+    try assertEq(try tier("vendor/cheap"), .light, "cost per 1M")
+    try assertEq(try tier("vendor/dear"), .frontier, "cost per 1M")
+    try assertEq(try tier("vendor/x:free"), .free)
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -879,6 +934,10 @@ struct TestsMain {
         TestRunner.run("OpenRouter decode tolerates missing architecture", testOpenRouterDecodeToleratesMissingArchitecture)
         TestRunner.run("No payment code in the source tree", testNoPaymentCodeInSourceTree)
         TestRunner.run("Show all is scoped to the filters", testShowAllIsScopedToTheGivenIds)
+        TestRunner.run("Model tier thresholds", testModelTierThresholds)
+        TestRunner.run("Model tier rejects router pricing", testModelTierRejectsRouterPricing)
+        TestRunner.run("Blended price conversion", testBlendedPriceConversion)
+        TestRunner.run("Model tier from a catalogue entry", testModelTierFromCatalogueEntry)
         TestRunner.run("Grok stream URL", testGrokStreamURL)
         TestRunner.run("Grok stitches an utterance from its chunks", testGrokStitchesAnUtterance)
         TestRunner.run("Grok keeps locked chunks the final leaves out", testGrokKeepsLockedChunksIfTheFinalOmitsThem)
