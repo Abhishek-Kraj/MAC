@@ -36,6 +36,7 @@ SOURCES=(
     "$SRC_DIR/Stores/ModelVisibility.swift"
     "$SRC_DIR/Stores/OpenRouterCatalog.swift"
     "$SRC_DIR/Stores/ModelFilterStore.swift"
+    "$SRC_DIR/ScreenPlacement.swift"
     "$SRC_DIR/Views/Shared/Design.swift"
     "$SRC_DIR/Views/Shared/MarkdownResponseView.swift"
 )

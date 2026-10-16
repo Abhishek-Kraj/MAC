@@ -980,6 +980,72 @@ func testSharedModelFilterStore() throws {
     try assertEq(countMatching(), 2, "reset clears everything")
 }
 
+/// The panel could not be dragged onto a second display because
+/// `constrainFrameRect` fell back to `NSScreen.main` — the screen holding
+/// key focus — and clamped the frame back to it. The target is now resolved
+/// from the frame being requested.
+///
+/// Uses synthetic screen rects, so this runs without a second display
+/// attached.
+func testPanelCanMoveBetweenDisplays() throws {
+    // Built-in on the left, external 1920x1080 to its right.
+    let builtIn  = NSRect(x: 0,    y: 0, width: 1512, height: 945)
+    let external = NSRect(x: 1512, y: 0, width: 1920, height: 1080)
+    let screens = [builtIn, external]
+
+    // Sitting on the built-in display.
+    let onBuiltIn = NSRect(x: 100, y: 400, width: 400, height: 200)
+    try assertEq(ScreenPlacement.bestScreenIndex(for: onBuiltIn, screens: screens), 0,
+                 "starts on the built-in display")
+
+    // Straddling the boundary. 1200..1600 overlaps the built-in by 312pt and
+    // the external by only 88pt, so the built-in display wins on area.
+    let mostlyBuiltIn = NSRect(x: 1200, y: 400, width: 400, height: 200)
+    try assertEq(ScreenPlacement.bestScreenIndex(for: mostlyBuiltIn, screens: screens), 0,
+                 "mostly on the built-in display while straddling")
+
+    // The same boundary, tipped the other way: 1400..1800 gives 112pt to the
+    // built-in and 288pt to the external, so the external now wins. This is
+    // the rule doing real work, not a tie-break.
+    let mostlyExternal = NSRect(x: 1400, y: 400, width: 400, height: 200)
+    try assertEq(ScreenPlacement.bestScreenIndex(for: mostlyExternal, screens: screens), 1,
+                 "crossed the midpoint while straddling")
+
+    // Dragged well onto the external display — the case that used to snap back.
+    let onExternal = NSRect(x: 2000, y: 400, width: 400, height: 200)
+    try assertEq(ScreenPlacement.bestScreenIndex(for: onExternal, screens: screens), 1,
+                 "fully on the external display resolves to it")
+
+    // Nudged off the right-hand edge: nearest screen, not the focused one.
+    let pastEdge = NSRect(x: 3900, y: 400, width: 400, height: 200)
+    try assertEq(ScreenPlacement.bestScreenIndex(for: pastEdge, screens: screens), 1,
+                 "off-screen frame snaps to the nearest display")
+
+    // Off the left edge of the leftmost display.
+    let pastLeft = NSRect(x: -900, y: 400, width: 400, height: 200)
+    try assertEq(ScreenPlacement.bestScreenIndex(for: pastLeft, screens: screens), 0,
+                 "off the left edge snaps to the leftmost display")
+
+    // A single display is unaffected.
+    try assertEq(ScreenPlacement.bestScreenIndex(for: onExternal, screens: [builtIn]), 0,
+                 "single display always wins")
+    try assertEq(ScreenPlacement.bestScreenIndex(for: onBuiltIn, screens: []), nil,
+                 "no screens, no answer")
+}
+
+/// Displays stacked vertically rather than side by side — the same clamp
+/// must not pin the panel to the focused screen there either.
+func testPanelMovesBetweenVerticallyStackedDisplays() throws {
+    let top = NSRect(x: 0, y: 1080, width: 1920, height: 1080)
+    let bottom = NSRect(x: 0, y: 0, width: 1920, height: 1080)
+    let screens = [bottom, top]
+
+    try assertEq(ScreenPlacement.bestScreenIndex(
+        for: NSRect(x: 100, y: 1500, width: 400, height: 200), screens: screens), 1, "on the top display")
+    try assertEq(ScreenPlacement.bestScreenIndex(
+        for: NSRect(x: 100, y: 100,  width: 400, height: 200), screens: screens), 0, "on the bottom display")
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -1086,6 +1152,8 @@ struct TestsMain {
         TestRunner.run("Show all is scoped to the filters", testShowAllIsScopedToTheGivenIds)
         TestRunner.run("Model tier thresholds", testModelTierThresholds)
         TestRunner.run("Shared model filter store", testSharedModelFilterStore)
+        TestRunner.run("Panel can move between displays", testPanelCanMoveBetweenDisplays)
+        TestRunner.run("Panel moves between stacked displays", testPanelMovesBetweenVerticallyStackedDisplays)
         TestRunner.run("Model tier rejects router pricing", testModelTierRejectsRouterPricing)
         TestRunner.run("Blended price conversion", testBlendedPriceConversion)
         TestRunner.run("Model tier from a catalogue entry", testModelTierFromCatalogueEntry)

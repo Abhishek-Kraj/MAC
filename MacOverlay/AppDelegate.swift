@@ -34,12 +34,15 @@ class UnconstrainedPanel: NSPanel {
         // Position constraint — keep the panel on a connected screen
         // (full frame so the bottom can reach the absolute edge; the
         // visibleFrame caps the top to leave room for the menu bar).
-        guard let screen = screen ?? NSScreen.main else { return f }
-        let sf = screen.frame
-        let vf = screen.visibleFrame
-        f.origin.x = min(max(f.origin.x, sf.minX), sf.maxX - f.size.width)
-        f.origin.y = min(max(f.origin.y, sf.minY), vf.maxY - f.size.height)
-        return f
+        //
+        // This used to fall back to `NSScreen.main`, which is the screen
+        // holding key focus. On a multi-display setup that is the wrong
+        // display for a drag in progress, so the panel was clamped back to
+        // the focused screen and could not be pulled onto the second one.
+        // The target is now resolved from the frame being requested, which is
+        // the ground truth of where the panel is going.
+        guard let target = ScreenPlacement.screen(for: f, hint: screen) else { return f }
+        return ScreenPlacement.clamp(f, to: target)
     }
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
