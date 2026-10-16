@@ -1465,52 +1465,73 @@ func testPrepGeneratorParsesWrappedJSON() throws {
     try assertTrue(PrepGenerator.parse("[broken").isEmpty, "unterminated")
 }
 
-/// Answers must never be invented when no background was supplied — the bank
-/// is meant to be things the user actually says.
-@MainActor
-func testPrepGeneratorWarnsWithoutBackground() throws {
-    // The prompt text is what enforces this; assert it says so explicitly.
-    let prompt = PrepGenerator.debugPrompt(role: "R", jd: String(repeating: "x", count: 60),
-                                           count: 10)
-    // The prompt is a Swift multiline literal, so phrases wrap across lines.
-    // Compare against a whitespace-collapsed copy.
-    let flat = prompt.lowercased()
-        .split(whereSeparator: \.isWhitespace)
-        .joined(separator: " ")
-    try assertTrue(flat.contains("do not invent"),
-                   "prompt forbids inventing experience")
-    try assertTrue(flat.contains("keep the answer general"),
-                   "and says what to do instead when context is thin")
-
-    // One field has to do both jobs: pick the questions and ground the answers.
-    try assertTrue(flat.contains("twice"), "context is explicitly used for both")
-    try assertFalse(flat.contains("background:"), "no second background field to fill in")
-}
-
-/// The posting must be typed once. Prep used to have its own JD box, which
-/// meant pasting the same description into two fields on the same screen.
-/// `useContext` takes the interview setup's Context instead, and never
-/// overwrites something the user pasted deliberately.
+/// The posting must be typed once. Prep used to have its own JD box on the
+/// same screen as Context, so the same description was pasted into two
+/// places. `useContext` takes the interview's Context instead, and never
+/// overwrites something pasted deliberately.
 @MainActor
 func testPrepGeneratorTakesPostingFromInterviewContext() throws {
     let g = PrepGenerator()
     try assertTrue(g.jobDescription.isEmpty, "starts empty")
 
-    let short = "Fabric role"
-    g.useContext(short)
+    g.useContext("Fabric role")
     try assertTrue(g.jobDescription.isEmpty, "a stub context is not worth using")
 
-    let context = "Fabric Platform Lead at GyanSys. " + String(repeating: "responsibility ", count: 12)
+    let context = "Fabric Platform Lead. " + String(repeating: "responsibility ", count: 12)
     g.useContext(context)
     try assertEq(g.jobDescription,
                  context.trimmingCharacters(in: .whitespacesAndNewlines),
                  "context adopted as the posting, trimmed")
 
-    // A deliberate paste wins, and a shorter context must not clobber it.
-    let mine = "A completely different posting that I typed in deliberately."
+    let mine = "A different posting that I typed in deliberately."
     g.jobDescription = mine
     g.useContext("short context")
     try assertEq(g.jobDescription, mine, "an explicit paste is never overwritten")
+}
+
+/// Answers must never be invented. The setup screen already holds a Context
+/// field and a résumé, and prep reads both rather than asking for either a
+/// second time — so the prompt has to make its stance explicit in both cases:
+/// ground answers in the CV when there is one, and keep them general when
+/// there is not.
+@MainActor
+func testPrepGeneratorGroundingDependsOnTheResume() throws {
+    func flat(_ role: String, _ jd: String, _ resume: String) -> String {
+        PrepGenerator.debugPrompt(role: role, jd: jd, resume: resume, count: 10)
+            .lowercased()
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+    }
+    let jd = String(repeating: "x", count: 60)
+
+    // One field has to do both jobs: pick the questions and ground the answers.
+    let none = flat("R", jd, "")
+    try assertTrue(none.contains("twice"), "context is explicitly used for both")
+    try assertFalse(none.contains("background:"), "no second background field to fill in")
+
+    // No résumé: say so, and steer away from specifics.
+    try assertTrue(none.contains("no résumé is attached"),
+                   "states plainly that no CV was supplied")
+    try assertTrue(none.contains("invented projects, employers or metrics"),
+                   "and warns against inventing them")
+
+    // With a résumé: it must actually reach the prompt, unedited.
+    let cv = String(repeating: "Led a lakehouse migration at Contoso. ", count: 12)
+    let some = flat("R", jd, cv)
+    try assertTrue(some.contains("candidate's résumé"), "the CV section is present")
+    try assertTrue(some.contains("contoso"), "the actual CV text reaches the prompt")
+    try assertTrue(some.contains("quote nothing that is not in this résumé"),
+                   "and answers are restricted to it")
+    try assertFalse(some.contains("no résumé is attached"),
+                    "the no-CV warning is gone once there is one")
+
+    // A pathologically long CV is truncated rather than sent whole.
+    let huge = flat("R", jd, String(repeating: "experience detail. ", count: 900))
+    try assertTrue(huge.contains("truncated"), "a very long CV is truncated")
+
+    // A token-sized string is treated as no CV at all.
+    try assertTrue(flat("R", jd, "hi").contains("no résumé is attached"),
+                   "a stub string is not a résumé")
 }
 
 // MARK: - Grok transcription
@@ -1638,7 +1659,8 @@ struct TestsMain {
         TestRunner.run("Missed questions are captured, not auto-banked", testMissedQuestionsAreCapturedNotAutoBanked)
         TestRunner.run("Prep generator takes posting from interview context", testPrepGeneratorTakesPostingFromInterviewContext)
         TestRunner.run("Prep generator parses wrapped JSON", testPrepGeneratorParsesWrappedJSON)
-        TestRunner.run("Prep generator warns without background", testPrepGeneratorWarnsWithoutBackground)
+        TestRunner.run("Prep generator takes posting from interview context", testPrepGeneratorTakesPostingFromInterviewContext)
+        TestRunner.run("Prep generator grounding depends on the resume", testPrepGeneratorGroundingDependsOnTheResume)
         TestRunner.run("Cosine similarity", testCosineSimilarity)
         TestRunner.run("Semantic ranking skips unembedded and gates on margin", testSemanticRankingSkipsUnembeddedAndGatesOnMargin)
         TestRunner.run("Bank backup snapshots and restores", testBankBackupSnapshotsAndRestores)

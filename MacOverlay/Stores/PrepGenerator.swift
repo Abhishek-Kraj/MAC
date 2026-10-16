@@ -34,6 +34,10 @@ final class PrepGenerator {
     /// panel reads the interview's existing Context field instead, so the JD
     /// is typed once rather than pasted into two boxes.
     var jobDescription = ""
+    /// Extracted text of the résumé attached on the setup screen. Supplied by
+    /// the caller rather than read here, so the generator has no opinion about
+    /// where a résumé comes from.
+    var resumeText = ""
     var questionCount = 40
 
     /// Takes the posting from the interview setup's Context field.
@@ -86,7 +90,8 @@ final class PrepGenerator {
             let raw = try await Self.ask(
                 key: key,
                 system: "You write interview questions and model answers. You reply with JSON only.",
-                user: Self.prompt(role: role, jd: jd, count: questionCount))
+                user: Self.prompt(role: role, jd: jd,
+                                  resume: resumeText, count: questionCount))
             let parsed = Self.parse(raw)
             guard !parsed.isEmpty else {
                 stage = .failed("The model returned no usable questions. Try again.")
@@ -159,12 +164,28 @@ final class PrepGenerator {
     }
 
     /// Exposed so the prompt can be asserted in tests without a network call.
-    static func debugPrompt(role: String, jd: String, count: Int) -> String {
-        prompt(role: role, jd: jd, count: count)
+    static func debugPrompt(role: String, jd: String,
+                            resume: String = "", count: Int) -> String {
+        prompt(role: role, jd: jd, resume: resume, count: count)
     }
 
-    private static func prompt(role: String, jd: String, count: Int) -> String {
-        """
+    private static func prompt(role: String, jd: String,
+                               resume: String, count: Int) -> String {
+        let cv = resume.trimmingCharacters(in: .whitespacesAndNewlines)
+        let grounding: String
+        if cv.count > 80 {
+            let body = cv.count > 6000 ? String(cv.prefix(6000)) + "\n[truncated]" : cv
+            grounding = """
+            The candidate's résumé. Every answer must be grounded in something             that appears here — their employers, projects, stack and numbers.             Quote nothing that is not in this résumé or the context above.
+
+            \(body)
+            """
+        } else {
+            grounding = """
+            No résumé is attached. Keep answers to method and judgement rather             than to invented projects, employers or metrics.
+            """
+        }
+        return """
         Research this role and write the questions an interviewer would actually ask.
 
         Role: \(role)
@@ -175,9 +196,9 @@ final class PrepGenerator {
 
         Use that twice: to work out what the role will probe, and to ground each
         answer in what the candidate has actually done, written in the first
-        person. Do not invent employers, projects, metrics or employers' names
-        that are not in the context above — if the context is thin, keep the
-        answer general rather than specific and fictional.
+        person.
+
+        \(grounding)
 
         Return ONLY a JSON array. Each element:
         {"q":"<the interviewer's question, one line>",

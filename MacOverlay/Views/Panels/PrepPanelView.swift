@@ -234,6 +234,7 @@ struct PrepSetupView: View {
                 HStack(spacing: 8) {
                     Button {
                         generator.useContext(vm.interviewContext)
+                        generator.resumeText = vm.interviewResumeText
                         Task { await generator.generate() }
                     } label: {
                         if generator.isRunning {
@@ -282,26 +283,24 @@ struct PrepSetupView: View {
         generator.roleName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Everything prep will read, with a tick per source, so it is visible
+    /// rather than assumed. The point is that you do not retype any of it.
     @ViewBuilder
     private var posting: some View {
         let context = vm.interviewContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasContext = context.count > 40
+        let hasCV = vm.interviewResumeText.count > 80
         let hasOwn = !generator.jobDescription.isEmpty
 
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: hasOwn ? "doc.text.fill"
-                          : (hasContext ? "checkmark.circle.fill" : "exclamationmark.circle"))
-                    .font(.system(size: 11))
-                    .foregroundColor(hasOwn || hasContext ? .green : .orange)
-                Text(hasOwn
-                     ? "Using a posting pasted here"
-                     : hasContext
-                       ? "Using your interview context"
-                       : "No context yet — add the JD under Context, or paste below")
-                    .font(.system(size: 11, weight: .medium))
-                Spacer()
-            }
+            sourceRow(hasOwn ? "Posting" : "Context", ok: hasOwn || hasContext,
+                      detail: hasOwn ? "pasted here"
+                        : hasContext ? "\(context.count) characters"
+                        : "empty — add the JD under Context")
+            sourceRow("Résumé", ok: hasCV,
+                      detail: hasCV
+                        ? "\(vm.interviewResumeText.count) characters from \(vm.interviewResumeFileURL?.lastPathComponent ?? "file")"
+                        : "none attached — answers stay general")
             if !hasOwn {
                 TextEditor(text: $generator.jobDescription)
                     .font(.system(size: 11))
@@ -309,6 +308,20 @@ struct PrepSetupView: View {
                     .overlay(RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5))
             }
+        }
+    }
+
+    private func sourceRow(_ label: String, ok: Bool, detail: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "circle.dashed")
+                .font(.system(size: 11))
+                .foregroundColor(ok ? .green : .secondary.opacity(0.6))
+            Text(label).font(.system(size: 11, weight: .medium))
+            Text(detail)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+            Spacer()
         }
     }
 
