@@ -70,6 +70,10 @@ struct PrepQuestion: Identifiable, Hashable, Codable {
 final class PrepBank {
     static let shared = PrepBank()
 
+    /// The name a bank gets when no role is known yet. Deliberately not a
+    /// plausible role, so it can never collide with a real one.
+    static let placeholderBankID = "Imported"
+
     private static let filename = "prepBank.json"
 
     private(set) var questions: [PrepQuestion] = []
@@ -144,6 +148,29 @@ final class PrepBank {
             activeBankID = new.first?.bankID ?? ""
         }
         persist()
+    }
+
+    /// Moves every question from one bank to another.
+    ///
+    /// Exists because the placeholder name is a trap. A bank imported before
+    /// the role could be detected is filed under "Imported", which is not a
+    /// role — so it is never selected again, never matched against, and the
+    /// questions quietly stop working while still appearing to be saved.
+    @discardableResult
+    func renameBank(from oldID: String, to newID: String) -> Int {
+        let target = newID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty, oldID != target else { return 0 }
+        var moved = 0
+        for i in questions.indices where questions[i].bankID == oldID {
+            questions[i].bankID = target
+            moved += 1
+        }
+        if moved > 0 {
+            if activeBankID == oldID { activeBankID = target }
+            persist()
+            _ = PrepBankBackup.snapshot()
+        }
+        return moved
     }
 
     func deleteBank(_ id: String) {

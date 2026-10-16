@@ -50,17 +50,25 @@ struct PrepPanelView: View {
                     if isRunning {
                         Button("Stop") { generator.cancel() }
                             .buttonStyle(.secondaryCompact)
-                    }
-                    // Styled by a branch rather than a ternary: the two
-                    // styles are different concrete types and will not unify.
-                    if isReady {
-                        Button(prepareButtonTitle) { showSetup = true }
-                            .buttonStyle(.secondaryCompact)
+                    } else if isReady {
+                        // The way to actually see what was prepared. It was
+                        // missing entirely: nothing anywhere set `showBank`,
+                        // so the bank was generated and then unreachable.
+                        HStack(spacing: 6) {
+                            Button("View \(questionCount) questions") { showBank = true }
+                                .buttonStyle(.primaryCompact)
+                            Button("Add more") { showSetup = true }
+                                .buttonStyle(.secondaryCompact)
+                        }
                     } else {
                         Button(prepareButtonTitle) { showSetup = true }
                             .buttonStyle(.primaryCompact)
                     }
                 }
+
+                // Unmissable confirmation. Preparing takes minutes and used to
+                // end with no more on screen than the state you started from.
+                if isReady { preparedBanner }
 
                 if isRunning { progress.animation(.easeInOut(duration: 0.2), value: isRunning) }
 
@@ -77,12 +85,41 @@ struct PrepPanelView: View {
                 }
             }
         }
-        .sheet(isPresented: $showSetup) { PrepSetupView(onDone: { showSetup = false }) }
+        .sheet(isPresented: $showSetup) {
+            PrepSetupView(onDone: { showSetup = false },
+                          onViewBank: { showSetup = false; showBank = true })
+        }
         .sheet(isPresented: $showBank) { bankList }
         .sheet(isPresented: $showBackups) { backupList }
         .sheet(item: $editing) { q in
             QuestionEditor(question: q) { editing = nil }
         }
+    }
+
+    /// The confirmation that preparing finished, with the count and the way
+    /// in. Deliberately the loudest thing in the card: a two-minute job that
+    /// ends looking unchanged is indistinguishable from one that failed.
+    private var preparedBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 14))
+                .foregroundColor(.green)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Prepared — \(questionCount) questions")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Matched live during the interview. For \(activeBankID).")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Button("View") { showBank = true }
+                .buttonStyle(.secondaryCompact)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(RoundedRectangle(cornerRadius: 7)
+            .fill(Color.green.opacity(0.10)))
+        .accessibilityLabel("\(questionCount) questions prepared")
     }
 
     private var isRunning: Bool { generator.isRunning }
@@ -346,8 +383,12 @@ struct PrepSetupView: View {
     @Bindable private var generator = PrepGenerator.shared
     @State private var pastedQuestions = ""
     @State private var importMessage: String?
+    @State private var adoptedNote: String?
 
     var onDone: () -> Void
+    /// Closes this sheet and opens the bank, so a finished run can be
+    /// inspected without hunting for where the questions went.
+    var onViewBank: () -> Void = {}
 
     var body: some View {
         ScrollView {
@@ -427,6 +468,16 @@ struct PrepSetupView: View {
             await generator.detectRole(context: vm.interviewContext,
                                        resume: vm.interviewResumeText,
                                        key: key)
+            // A bank imported before the role could be detected is filed under
+            // "Imported" — not a role, so never selected again and never
+            // matched against. Now that the role is known, adopt it, or those
+            // questions keep looking saved while doing nothing.
+            let role = generator.roleName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !role.isEmpty, PrepBank.shared.hasBank(forRole: PrepBank.placeholderBankID) {
+                let moved = PrepBank.shared.renameBank(from: PrepBank.placeholderBankID,
+                                                       to: role)
+                if moved > 0 { adoptedNote = "\(moved) questions now filed under \(role)." }
+            }
         }
     }
 
@@ -529,6 +580,12 @@ struct PrepSetupView: View {
                     }
                 }
 
+            if let adoptedNote {
+                Label(adoptedNote, systemImage: "folder.badge.gearshape")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+
             if let message = importMessage {
                 Text(message)
                     .font(.system(size: 10))
@@ -577,7 +634,7 @@ struct PrepSetupView: View {
         let text = pastedQuestions.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         let role = generator.roleName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let bank = role.isEmpty ? "Imported" : role
+        let bank = role.isEmpty ? PrepBank.placeholderBankID : role
         let result = PrepBankImporter.parse(text)
         guard !result.pairs.isEmpty else {
             importMessage = "No question-and-answer pairs found. Try Q: … / A: … on separate lines."
@@ -620,10 +677,14 @@ struct PrepSetupView: View {
         }
         switch generator.stage {
         case .done(let count):
-            Label("Added \(count) questions. Ready to use.",
-                  systemImage: "checkmark.circle.fill")
-                .font(.system(size: 11))
-                .foregroundColor(.green)
+            HStack(spacing: 6) {
+                Label("Prepared \(count) questions.", systemImage: "checkmark.seal.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.green)
+                Spacer()
+                Button("View them") { onDone(); onViewBank() }
+                    .buttonStyle(.secondaryCompact)
+            }
         case .failed(let why):
             Label(why, systemImage: "exclamationmark.triangle.fill")
                 .font(.system(size: 11))

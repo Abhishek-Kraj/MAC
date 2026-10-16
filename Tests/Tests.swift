@@ -1530,6 +1530,98 @@ func testPreparedAnswerSlotArbitratesCorrectly() throws {
     try assertEq(slot.displayed, "Real answer", "toggle is inert until there is an alternative")
 }
 
+/// A bank filed under a placeholder is a bank that has stopped working.
+///
+/// Questions imported before the role could be detected were filed under
+/// "Imported", which is not a role. It never gets selected, never gets matched
+/// against, and never grows — the questions sit there looking saved while
+/// doing nothing. The user has exactly this bank.
+@MainActor
+func testPlaceholderBankAdoptsTheDetectedRole() throws {
+    let bank = PrepBank.shared
+    let saved = bank.questions
+    defer { bank.replaceAll(with: saved) }
+
+    bank.replaceAll(with: [
+        PrepQuestion(question: "Q1", answer: "A1", bankID: PrepBank.placeholderBankID),
+        PrepQuestion(question: "Q2", answer: "A2", bankID: PrepBank.placeholderBankID),
+        PrepQuestion(question: "Q3", answer: "A3", bankID: "Some Other Role"),
+    ])
+
+    try assertTrue(bank.hasBank(forRole: PrepBank.placeholderBankID), "placeholder exists")
+    try assertFalse(PrepBank.placeholderBankID.contains(" "),
+                    "the placeholder is not a plausible role name")
+
+    let moved = bank.renameBank(from: PrepBank.placeholderBankID, to: "Fabric CoE Lead")
+    try assertEq(moved, 2, "both placeholder questions moved")
+    try assertFalse(bank.hasBank(forRole: PrepBank.placeholderBankID),
+                    "and the placeholder is gone")
+    try assertEq(bank.questions(inBank: "Fabric CoE Lead").count, 2, "now under the role")
+    try assertEq(bank.questions(inBank: "Some Other Role").count, 1,
+                 "other banks untouched")
+
+    // The active bank follows a rename, or the card shows an empty bank.
+    bank.replaceAll(with: [
+        PrepQuestion(question: "Q9", answer: "A9", bankID: PrepBank.placeholderBankID),
+    ])
+    try assertEq(bank.activeBankID, PrepBank.placeholderBankID,
+                 "replacing the set points the active bank at what is there")
+    bank.renameBank(from: PrepBank.placeholderBankID, to: "Data Platform Lead")
+    try assertEq(bank.activeBankID, "Data Platform Lead",
+                 "the active bank follows the rename")
+
+    // Nonsense renames are refused rather than destroying the bank.
+    try assertEq(bank.renameBank(from: "Nothing", to: "Whatever"), 0,
+                 "renaming a bank that does not exist moves nothing")
+    try assertEq(bank.renameBank(from: "Data Platform Lead", to: "   "), 0,
+                 "a blank name is refused")
+    try assertEq(bank.questions(inBank: "Data Platform Lead").count, 1,
+                 "and the bank is still intact")
+}
+
+/// Generated questions have to be reachable. They are produced, embedded and
+/// saved — and then, for one build, there was no control anywhere that opened
+/// them. A sheet declared and never presented, because renaming the one button
+/// that opened it removed the only `showBank = true` in the file.
+///
+/// This is a source-level guard because the failure is a wiring gap, not a
+/// logic error: nothing crashed, every other test passed, and the questions
+/// existed on disk the whole time.
+func testPreparedQuestionsAreReachableFromTheSetupScreen() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let panel = try String(contentsOf: root.appending(path:
+        "MacOverlay/Views/Panels/PrepPanelView.swift"), encoding: .utf8)
+
+    // Something must actually open the bank, and something the other bank.
+    try assertTrue(panel.contains("showBank = true"),
+                   "a control opens the question bank")
+    try assertTrue(panel.contains("showBackups = true"),
+                   "a control opens the backups")
+
+    // And it must not be the declaration or a reset being counted as the
+    // only occurrence.
+    let opens = panel.components(separatedBy: "showBank = true").count - 1
+    try assertTrue(opens >= 1, "the bank is opened from the card or the sheet")
+
+    // The success state has to say so, with a count and a way in — a run that
+    // finishes looking exactly as it started is indistinguishable from one
+    // that failed.
+    try assertTrue(panel.contains("Prepared —"),
+                   "the card confirms the run finished")
+    try assertTrue(panel.contains("View \\(questionCount) questions"),
+                   "and the count is on the control that opens the bank")
+
+    // Every generated question must be findable, and the prepared path must be
+    // reachable from the send flow too.
+    let vm = try String(contentsOf: root.appending(path:
+        "MacOverlay/OverlayViewModel.swift"), encoding: .utf8)
+    try assertTrue(vm.contains("preparedAnswer(for:"),
+                   "the send path actually calls the matcher")
+    try assertTrue(vm.contains("sessionMode == .interview"),
+                   "and only in an interview, where a bank exists")
+}
+
 /// One vector in, one vector out.
 ///
 /// The bug this pins was two independent casts in the response reader: on
@@ -2123,6 +2215,8 @@ struct TestsMain {
         TestRunner.run("Bank records matches", testBankRecordsMatches)
         TestRunner.run("Missed questions are captured, not auto-banked", testMissedQuestionsAreCapturedNotAutoBanked)
         TestRunner.run("Prepared answer arbitration", testPreparedAnswerSlotArbitratesCorrectly)
+        TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)
+        TestRunner.run("Prepared questions are reachable", testPreparedQuestionsAreReachableFromTheSetupScreen)
         TestRunner.run("Embedding response gives one vector per row", testEmbeddingResponseYieldsOneVectorPerRow)
         TestRunner.run("Question bank importer reads real exports", testPrepBankImporterReadsTheShapesRealToolsExport)
         TestRunner.run("Prep parser accepts real model shapes", testPrepParserAcceptsRealModelShapes)
