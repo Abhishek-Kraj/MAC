@@ -9,8 +9,9 @@ enum KeywordStyle: String, CaseIterable, Identifiable {
 
     static let defaultsKey = "keywordStyle"
     static let standard = KeywordStyle.lightBlue
-    /// Shown under the picker in Settings.
-    static let sample = "Use **PostgreSQL** here, since payments need **strong consistency**."
+    /// Shown under the picker in Settings so the colour can be chosen against
+    /// real text. Kept short and domain-neutral.
+    static let sample = "Lead with the **key point**, then two supporting **details**."
 
     var id: String { rawValue }
 
