@@ -41,6 +41,9 @@ final class PrepGenerator {
     }
 
     private(set) var stage: Stage = .idle
+    /// Set when a later batch failed but earlier ones succeeded, so a partial
+    /// run can say why it is short rather than looking arbitrarily incomplete.
+    private var batchWarning: String?
     /// Cancels an in-flight run, since preparation takes minutes and may turn
     /// out to be the wrong posting.
     @ObservationIgnored private var run: Task<Void, Never>?
@@ -271,9 +274,12 @@ final class PrepGenerator {
             let jd = jobDescription.trimmingCharacters(in: .whitespacesAndNewlines)
             let parsed = await Self.askInBatches(
                 key: key, role: role, jd: jd, resume: resumeText,
-                want: questionCount, existing: currentBank)
+                want: questionCount, existing: currentBank) { why in
+                batchWarning = why
+            }
             guard !parsed.isEmpty else {
-                stage = .failed("The model returned no usable questions. Try again.")
+                stage = .failed(batchWarning
+                    ?? "The model returned no usable questions. Try again.")
                 return
             }
 
@@ -314,7 +320,8 @@ final class PrepGenerator {
     /// round, and telling it what has already been covered, gets the count the
     /// user actually asked for.
     static func askInBatches(key: String, role: String, jd: String, resume: String,
-                             want: Int, existing: [String]) async -> [Generated] {
+                             want: Int, existing: [String],
+                             onError: (String) -> Void = { _ in }) async -> [Generated] {
         let perBatch = 8
         var out: [Generated] = []
         var seen = Set(existing.map { $0.lowercased() })
@@ -340,9 +347,13 @@ final class PrepGenerator {
                           + "You reply with JSON only.",
                     user: user)
             } catch {
-                // Keep whatever earlier rounds produced. A run that gets 16 of
+                // Keep whatever earlier rounds produced — a run that gets 16 of
                 // 40 through one bad response is worth more than one that
-                // throws all of it away.
+                // throws the lot away — but never swallow the reason. A silent
+                // `break` reported "no usable questions" with nothing to act
+                // on, and cost a round of debugging to find.
+                onError((error as? LocalizedError)?.errorDescription
+                        ?? error.localizedDescription)
                 break
             }
 
