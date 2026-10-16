@@ -135,7 +135,42 @@ final class OverlayViewModel {
     var statusMessage   = "" { didSet { scheduleBroadcast() } }
 
     // MARK: - AI
-    var aiResponse     = "" { didSet { scheduleBroadcast() } }
+
+    /// Arbitration between a prepared answer and the model's, and the single
+    /// place either one is written. See `PreparedAnswerSlot`.
+    let preparedSlot = PreparedAnswerSlot()
+
+    var aiResponse: String {
+        get { preparedSlot.displayed }
+        set { preparedSlot.setStreamed(newValue); scheduleBroadcast() }
+    }
+
+    var hasPreparedAnswer: Bool { preparedSlot.hasPrepared }
+    var canShowGenerated: Bool { preparedSlot.canShowGenerated }
+    var isShowingPrepared: Bool { preparedSlot.isShowingPrepared }
+    var preparedSource: String { preparedSlot.source }
+
+    func showPreparedAnswer(_ answer: String, matchedQuestion: String) {
+        preparedSlot.showPrepared(answer, source: matchedQuestion)
+        scheduleBroadcast()
+    }
+
+    /// Must run before a stream starts.
+    func clearPreparedAnswer() { preparedSlot.clear() }
+
+    func togglePreparedAnswer() {
+        preparedSlot.toggle()
+        scheduleBroadcast()
+    }
+
+    /// The bank the live path matches against. The setup screen writes the
+    /// active bank when it generates, so this is whatever was prepared for
+    /// this role most recently.
+    var activePrepBankID: String {
+        if !PrepBank.shared.activeBankID.isEmpty { return PrepBank.shared.activeBankID }
+        return PrepBank.shared.banks.first?.id ?? ""
+    }
+
     var isSendingToAI  = false { didSet { scheduleBroadcast() } }
     var pendingQuickAction: QuickAction? = nil
     /// How much an interview answer should say. See `AnswerDepth`.
@@ -1742,6 +1777,32 @@ final class OverlayViewModel {
         if showManualInput { manualInput = "" }
         pendingScreenshot = nil
         pendingAttachments = []
+
+        // Cleared before the stream starts: the stream's own opening write
+        // would otherwise be captured as the "generated alternative" for a
+        // previous question.
+        clearPreparedAnswer()
+
+        // Look for a prepared answer while the model is already working. Both
+        // run at once — the lookup costs one embedding round-trip and the
+        // generated answer is still wanted as a cross-check, so there is no
+        // reason to wait for one before starting the other.
+        let lookupText = userText
+        // Only in an interview. In ordinary chat a prepared answer would be
+        // wrong by default — there is no question bank behind "rewrite this".
+        let lookupBank = sessionMode == .interview ? activePrepBankID : ""
+        if !lookupText.isEmpty, !lookupBank.isEmpty {
+            Task { [weak self] in
+                guard let self else { return }
+                if let hit = await PreparedAnswerLookup.shared
+                    .preparedAnswer(for: lookupText, inBank: lookupBank),
+                   let source = PreparedAnswerLookup.shared.lastMatchQuestion,
+                   !self.hasPreparedAnswer,
+                   self.aiResponse.isEmpty {
+                    self.showPreparedAnswer(hit, matchedQuestion: source)
+                }
+            }
+        }
 
         ai.runStream(userText: prompt,
                      screenshot: snapshot,

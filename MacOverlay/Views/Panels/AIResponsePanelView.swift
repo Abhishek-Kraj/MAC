@@ -11,6 +11,7 @@ struct AIResponsePanelView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundColor(.secondary)
                 Spacer()
+                if vm.hasPreparedAnswer { preparedBadge }
                 if !vm.aiResponse.isEmpty {
                     Button {
                         NSPasteboard.general.clearContents()
@@ -31,25 +32,58 @@ struct AIResponsePanelView: View {
             .padding(.bottom, 4)
 
             ScrollView {
-                if vm.isSendingToAI {
-                    HStack(spacing: 8) {
-                        ProgressView().scaleEffect(0.75)
-                        Text("Thinking…")
-                            .font(.system(size: 12))
+                VStack(alignment: .leading, spacing: 0) {
+                    if vm.hasPreparedAnswer && !vm.isShowingPrepared {
+                        Text("Showing the answer generated live. Your prepared answer is one click away.")
+                            .font(.system(size: 10))
                             .foregroundColor(.secondary)
+                            .padding(.horizontal, 12).padding(.bottom, 2)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                } else {
-                    MarkdownResponseView(text: vm.aiResponse, baseSize: 12 * vm.textScale,
-                                         codeSize: 11 * vm.textScale)
+                    if vm.isSendingToAI && !vm.hasPreparedAnswer {
+                        HStack(spacing: 8) {
+                            ProgressView().scaleEffect(0.75)
+                            Text("Thinking…")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
-                        .transition(.opacity)
+                    } else {
+                        MarkdownResponseView(text: vm.aiResponse, baseSize: 12 * vm.textScale,
+                                             codeSize: 11 * vm.textScale)
+                            .padding(12)
+                            .transition(.opacity)
+                    }
                 }
             }
             .hiddenScrollGutter()
             .frame(maxHeight: 300)
             .animation(.easeInOut(duration: 0.2), value: vm.isSendingToAI)
+            .animation(.easeInOut(duration: 0.15), value: vm.isShowingPrepared)
         }
+    }
+
+    /// Marks the answer as coming from the bank rather than the model, and
+    /// offers the generated one for comparison. A prepared answer that looks
+    /// like any other answer is a prepared answer nobody will check.
+    private var preparedBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 8))
+                .foregroundColor(.white)
+                .padding(3)
+                .background(Circle().fill(Color.accentColor))
+            Text("Prepared")
+                .font(.system(size: 10, weight: .semibold))
+            if vm.canShowGenerated {
+                Button(vm.isShowingPrepared ? "Show generated" : "Show prepared") {
+                    vm.togglePreparedAnswer()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.accentColor)
+            }
+        }
+        .help(vm.preparedSource)
     }
 }

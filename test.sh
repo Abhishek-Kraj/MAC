@@ -41,6 +41,7 @@ SOURCES=(
     "$SRC_DIR/Stores/ResumeImporter.swift"
     "$SRC_DIR/Stores/InterviewSetupStore.swift"
     "$SRC_DIR/Stores/PrepBankImporter.swift"
+    "$SRC_DIR/Stores/PreparedAnswerSlot.swift"
     "$SRC_DIR/Stores/PrepMatcher.swift"
     "$SRC_DIR/Stores/PrepBank.swift"
     "$SRC_DIR/Stores/PrepBankBackup.swift"

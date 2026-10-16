@@ -1467,6 +1467,69 @@ func testPrepGeneratorParsesWrappedJSON() throws {
     try assertTrue(PrepGenerator.parse("[broken").isEmpty, "unterminated")
 }
 
+/// A prepared answer must be on screen the instant a question matches, and
+/// the model's answer must still be reachable. Getting either half wrong is
+/// bad in opposite directions: showing nothing means the cost of preparing was
+/// never recovered, and showing only the prepared answer means a wrong match
+/// is never discovered.
+@MainActor
+func testPreparedAnswerSlotArbitratesCorrectly() throws {
+    let slot = PreparedAnswerSlot()
+
+    // With nothing prepared, the slot is the ordinary streaming path.
+    slot.setStreamed("Th")
+    slot.setStreamed("Thinking about it")
+    try assertEq(slot.displayed, "Thinking about it", "streams normally")
+    try assertFalse(slot.hasPrepared, "and is not treated as prepared")
+
+    // A match lands. The stream's opening clear happens first, as it always
+    // does — and must not become the "generated alternative".
+    slot.clear()
+    slot.showPrepared("Start with two pilot entities.", source: "How do you start?")
+    slot.setStreamed("")          // the stream's first act
+    try assertEq(slot.displayed, "Start with two pilot entities.",
+                 "the prepared answer is up immediately")
+    try assertFalse(slot.canShowGenerated,
+                    "and nothing to switch to yet — a dead control would lie")
+
+    // The model answers. The prepared answer stays on screen; the generated
+    // one is held, not discarded.
+    slot.setStreamed("I would begin")
+    try assertEq(slot.displayed, "Start with two pilot entities.",
+                 "the prepared answer keeps the screen while generation finishes")
+    try assertTrue(slot.canShowGenerated, "and the alternative is now available")
+    try assertTrue(slot.isShowingPrepared, "still showing prepared by default")
+
+    // Later chunks grow the same alternative rather than replacing it.
+    slot.setStreamed("I would begin by")
+    try assertEq(slot.generated, "I would begin", "only the first write is captured")
+
+    // The user can check the match.
+    slot.toggle()
+    try assertFalse(slot.isShowingPrepared, "switches to the generated answer")
+    try assertEq(slot.displayed, "I would begin", "which is shown")
+    slot.toggle()
+    try assertEq(slot.displayed, "Start with two pilot entities.",
+                 "and switching back returns to the prepared one")
+
+    // Clearing is total — a stale prepared answer must not survive into the
+    // next question.
+    slot.clear()
+    try assertFalse(slot.hasPrepared, "clear drops the prepared answer")
+    try assertEq(slot.generated, "", "and the alternative")
+    try assertEq(slot.displayed, "", "and what is on screen")
+    try assertFalse(slot.canShowGenerated, "and offers no toggle")
+
+    // An empty match is not a match.
+    slot.showPrepared("   ", source: "ignored")
+    try assertFalse(slot.hasPrepared, "whitespace is not a prepared answer")
+
+    // Toggling with nothing generated does nothing rather than blanking.
+    slot.showPrepared("Real answer", source: "Q")
+    slot.toggle()
+    try assertEq(slot.displayed, "Real answer", "toggle is inert until there is an alternative")
+}
+
 /// One vector in, one vector out.
 ///
 /// The bug this pins was two independent casts in the response reader: on
@@ -2059,6 +2122,7 @@ struct TestsMain {
         TestRunner.run("Bank is keyed by role not by posting", testBankIsKeyedByRoleNotByPosting)
         TestRunner.run("Bank records matches", testBankRecordsMatches)
         TestRunner.run("Missed questions are captured, not auto-banked", testMissedQuestionsAreCapturedNotAutoBanked)
+        TestRunner.run("Prepared answer arbitration", testPreparedAnswerSlotArbitratesCorrectly)
         TestRunner.run("Embedding response gives one vector per row", testEmbeddingResponseYieldsOneVectorPerRow)
         TestRunner.run("Question bank importer reads real exports", testPrepBankImporterReadsTheShapesRealToolsExport)
         TestRunner.run("Prep parser accepts real model shapes", testPrepParserAcceptsRealModelShapes)

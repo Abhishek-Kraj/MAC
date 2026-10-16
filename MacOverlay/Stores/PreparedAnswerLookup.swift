@@ -22,6 +22,10 @@ final class PreparedAnswerLookup {
     /// HTTP error. Surfaced so Settings can explain why matching is inert.
     private(set) var lastError: String?
     private(set) var lastMatchWasSemantic = false
+    /// The bank question the last lookup matched, so the answer on screen can
+    /// be attributed. Without it a prepared answer is unattributed text and
+    /// the user has no way to tell a match from a guess.
+    private(set) var lastMatchQuestion: String?
 
     /// Embeds every question in a bank that does not already have a vector.
     /// Called after research, or after the user edits the bank. Cheap: the
@@ -82,6 +86,7 @@ final class PreparedAnswerLookup {
 
         guard let hit = PrepMatcher.semanticBest(query: vector, against: bank) else {
             lastMatchWasSemantic = false
+            lastMatchQuestion = nil
             return nil
         }
         let answer = hit.question.answer.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -89,6 +94,7 @@ final class PreparedAnswerLookup {
 
         lastError = nil
         lastMatchWasSemantic = true
+        lastMatchQuestion = hit.question.question
         PrepBank.shared.recordMatch(hit.question.id)
         return answer
     }
