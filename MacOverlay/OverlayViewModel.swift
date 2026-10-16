@@ -242,6 +242,17 @@ final class OverlayViewModel {
     var sessionNotes:  [NoteEntry] = []
     var showNotesPanel = false
 
+    /// Re-attach whatever was on the form last time, and re-read the résumé.
+    func restoreInterviewSetup() {
+        let state = InterviewSetupStore.restore()
+        interviewContext = state.context
+        interviewAutoGenerate = state.autoGenerate
+        interviewFocusMode = state.focusMode
+        // Assigning this triggers the didSet, which re-parses the résumé in
+        // the background — so it is ready before Start is pressed.
+        interviewResumeFileURL = state.resumeURL
+    }
+
     // MARK: - Interview setup (pre-Start form on the Interview surface)
     /// Optional resume the user uploaded for the upcoming interview. We hold
     /// the URL so the form can display the filename — and the moment it's
@@ -251,6 +262,11 @@ final class OverlayViewModel {
     var interviewResumeFileURL: URL? = nil {
         didSet {
             guard interviewResumeFileURL != oldValue else { return }
+            // Survive a relaunch. Typing a posting and attaching a CV is the
+            // slowest part of setting up, and none of it was stored — so a
+            // crash, a rebuild, or a quit silently returned you to a blank
+            // form that looked as though you had never done the work.
+            InterviewSetupStore.setResumeURL(interviewResumeFileURL)
             prepareInterviewResumeText()
         }
     }
@@ -260,8 +276,16 @@ final class OverlayViewModel {
     /// True while the picked resume is being parsed in the background — lets
     /// the setup form show a "Reading…" hint instead of looking idle.
     private(set) var isPreparingResume = false
+    /// Why the last resume parse failed, verbatim. The importer's failure was
+    /// being swallowed into `""`, which made a broken file look like an absent
+    /// one — the UI showed nothing at all and answers came out generic with no
+    /// hint why. Kept separately so "not attached" and "attached, unreadable"
+    /// can never be mistaken for each other.
+    private(set) var interviewResumeError: String? = nil
     /// Free-text context describing the role, company, JD, etc. Empty = none.
-    var interviewContext: String = ""
+    var interviewContext: String = "" {
+        didSet { InterviewSetupStore.setContext(interviewContext) }
+    }
     /// Which past session the user picked to resume. `nil` means "New session".
     var interviewResumeSessionID: UUID? = nil
     /// Extra context files (JD PDF, notes, briefing docs, etc.). Their text
@@ -272,13 +296,17 @@ final class OverlayViewModel {
     /// transcript updates. When OFF, the user hits Send manually. Only
     /// shown / honored in `.interview` setup; Regular call has no such
     /// toggle today.
-    var interviewAutoGenerate: Bool = true
+    var interviewAutoGenerate: Bool = true {
+        didSet { InterviewSetupStore.setAutoGenerate(interviewAutoGenerate) }
+    }
 
     /// Live Focus: during a live interview, show only the current question
     /// and the latest streaming answer instead of the full conversation —
     /// everything that isn't the current exchange melts away. Toggleable
     /// from the live strip; resets to ON each time a session goes live.
-    var interviewFocusMode: Bool = true
+    var interviewFocusMode: Bool = true {
+        didSet { InterviewSetupStore.setFocusMode(interviewFocusMode) }
+    }
 
     /// Whether the live transcript strip is visible during an interview.
     /// Hiding it leaves ONLY the question + answer on screen; the toggle
@@ -1584,19 +1612,30 @@ final class OverlayViewModel {
     /// and the interview begins without a parse stall.
     private func prepareInterviewResumeText() {
         interviewResumeText = ""
+        interviewResumeError = nil
         guard let url = interviewResumeFileURL else {
             isPreparingResume = false
             return
         }
         isPreparingResume = true
         Task.detached(priority: .userInitiated) {
-            let text = (try? ResumeImporter.importFile(url: url)) ?? ""
+            let result = Result { try ResumeImporter.importFile(url: url) }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 // Drop a stale result if the user swapped or cleared the
                 // file while this parse was still in flight.
                 guard self.interviewResumeFileURL == url else { return }
-                self.interviewResumeText = text
+                switch result {
+                case .success(let text):
+                    self.interviewResumeText = text
+                case .failure(let error):
+                    // Report it. A resume that cannot be read must not look
+                    // like a resume that was never attached.
+                    let reason = (error as? ResumeImporter.ImportError)?
+                        .errorDescription ?? error.localizedDescription
+                    let fix = (error as? ResumeImporter.ImportError)?.recovery
+                    self.interviewResumeError = fix.map { "\(reason). \($0)" } ?? reason
+                }
                 self.isPreparingResume = false
             }
         }

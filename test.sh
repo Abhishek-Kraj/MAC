@@ -38,6 +38,8 @@ SOURCES=(
     "$SRC_DIR/Stores/ModelFilterStore.swift"
     "$SRC_DIR/ScreenPlacement.swift"
     "$SRC_DIR/Models/AnswerDepth.swift"
+    "$SRC_DIR/Stores/ResumeImporter.swift"
+    "$SRC_DIR/Stores/InterviewSetupStore.swift"
     "$SRC_DIR/Stores/PrepMatcher.swift"
     "$SRC_DIR/Stores/PrepBank.swift"
     "$SRC_DIR/Stores/PrepBankBackup.swift"

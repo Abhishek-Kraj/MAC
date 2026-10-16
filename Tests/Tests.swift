@@ -1,5 +1,7 @@
 import AppKit
+import CoreText
 import Foundation
+import PDFKit
 
 // MARK: - Tiny test runner
 //
@@ -1465,6 +1467,163 @@ func testPrepGeneratorParsesWrappedJSON() throws {
     try assertTrue(PrepGenerator.parse("[broken").isEmpty, "unterminated")
 }
 
+/// The setup form's contents must outlive the process. Everything on it is
+/// typed by hand — a posting pasted in, a CV attached — and none of it was
+/// stored, so a rebuild or a crash returned you to a blank form that looked as
+/// though the work had never been done.
+func testInterviewSetupSurvivesRelaunch() throws {
+    let d = UserDefaults.standard
+    InterviewSetupStore.reset()
+    defer { InterviewSetupStore.reset() }
+
+    let posting = "Fabric CoE interview loop — platform lead, lakehouse, cost governance."
+    InterviewSetupStore.setContext(posting)
+    try assertEq(InterviewSetupStore.context, posting,
+                 "the posting is written through as it is typed")
+    try assertEq(d.string(forKey: "interviewContext"), posting,
+                 "under the documented key, not a private one")
+
+    // A résumé is re-attached only if the file is still there — a chip
+    // pointing at a moved file is worse than no chip.
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("setup-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let cv = dir.appendingPathComponent("cv.txt")
+    try ("Abhishek K — Fabric CoE. " + String(repeating: "experience. ", count: 40))
+        .write(to: cv, atomically: true, encoding: .utf8)
+
+    InterviewSetupStore.setResumeURL(cv)
+    try assertEq(InterviewSetupStore.resumeURLIfPresent?.path, cv.path,
+                 "the résumé is recovered after a relaunch")
+
+    // Delete it underneath, and the stale path is dropped rather than restored
+    // as an unreadable attachment.
+    try FileManager.default.removeItem(at: cv)
+    try assertEq(InterviewSetupStore.resumeURLIfPresent?.path, nil,
+                 "a résumé that has since been deleted is not restored")
+    try assertTrue(d.string(forKey: "interviewResumeFilePath") == nil,
+                   "and its stale path is cleared so it cannot fail again")
+    try assertEq(InterviewSetupStore.context, posting,
+                 "while the posting, which is still good, is kept")
+
+    // A directory is not a résumé, however much it is pointed at.
+    let dirOnly = dir.appendingPathComponent("weird.txt")
+    try FileManager.default.createDirectory(at: dirOnly,
+                                            withIntermediateDirectories: true)
+    d.set(dirOnly.path, forKey: "interviewResumeFilePath")
+    try assertEq(InterviewSetupStore.resumeURLIfPresent?.path, nil,
+                 "a directory is not accepted as a résumé")
+
+    // restore() carries everything at once, as launch does.
+    InterviewSetupStore.reset()
+    d.removeObject(forKey: "interviewAutoGenerate")
+    try "a résumé that is genuinely there".write(to: cv, atomically: true, encoding: .utf8)
+    InterviewSetupStore.setContext("second posting")
+    InterviewSetupStore.setResumeURL(cv)
+    let state = InterviewSetupStore.restore()
+    try assertEq(state.context, "second posting", "restore returns the posting")
+    try assertEq(state.resumeURL?.path, cv.path, "restore returns the résumé")
+
+    // Absent means "never set", not "off" — an existing user must not lose
+    // auto-generate just because a newer build added the key.
+    InterviewSetupStore.reset()
+    try assertTrue(InterviewSetupStore.autoGenerate,
+                   "auto-generate defaults on when never set")
+    try assertTrue(InterviewSetupStore.focusMode,
+                   "focus mode defaults on when never set")
+    InterviewSetupStore.setAutoGenerate(false)
+    try assertFalse(InterviewSetupStore.autoGenerate, "and honours an explicit off")
+}
+
+/// A resume that cannot be parsed must fail loudly. The importer's error used
+/// to be discarded into `""`, which made a scanned PDF indistinguishable from
+/// no file at all: the card showed nothing, prep reported "none attached", and
+/// the answers came out generic with no hint why. These two PDFs are the exact
+/// pair that got confused — one is readable, one is not.
+func testScannedResumeFailsLoudlyInsteadOfSilently() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("resume-fixture-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    /// Writes a genuine PDF via CoreGraphics. With text it gets a real text
+    /// layer (what a digitally-produced résumé has); without, the page is a
+    /// bitmap (what a scanner or an ATS re-export produces).
+    func pdf(text: String?) -> URL {
+        let url = dir.appendingPathComponent(text == nil ? "scan.pdf" : "typed.pdf")
+        guard let consumer = CGDataConsumer(url: url as CFURL) else {
+            fatalError("test could not create a PDF at \(url.path)")
+        }
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let ctx = CGContext(consumer: consumer, mediaBox: &box, nil)!
+        ctx.beginPDFPage(nil)
+        ctx.setFillColor(NSColor.white.cgColor)
+        ctx.fill(box)
+        if let text {
+            // CoreText with Helvetica, deliberately. Drawing with NSString and
+            // a *system* font also produces a PDF, but its embedded subset has
+            // no usable encoding and `page.string` comes back empty — which is
+            // the very failure mode this test exists to distinguish from a scan.
+            let font = CTFontCreateWithName("Helvetica" as CFString, 11, nil)
+            let line = CTLineCreateWithAttributedString(
+                NSAttributedString(string: text, attributes: [
+                    .init(kCTFontAttributeName as String): font,
+                ]))
+            ctx.textPosition = CGPoint(x: 50, y: 500)
+            CTLineDraw(line, ctx)
+        } else {
+            ctx.draw(makeBitmap(), in: box)
+        }
+        ctx.endPDFPage()
+        ctx.closePDF()
+        return url
+    }
+
+    func makeBitmap() -> CGImage {
+        let image = NSImage(size: NSSize(width: 612, height: 792))
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: 612, height: 792).fill()
+        ("Abhishek K — Fabric CoE" as NSString).draw(
+            at: NSPoint(x: 50, y: 500),
+            withAttributes: [.font: NSFont.systemFont(ofSize: 11),
+                             .foregroundColor: NSColor.black])
+        image.unlockFocus()
+        return image.cgImage(forProposedRect: nil, context: nil, hints: nil)!
+    }
+
+    // The readable one must keep working — this is the regression guard for
+    // tightening the importer.
+    let typed = try ResumeImporter.importFile(url: pdf(text: "Abhishek K — Fabric CoE"))
+    try assertTrue(typed.contains("Abhishek"),
+                   "a PDF with a text layer still imports (got \(typed.count) chars)")
+
+    // The scanned one must throw a named, recoverable error — not return "".
+    var thrown: ResumeImporter.ImportError?
+    do {
+        _ = try ResumeImporter.importFile(url: pdf(text: nil))
+        try assertTrue(false, "a scanned PDF must not import silently")
+    } catch let e as ResumeImporter.ImportError {
+        thrown = e
+    }
+    try assertTrue({
+        if case .scannedPDF = thrown { return true }
+        return false
+    }(), "expected .scannedPDF, got \(String(describing: thrown))")
+    try assertTrue(ResumeImporter.ImportError.scannedPDF.recovery?
+        .contains("Export as PDF") == true,
+                   "the error tells the user how to fix it")
+
+    // Every importer error must carry recovery text — an unfixable error
+    // message is the same failure mode as no message.
+    for e: ResumeImporter.ImportError in [.scannedPDF, .unreadable, .empty,
+                                          .unsupportedType("pages")] {
+        try assertTrue(e.recovery?.isEmpty == false,
+                       "\(e) explains how to recover")
+    }
+}
+
 /// The posting must be typed once. Prep used to have its own JD box on the
 /// same screen as Context, so the same description was pasted into two
 /// places. `useContext` takes the interview's Context instead, and never
@@ -1657,6 +1816,8 @@ struct TestsMain {
         TestRunner.run("Bank is keyed by role not by posting", testBankIsKeyedByRoleNotByPosting)
         TestRunner.run("Bank records matches", testBankRecordsMatches)
         TestRunner.run("Missed questions are captured, not auto-banked", testMissedQuestionsAreCapturedNotAutoBanked)
+        TestRunner.run("Interview setup survives a relaunch", testInterviewSetupSurvivesRelaunch)
+        TestRunner.run("A scanned resume fails loudly", testScannedResumeFailsLoudlyInsteadOfSilently)
         TestRunner.run("Prep generator takes posting from interview context", testPrepGeneratorTakesPostingFromInterviewContext)
         TestRunner.run("Prep generator parses wrapped JSON", testPrepGeneratorParsesWrappedJSON)
         TestRunner.run("Prep generator takes posting from interview context", testPrepGeneratorTakesPostingFromInterviewContext)

@@ -275,22 +275,36 @@ private struct InterviewSetupForm: View {
                 .help("PDF · DOCX · RTF · TXT · MD")
 
                 // Resume text is extracted in the background the moment the
-                // file is picked, so Start doesn't block on parsing.
+                // file is picked, so Start doesn't block on parsing. All three
+                // states have to be visible: a failure that renders nothing
+                // is indistinguishable from no file having been chosen, and
+                // that is exactly how a scanned PDF used to look.
                 if vm.interviewResumeFileURL != nil {
                     if vm.isPreparingResume {
                         HStack(spacing: 5) {
-                            ProgressView()
-                                .controlSize(.mini)
+                            ProgressView().controlSize(.mini)
                             Text("Reading…")
                                 .font(.system(size: 11))
                                 .foregroundColor(Design.Ink.secondary)
+                        }
+                    } else if let problem = vm.interviewResumeError {
+                        // The reason, in full, and a way out. Truncating this
+                        // hides the only actionable sentence in it.
+                        HStack(alignment: .top, spacing: 5) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.orange)
+                            Text(problem)
+                                .font(.system(size: 11))
+                                .foregroundColor(Design.Ink.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     } else if !vm.interviewResumeText.isEmpty {
                         HStack(spacing: 4) {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 10))
                                 .foregroundColor(.green)
-                            Text("Ready")
+                            Text("Ready · \(vm.interviewResumeText.count) characters")
                                 .font(.system(size: 11))
                                 .foregroundColor(Design.Ink.secondary)
                         }

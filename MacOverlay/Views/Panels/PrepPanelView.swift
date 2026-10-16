@@ -62,6 +62,14 @@ struct PrepPanelView: View {
 
                 if isRunning { progress.animation(.easeInOut(duration: 0.2), value: isRunning) }
 
+                // What prep would read, on the card itself. Attaching a CV and
+                // seeing no sign of it anywhere is what makes the whole panel
+                // look broken.
+                if vm.interviewResumeFileURL != nil ||
+                   !vm.interviewContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    sourcesSummary
+                }
+
                 if PrepBank.shared.pendingCaptureCount > 0 {
                     capturedNotice
                 }
@@ -120,6 +128,46 @@ struct PrepPanelView: View {
         if isReady { return "Answers appear instantly when a question matches." }
         if questionCount > 0 { return "Open review to finish matching them." }
         return "Do this before you start. Takes a minute or two."
+    }
+
+    /// One line, on the card: which sources are in play. Mirrors the detail
+    /// in the sheet so the answer to "is it using my CV?" is visible before
+    /// opening anything.
+    private var sourcesSummary: some View {
+        HStack(spacing: 5) {
+            if vm.isPreparingResume {
+                ProgressView().controlSize(.mini)
+                Text("Reading résumé…")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            } else if let problem = vm.interviewResumeError {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 9))
+                    .foregroundColor(.orange)
+                Text(problem)
+                    .font(.system(size: 10))
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !vm.interviewResumeText.isEmpty {
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 9))
+                    .foregroundColor(.green)
+                Text("CV · \(vm.interviewResumeText.count) chars")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+            if !vm.interviewContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if vm.isPreparingResume == false && vm.interviewResumeError == nil
+                    && !vm.interviewResumeText.isEmpty { Text("·").foregroundColor(.secondary) }
+                Image(systemName: "text.alignleft")
+                    .font(.system(size: 9))
+                    .foregroundColor(.green)
+                Text("Context · \(vm.interviewContext.count) chars")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     @ViewBuilder
@@ -360,10 +408,13 @@ struct PrepSetupView: View {
                       detail: hasOwn ? "pasted here"
                         : hasContext ? "\(context.count) characters"
                         : "empty — add the JD under Context")
-            sourceRow("Résumé", ok: hasCV,
+            sourceRow("Résumé",
+                      ok: hasCV,
+                      failed: vm.interviewResumeError != nil,
                       detail: hasCV
                         ? "\(vm.interviewResumeText.count) characters from \(vm.interviewResumeFileURL?.lastPathComponent ?? "file")"
-                        : "none attached — answers stay general")
+                        : (vm.interviewResumeError.map { "attached but unreadable — \($0)" }
+                           ?? "none attached — answers stay general"))
             if !hasOwn {
                 TextEditor(text: $generator.jobDescription)
                     .font(.system(size: 11))
@@ -374,17 +425,20 @@ struct PrepSetupView: View {
         }
     }
 
-    private func sourceRow(_ label: String, ok: Bool, detail: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: ok ? "checkmark.circle.fill" : "circle.dashed")
+    private func sourceRow(_ label: String, ok: Bool, failed: Bool = false,
+                           detail: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: ok ? "checkmark.circle.fill"
+                      : (failed ? "exclamationmark.triangle.fill" : "circle.dashed"))
                 .font(.system(size: 11))
-                .foregroundColor(ok ? .green : .secondary.opacity(0.6))
+                .foregroundColor(ok ? .green
+                             : (failed ? .orange : .secondary.opacity(0.6)))
             Text(label).font(.system(size: 11, weight: .medium))
             Text(detail)
                 .font(.system(size: 10))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-            Spacer()
+                .foregroundColor(failed ? .orange : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
     }
 

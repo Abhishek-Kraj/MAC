@@ -10,12 +10,33 @@ enum ResumeImporter {
         case unsupportedType(String)
         case unreadable
         case empty
+        /// A PDF that opens cleanly and has pages, but not one of them carries
+        /// a text layer — a scan, or an image re-wrapped as PDF. Worth naming
+        /// separately: it is by far the most common resume failure and the fix
+        /// is different from every other error here.
+        case scannedPDF
 
         var errorDescription: String? {
             switch self {
             case .unsupportedType(let ext): return "Unsupported file type: .\(ext)"
             case .unreadable:               return "Could not read file contents"
             case .empty:                    return "File contained no text"
+            case .scannedPDF:               return "Scanned PDF — it has no selectable text"
+            }
+        }
+
+        /// What to actually do about it. A bare "could not read" leaves the
+        /// user stuck; this is the step that unblocks them.
+        var recovery: String? {
+            switch self {
+            case .scannedPDF:
+                return "Open it in Preview or Acrobat and use File › Export as PDF with text, or paste the text into Context."
+            case .unsupportedType(let ext):
+                return "Export it as PDF, DOCX, RTF, TXT or MD — .\(ext) is not one of those."
+            case .unreadable:
+                return "The file may be locked, password-protected, or a cloud placeholder that has not downloaded yet."
+            case .empty:
+                return "The file parsed but contained no text. Try re-exporting it."
             }
         }
     }
@@ -71,6 +92,13 @@ enum ResumeImporter {
                 buffer += pageText
                 if !pageText.hasSuffix("\n") { buffer += "\n" }
             }
+        }
+        // Opens fine, has pages, but no text anywhere: a scan, or an image
+        // re-wrapped as PDF. Named explicitly because "no text" on its own
+        // reads as "your file is broken" rather than "this format carries no
+        // text and needs re-exporting" — and re-exporting is the whole fix.
+        if buffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ImportError.scannedPDF
         }
         return buffer
     }

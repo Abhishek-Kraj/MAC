@@ -88,6 +88,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         DispatchQueue.global(qos: .utility).async { LegacyLaunchShortcutCleanup.removeIfInstalled() }
         vm = OverlayViewModel()
+        // Re-attach the résumé and posting typed last session. Cheap, and it
+        // stops a rebuild from wiping the slowest part of setup.
+        vm.restoreInterviewSetup()
         NSApp.setActivationPolicy(.accessory)
         // Seed the screen-share gate BEFORE any window is created so the
         // panel (and the swizzle) pick up the persisted preference.
