@@ -15,6 +15,11 @@ import Observation
 @MainActor
 final class PrepGenerator {
 
+    /// Shared, because preparation takes minutes and the sheet it starts from
+    /// can be closed while it runs. Held in view state it would be torn down
+    /// with the sheet and the work would be lost mid-flight.
+    static let shared = PrepGenerator()
+
     enum Stage: Equatable {
         case idle
         case researching
@@ -24,6 +29,15 @@ final class PrepGenerator {
     }
 
     private(set) var stage: Stage = .idle
+    /// Cancels an in-flight run, since preparation takes minutes and may turn
+    /// out to be the wrong posting.
+    @ObservationIgnored private var run: Task<Void, Never>?
+
+    func cancel() {
+        run?.cancel()
+        run = nil
+        stage = .idle
+    }
 
     /// The role name is the bank key. Deliberately not the posting: a bank
     /// scoped to one JD has to be regenerated for every interview and never
@@ -71,7 +85,17 @@ final class PrepGenerator {
 
     // MARK: - Generate
 
-    func generate() async {
+    /// Starts a run and returns immediately. Use this from a button: the work
+    /// belongs to the generator, not to whatever sheet started it.
+    func start(context: String, resume: String) {
+        guard canGenerate else { return }
+        jobDescription = jobDescription.isEmpty ? context : jobDescription
+        resumeText = resume
+        run?.cancel()
+        run = Task { await generate() }
+    }
+
+    private func generate() async {
         guard canGenerate else { return }
         let role = roleName.trimmingCharacters(in: .whitespacesAndNewlines)
         stage = .researching
@@ -108,6 +132,7 @@ final class PrepGenerator {
                              source: .researched, topic: $0.topic, bankID: role)
             })
 
+            try Task.checkCancellation()
             stage = .embedding
             await PreparedAnswerLookup.shared.embedBank(role)
             if let error = PreparedAnswerLookup.shared.lastError {
@@ -116,6 +141,8 @@ final class PrepGenerator {
             }
             _ = PrepBankBackup.snapshot()
             stage = .done(count: parsed.count)
+        } catch is CancellationError {
+            stage = .idle
         } catch {
             stage = .failed((error as? LocalizedError)?.errorDescription
                             ?? error.localizedDescription)

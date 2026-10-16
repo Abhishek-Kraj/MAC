@@ -9,6 +9,8 @@ import SwiftUI
 /// actually want to do the work.
 struct PrepPanelView: View {
     @Environment(OverlayViewModel.self) private var vm
+    @Bindable private var generator = PrepGenerator.shared
+    @State private var spin: Double = 0
     @State private var showSetup = false
     @State private var showBank = false
     @State private var showBackups = false
@@ -34,11 +36,7 @@ struct PrepPanelView: View {
         prepSectionCard(title: "Interview prep", systemImage: "text.book.closed") {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    Image(systemName: isReady ? "checkmark.circle.fill"
-                              : (questionCount > 0 ? "exclamationmark.circle.fill" : "circle"))
-                        .font(.system(size: 13))
-                        .foregroundColor(isReady ? .green
-                                         : (questionCount > 0 ? .orange : .secondary.opacity(0.6)))
+                    statusIcon
                     VStack(alignment: .leading, spacing: 2) {
                         Text(headline)
                             .font(.system(size: 12, weight: .medium))
@@ -47,11 +45,22 @@ struct PrepPanelView: View {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    Button(isReady ? "Review" : "Set up") {
-                        isReady ? (showBank = true) : (showSetup = true)
+                    if isRunning {
+                        Button("Stop") { generator.cancel() }
+                            .buttonStyle(.secondaryCompact)
                     }
-                    .buttonStyle(.secondaryCompact)
+                    // Styled by a branch rather than a ternary: the two
+                    // styles are different concrete types and will not unify.
+                    if isReady {
+                        Button(prepareButtonTitle) { showSetup = true }
+                            .buttonStyle(.secondaryCompact)
+                    } else {
+                        Button(prepareButtonTitle) { showSetup = true }
+                            .buttonStyle(.primaryCompact)
+                    }
                 }
+
+                if isRunning { progress.animation(.easeInOut(duration: 0.2), value: isRunning) }
 
                 if PrepBank.shared.pendingCaptureCount > 0 {
                     capturedNotice
@@ -66,16 +75,69 @@ struct PrepPanelView: View {
         }
     }
 
+    private var isRunning: Bool { generator.isRunning }
+
+    /// Labelled for the action, not for the state. Someone scanning the setup
+    /// screen should be able to find "prepare" without reading the body text.
+    private var prepareButtonTitle: String {
+        if isRunning { return "Preparing…" }
+        return questionCount > 0 ? "Prepare more" : "Prepare interview"
+    }
+
+    /// Spins while preparing. A static glyph reads as decoration; the motion
+    /// is what tells you a two-minute job is actually running and that you can
+    /// walk away from it.
+    @ViewBuilder
+    private var statusIcon: some View {
+        if isRunning {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 13))
+                .foregroundColor(.accentColor)
+                .rotationEffect(.degrees(spin))
+                .onAppear {
+                    withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
+                        spin = 360
+                    }
+                }
+        } else {
+            Image(systemName: isReady ? "checkmark.circle.fill"
+                      : (questionCount > 0 ? "exclamationmark.circle.fill" : "circle.dashed"))
+                .font(.system(size: 13))
+                .foregroundColor(isReady ? .green
+                             : (questionCount > 0 ? .orange : .secondary.opacity(0.6)))
+        }
+    }
+
     private var headline: String {
+        if isRunning { return "Preparing…" }
         if isReady { return "\(questionCount) prepared questions for \(activeBankID)" }
         if questionCount > 0 { return "\(questionCount) questions, but not yet matched" }
-        return "Not prepared yet"
+        return "No questions prepared yet"
     }
 
     private var detail: String {
+        if isRunning { return "You can start the interview now — it will use what is ready." }
         if isReady { return "Answers appear instantly when a question matches." }
         if questionCount > 0 { return "Open review to finish matching them." }
-        return "Generate questions and answers from your job description."
+        return "Do this before you start. Takes a minute or two."
+    }
+
+    @ViewBuilder
+    private var progress: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // Indeterminate, because the model decides how long research takes
+            // and no honest number is available to show.
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(x: 1, y: 1.2, anchor: .center)
+            Text(generator.stage == .researching
+                 ? "Researching the role and writing questions…"
+                 : "Embedding, so answers can be matched live…")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+        .padding(.leading, 21)
+        .transition(.opacity)
     }
 
     @ViewBuilder
@@ -215,7 +277,8 @@ struct PrepPanelView: View {
 /// so the setup screen stays about starting the interview.
 struct PrepSetupView: View {
     @Environment(OverlayViewModel.self) private var vm
-    @State private var generator = PrepGenerator()
+    /// Shared, so closing this sheet mid-run does not abandon the work.
+    @Bindable private var generator = PrepGenerator.shared
 
     var onDone: () -> Void
 
@@ -233,9 +296,9 @@ struct PrepSetupView: View {
 
                 HStack(spacing: 8) {
                     Button {
-                        generator.useContext(vm.interviewContext)
-                        generator.resumeText = vm.interviewResumeText
-                        Task { await generator.generate() }
+                        generator.start(context: vm.interviewContext,
+                                        resume: vm.interviewResumeText)
+                        onDone()
                     } label: {
                         if generator.isRunning {
                             HStack(spacing: 5) {
