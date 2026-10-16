@@ -1723,6 +1723,61 @@ func testGapClassificationUsesRiskNotProse() throws {
     try assertEq(noOverlap.count, 0, "an unrelated area matches nothing")
 }
 
+/// The app must be inspectable, and gettable-out-of.
+///
+/// The overlay is a floating panel above every window that hides itself from
+/// screen sharing — correct during an interview, and exactly what makes a
+/// layout bug impossible to photograph or describe. Quitting was buried in a
+/// menu bar item and behind the overlay's own "…" menu, so with the overlay
+/// hidden there was no reachable way out.
+func testAppCanBeInspectedAndQuitFromInsideIt() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+
+    func read(_ path: String) throws -> String {
+        try String(contentsOf: root.appending(path: path), encoding: .utf8)
+    }
+
+    let inspector = try read("MacOverlay/Views/Shell/InspectorRootView.swift")
+    let appDelegate = try read("MacOverlay/AppDelegate.swift")
+    let menu = try read("MacOverlay/MenuBarController.swift")
+    let strip = try read("MacOverlay/Views/Shell/TopStripView.swift")
+
+    // The window has to exist and be reachable from more than one place —
+    // the overlay menu disappears when the overlay is hidden.
+    try assertTrue(appDelegate.contains("func toggleInspector"),
+                   "the inspector can be toggled")
+    try assertTrue(menu.contains("Troubleshooting window"),
+                   "and is reachable from the menu bar when the overlay is hidden")
+    try assertTrue(strip.contains("troubleshooting"),
+                   "and from the overlay's own menu")
+
+    // It must be a real, screenshot-able window: opaque, not floating, and
+    // explicitly not excluded from screen sharing.
+    try assertTrue(appDelegate.contains("w.sharingType = .readWrite"),
+                   "the inspector is visible to screen capture, unlike the overlay")
+    try assertTrue(appDelegate.contains("[.titled, .closable, .resizable]"),
+                   "and is an ordinary resizable window")
+
+    // Quitting has to be one click in that window. The button lives in the
+    // view; the terminate call lives where the closure is built.
+    try assertTrue(inspector.contains("Button(\"Quit\""),
+                   "the inspector has a Quit button")
+    try assertTrue(appDelegate.contains("onQuit: { NSApp.terminate(nil) }"),
+                   "wired to actually quit")
+    try assertTrue(inspector.contains("ScrollView"),
+                   "and its contents scroll rather than clip")
+
+    // The setup form has to fit, or Start sits below a fold with no hint.
+    let height = try Int(appDelegate
+        .components(separatedBy: "static let expandedSize  = NSSize(width: 440, height: ")[1]
+        .prefix(3)) ?? 0
+    try assertTrue(height >= 760,
+                   "the setup panel is tall enough for its ten sections, got \(height)")
+    // And it must still fit this screen.
+    try assertTrue(height <= 940, "and not taller than the display")
+}
+
 /// A bank filed under a placeholder is a bank that has stopped working.
 ///
 /// Questions imported before the role could be detected were filed under
@@ -2411,6 +2466,7 @@ struct TestsMain {
         TestRunner.run("Role detection avoids reasoning models", testRoleDetectionDoesNotUseAReasoningModel)
         TestRunner.run("Role detection budgets for reasoning", testRoleDetectionBudgetLeavesRoomForReasoning)
         TestRunner.run("Prepared banner breaks down sources", testPreparedBannerBreaksDownSources)
+        TestRunner.run("App is inspectable and quittable", testAppCanBeInspectedAndQuitFromInsideIt)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)

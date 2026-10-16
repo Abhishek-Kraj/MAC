@@ -280,7 +280,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     static let expandedCompactSize = NSSize(width: 440, height: 84)
     /// `.expanded` with a `primarySurface` set — full shell: top header
     /// + body + InputBar. Narrow + tall ChatGPT-companion proportions.
-    static let expandedSize  = NSSize(width: 440, height: 600)
+    /// Tall enough for the interview setup form, which stacks ten sections
+    /// — resume, context, prep, prompt, auto-generate, model, depth, start —
+    /// into a scrolling column. At 600 it scrolled, but the fold sat mid-form
+    /// so Start and the depth control were below it with nothing indicating
+    /// there was more, which reads as a layout that "is not coming properly".
+    ///
+    /// The live views do not use this height: they compute their own (see
+    /// `responseExpandedSize`, `expandedCompactSize`, and the focus-hug path),
+    /// so raising it costs nothing during an interview.
+    static let expandedSize  = NSSize(width: 440, height: 800)
     /// `.expanded` while showing chat/interview answers. Fixed compact
     /// height keeps streaming stable; long answers scroll inside the card
     /// instead of resizing the native window on every token.
@@ -1064,6 +1073,63 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func closeToMenuBar() {
         overlayPanel.orderOut(nil)
         MainActor.assumeIsolated { BrowserWindow.shared.setVisible(false) }
+    }
+
+    // MARK: - Troubleshooting
+
+    /// A plain window holding the same interface as the overlay.
+    ///
+    /// The overlay is a floating panel that sits above every other window and
+    /// hides itself from screen sharing, which makes it impossible to
+    /// photograph and impossible to show anyone. When something is laid out
+    /// wrongly there is then no way to see it or describe it. This is that
+    /// window: ordinary, focusable, screenshot-able, and never hidden from
+    /// screen capture.
+    final class InspectorWindow: NSWindow {
+        override var canBecomeKey: Bool { true }
+    }
+
+    private var inspector: InspectorWindow?
+
+    /// Shows or hides the troubleshooting window. Safe to call from anywhere.
+    @objc func toggleInspector() {
+        MainActor.assumeIsolated {
+            if let w = inspector, w.isVisible {
+                w.orderOut(nil)
+                return
+            }
+            let w = inspector ?? makeInspector()
+            inspector = w
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    private func makeInspector() -> InspectorWindow {
+        let size = NSSize(width: 460, height: 720)
+        let w = InspectorWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered, defer: false)
+        w.title = "TheCloser — troubleshooting"
+        w.titlebarAppearsTransparent = false
+        w.isReleasedWhenClosed = false
+        w.isOpaque = true
+        w.backgroundColor = .windowBackgroundColor
+        // The overlay hides itself from screen sharing so it does not appear
+        // in the other person's view. That is right for an interview and
+        // wrong for a bug report, so this window is explicitly visible to
+        // capture — which is the entire reason it exists.
+        w.sharingType = .readWrite
+        w.setFrameAutosaveName("TheCloserInspector")
+
+        let root = InspectorRootView(
+            onQuit: { NSApp.terminate(nil) },
+            onClose: { [weak w] in w?.orderOut(nil) })
+        let host = NSHostingController(rootView: root)
+        w.contentViewController = host
+        w.contentMinSize = NSSize(width: 380, height: 520)
+        return w
     }
 
     func showOverlay() {

@@ -413,6 +413,17 @@ struct TopStripView: View {
                 Label("Close to menu bar", systemImage: "menubar.arrow.up.rectangle")
             }
 
+            // Troubleshooting: the overlay floats above everything and the
+            // window under it is unreachable, so a layout problem cannot be
+            // photographed and there is nothing to look at but this menu.
+            // These two make the app inspectable and gettable-out-of.
+            Button {
+                (NSApp.delegate as? AppDelegate)?.toggleInspector()
+            } label: {
+                Label("Show / hide app window (troubleshooting)",
+                      systemImage: "macwindow.on.rectangle")
+            }
+
             Button {
                 NSApp.terminate(nil)
             } label: {
