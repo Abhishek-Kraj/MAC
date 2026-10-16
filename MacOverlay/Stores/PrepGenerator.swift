@@ -29,10 +29,22 @@ final class PrepGenerator {
     /// scoped to one JD has to be regenerated for every interview and never
     /// compounds, while a role bank is reused and grows.
     var roleName = ""
+
+    /// What the questions are generated *from*. Left empty on purpose: the
+    /// panel reads the interview's existing Context field instead, so the JD
+    /// is typed once rather than pasted into two boxes.
     var jobDescription = ""
     /// What the answers should be grounded in. Keeps them in your voice.
     var background = ""
     var questionCount = 40
+
+    /// Takes the posting from the interview setup's Context field.
+    func useContext(_ context: String) {
+        let trimmed = context.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Same floor as `canGenerate`: a phrase is not a posting.
+        guard trimmed.count > 40, trimmed.count > jobDescription.count else { return }
+        jobDescription = trimmed
+    }
 
     var isRunning: Bool { stage == .researching || stage == .embedding }
 
@@ -70,10 +82,13 @@ final class PrepGenerator {
         }
 
         do {
+            // No separate JD box: whatever the interview setup already holds in
+            // Context is the posting, unless one was pasted in specifically.
+            let jd = jobDescription.trimmingCharacters(in: .whitespacesAndNewlines)
             let raw = try await Self.ask(
                 key: key,
                 system: "You write interview questions and model answers. You reply with JSON only.",
-                user: Self.prompt(role: role, jd: jobDescription,
+                user: Self.prompt(role: role, jd: jd,
                                   background: background, count: questionCount))
             let parsed = Self.parse(raw)
             guard !parsed.isEmpty else {

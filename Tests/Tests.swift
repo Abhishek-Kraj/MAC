@@ -1483,6 +1483,32 @@ func testPrepGeneratorWarnsWithoutBackground() throws {
                     "background replaces the warning")
 }
 
+/// The posting must be typed once. Prep used to have its own JD box, which
+/// meant pasting the same description into two fields on the same screen.
+/// `useContext` takes the interview setup's Context instead, and never
+/// overwrites something the user pasted deliberately.
+@MainActor
+func testPrepGeneratorTakesPostingFromInterviewContext() throws {
+    let g = PrepGenerator()
+    try assertTrue(g.jobDescription.isEmpty, "starts empty")
+
+    let short = "Fabric role"
+    g.useContext(short)
+    try assertTrue(g.jobDescription.isEmpty, "a stub context is not worth using")
+
+    let context = "Fabric Platform Lead at GyanSys. " + String(repeating: "responsibility ", count: 12)
+    g.useContext(context)
+    try assertEq(g.jobDescription,
+                 context.trimmingCharacters(in: .whitespacesAndNewlines),
+                 "context adopted as the posting, trimmed")
+
+    // A deliberate paste wins, and a shorter context must not clobber it.
+    let mine = "A completely different posting that I typed in deliberately."
+    g.jobDescription = mine
+    g.useContext("short context")
+    try assertEq(g.jobDescription, mine, "an explicit paste is never overwritten")
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -1606,6 +1632,7 @@ struct TestsMain {
         TestRunner.run("Bank is keyed by role not by posting", testBankIsKeyedByRoleNotByPosting)
         TestRunner.run("Bank records matches", testBankRecordsMatches)
         TestRunner.run("Missed questions are captured, not auto-banked", testMissedQuestionsAreCapturedNotAutoBanked)
+        TestRunner.run("Prep generator takes posting from interview context", testPrepGeneratorTakesPostingFromInterviewContext)
         TestRunner.run("Prep generator parses wrapped JSON", testPrepGeneratorParsesWrappedJSON)
         TestRunner.run("Prep generator warns without background", testPrepGeneratorWarnsWithoutBackground)
         TestRunner.run("Cosine similarity", testCosineSimilarity)

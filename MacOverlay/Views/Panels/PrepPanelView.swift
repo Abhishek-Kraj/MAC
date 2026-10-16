@@ -57,27 +57,12 @@ struct PrepPanelView: View {
             .font(.system(size: 11))
             .help("The bank is filed under this, so name the role rather than the posting.")
 
-        Text("Job description")
-            .font(.system(size: 11, weight: .semibold))
-        ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.04))
-                .overlay(RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
-            TextEditor(text: $generator.jobDescription)
-                .scrollContentBackground(.hidden)
-                .font(.system(size: 11))
-                .padding(8)
-                .frame(minHeight: 100, maxHeight: 190)
-            if generator.jobDescription.isEmpty {
-                Text("Paste the posting. Research and 40 questions take about a minute.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary.opacity(0.5))
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 16)
-                    .allowsHitTesting(false)
-            }
-        }
+        postingSource
+
+        // The posting comes from the interview's Context field above, so it is
+        // typed once. A dedicated box is only for when the posting differs from
+        // the context you interview with.
+        postingSource
 
         Text("Your background (optional)")
             .font(.system(size: 11, weight: .semibold))
@@ -103,6 +88,7 @@ struct PrepPanelView: View {
 
         HStack(spacing: 8) {
             Button {
+                generator.useContext(vm.interviewContext)
                 Task { await generator.generate() }
             } label: {
                 if generator.isRunning {
@@ -126,6 +112,58 @@ struct PrepPanelView: View {
                 .fixedSize()
 
             Spacer()
+        }
+    }
+
+    /// Where the questions get generated from. Prefers the Context field the
+    /// interview setup already has, so the posting is not pasted twice.
+    @ViewBuilder
+    private var postingSource: some View {
+        let context = vm.interviewContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasContext = context.count > 40
+        let hasOwn = !generator.jobDescription.isEmpty
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: hasOwn ? "doc.text.fill" : (hasContext ? "checkmark.circle.fill" : "exclamationmark.circle"))
+                    .font(.system(size: 10))
+                    .foregroundColor(hasOwn || hasContext ? .green : .orange)
+                Text(hasOwn
+                     ? "Using a posting pasted into prep"
+                     : hasContext
+                       ? "Using your interview context (\(context.count) characters)"
+                       : "Add the JD to Context above, or paste one here")
+                    .font(.system(size: 11))
+                Spacer()
+                if hasContext && !hasOwn {
+                    Button("Re-read context") { generator.useContext(context) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10))
+                        .foregroundColor(Design.Accent.brand)
+                }
+            }
+
+            if !hasOwn {
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(0.04))
+                        .overlay(RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                    TextEditor(text: $generator.jobDescription)
+                        .scrollContentBackground(.hidden)
+                        .font(.system(size: 11))
+                        .padding(8)
+                        .frame(minHeight: 64, maxHeight: 130)
+                    if generator.jobDescription.isEmpty {
+                        Text("Optional — only if the posting differs from your context.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary.opacity(0.5))
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 14)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
         }
     }
 
