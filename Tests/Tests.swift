@@ -543,6 +543,76 @@ func testMuseSparkThinksMinimally() throws {
     try assertTrue(AIManager.reasoning(for: "anthropic/claude-sonnet-5") == nil, "others unchanged")
 }
 
+/// Thinking is turned down only for models OpenRouter advertises as
+/// honouring `reasoning_effort`. Sending it to a model that merely says
+/// `reasoning` is harmful: `exclude` hides the reasoning from the response
+/// but the model still computes it — deepseek-r1 measured 197 s to first
+/// token under this setting versus 1.2 s without.
+@MainActor
+func testThinkingIsDisabledOnlyWhereItTakesEffect() throws {
+    let saved = OpenRouterCatalog.reasoningEffortIDs
+    defer { OpenRouterCatalog.reasoningEffortIDs = saved }
+
+    OpenRouterCatalog.reasoningEffortIDs = [
+        "openrouter/google/gemini-3.8-flash",     // advertises reasoning_effort
+        "openrouter/openai/gpt-5.5",
+    ]
+    try assertTrue(AIManager.reasoning(for: "google/gemini-3.8-flash") != nil, "flash gets it")
+    try assertEq(AIManager.reasoning(for: "google/gemini-3.8-flash")?["effort"] as? String, "minimal")
+    try assertTrue(AIManager.reasoning(for: "deepseek/deepseek-r1") == nil, "r1 left alone")
+    try assertTrue(AIManager.reasoning(for: "some/model-without-metadata") == nil, "unknown left alone")
+}
+
+/// The user's escape hatch: letting models think turns the setting off
+/// everywhere, including Muse Spark.
+@MainActor
+func testAllowThinkingOverridesEverything() throws {
+    let saved = OpenRouterCatalog.reasoningEffortIDs
+    let savedFlag = AIManager.allowModelThinking
+    defer {
+        OpenRouterCatalog.reasoningEffortIDs = saved
+        AIManager.allowModelThinking = savedFlag
+    }
+    OpenRouterCatalog.reasoningEffortIDs = ["openrouter/google/gemini-3.8-flash"]
+
+    AIManager.allowModelThinking = false
+    try assertTrue(AIManager.reasoning(for: "google/gemini-3.8-flash") != nil, "off by default")
+
+    AIManager.allowModelThinking = true
+    try assertTrue(AIManager.reasoning(for: "google/gemini-3.8-flash") == nil, "thinking honoured")
+    try assertTrue(AIManager.reasoning(for: "meta/muse-spark-1.3") == nil, "Muse Spark too")
+}
+
+/// `enabled: false` is rejected by OpenRouter with HTTP 400, so it must never
+/// be sent whatever the model advertises.
+func testNeverSendsUnsupportedReasoningParam() throws {
+    let saved = OpenRouterCatalog.reasoningEffortIDs
+    defer { OpenRouterCatalog.reasoningEffortIDs = saved }
+    OpenRouterCatalog.reasoningEffortIDs = ["openrouter/google/gemini-3.8-flash"]
+
+    let r = AIManager.reasoning(for: "google/gemini-3.8-flash")
+    try assertTrue(r?["enabled"] == nil, "no `enabled` key — OpenRouter 400s on it")
+    try assertEq(Set(r?.keys.map { String($0) } ?? []), ["effort", "exclude"], "only the two that work")
+}
+
+/// The index is rebuilt from the cached catalogue on load and on fetch.
+@MainActor
+func testReasoningIndexIsBuiltFromTheCatalogue() throws {
+    let json = """
+    {"data":[
+      {"id":"google/gemini-3.8-flash","name":"Flash","context_length":8,
+       "supported_parameters":["reasoning","reasoning_effort"],
+       "architecture":{"input_modalities":["text"]}},
+      {"id":"deepseek/deepseek-r1","name":"R1","context_length":8,
+       "supported_parameters":["reasoning"],
+       "architecture":{"input_modalities":["text"]}}
+    ]}
+    """
+    let models = try OpenRouterCatalog.decode(Data(json.utf8))
+    let expected = Set(models.filter { $0.supportedParameters?.contains("reasoning_effort") == true }.map(\.id))
+    try assertEq(expected, ["openrouter/google/gemini-3.8-flash"], "only the effort-capable one")
+}
+
 // MARK: - OpenRouter model catalogue
 
 /// A bare slug gets the app's routing prefix and a derived provider.
@@ -794,6 +864,10 @@ struct TestsMain {
         TestRunner.run("Keyword styles pick the prompt's formatting rule", testKeywordStylePromptRules)
         TestRunner.run("Transcripts in another language are ignored", testTranscriptLanguageLock)
         TestRunner.run("Muse Spark thinks minimally", testMuseSparkThinksMinimally)
+        TestRunner.run("Thinking off only where it takes effect", testThinkingIsDisabledOnlyWhereItTakesEffect)
+        TestRunner.run("Allow thinking overrides everything", testAllowThinkingOverridesEverything)
+        TestRunner.run("Never sends an unsupported reasoning param", testNeverSendsUnsupportedReasoningParam)
+        TestRunner.run("Reasoning index built from the catalogue", testReasoningIndexIsBuiltFromTheCatalogue)
         TestRunner.run("OpenRouter model from slug", testOpenRouterModelFromSlug)
         TestRunner.run("OpenRouter free tier detection", testOpenRouterFreeTierDetection)
         TestRunner.run("OpenRouter prefix is idempotent", testOpenRouterModelIdempotentPrefix)

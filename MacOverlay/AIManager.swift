@@ -45,12 +45,41 @@ class AIManager {
     }
 
     /// OpenRouter's `reasoning` setting for models that think before they
-    /// answer. Muse Spark thinks for about 6 s at its usual level; "minimal"
-    /// starts the answer in about 1.5 s, just as good for interview answers
-    /// (measured 2026-10-11; it can't turn thinking off). `model` is the
-    /// OpenRouter id, without the app's "openrouter/" prefix.
+    /// answer. `model` is the OpenRouter id, without the app's "openrouter/"
+    /// prefix.
+    ///
+    /// Interview answers want the answer, not the deliberation — a question
+    /// like "when does the train arrive" does not need 500 characters of
+    /// scratch work in front of it. Measured against the live API on
+    /// 2026-10-16: `gemini-3.8-flash` 8.59 s with 507 characters of reasoning
+    /// versus 7.74 s and none at this setting; `gpt-5.5` 5.58 s -> 4.03 s.
+    ///
+    /// Deliberately NOT applied to every reasoning model. `exclude` only
+    /// strips reasoning from the *response*; it does not stop the model
+    /// computing it. `deepseek-r1` went from 1.2 s to 197 s to first token
+    /// under this setting, so only models OpenRouter advertises as honouring
+    /// `reasoning_effort` are given it. `enabled: false` is never sent —
+    /// OpenRouter rejects it with HTTP 400.
+    ///
+    /// `allowThinking` is the user's escape hatch: when off, every model is
+    /// left to think however it likes.
     static func reasoning(for model: String) -> [String: Any]? {
-        model.hasPrefix("meta/muse-spark") ? ["effort": "minimal", "exclude": true] : nil
+        if allowModelThinking { return nil }
+        // Muse Spark thinks for about 6 s at its usual level; "minimal"
+        // starts the answer in about 1.5 s and it cannot turn thinking off
+        // (measured 2026-10-11). Kept as a fallback for when the catalogue
+        // has not been fetched and there is no metadata to consult.
+        if model.hasPrefix("meta/muse-spark") { return ["effort": "minimal", "exclude": true] }
+        return OpenRouterCatalog.reasoningEffortIDs.contains(OpenRouterModel.make(slug: model).id)
+            ? ["effort": "minimal", "exclude": true]
+            : nil
+    }
+
+    /// User setting: let models think at their own default level instead of
+    /// asking for the shortest path. Off by default — see `reasoning(for:)`.
+    static var allowModelThinking: Bool {
+        get { UserDefaults.standard.bool(forKey: "allowModelThinking") }
+        set { UserDefaults.standard.set(newValue, forKey: "allowModelThinking") }
     }
 
     func isGrokModel(_ model: String) -> Bool {

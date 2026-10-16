@@ -25,6 +25,10 @@ struct OpenRouterModel: Identifiable, Hashable, Codable {
     /// OpenRouter's `:free` tier — no usage charge against the key.
     let isFree: Bool
     let contextLength: Int?
+    /// What OpenRouter says this model accepts. Optional because the cached
+    /// catalogue predates this field and `decodeIfPresent` keeps old caches
+    /// readable without a migration.
+    let supportedParameters: [String]?
 
     /// `qwen/qwen3-235b` → `Qwen`.
     static func provider(fromSlug slug: String) -> String {
@@ -52,9 +56,10 @@ struct OpenRouterModel: Identifiable, Hashable, Codable {
             id: "openrouter/\(bare)",
             name: name ?? displayName(for: bare),
             provider: provider(fromSlug: bare),
-            supportsImages: true,      // assumed; screenshots are opt-out per model below
+            supportsImages: true,
             isFree: bare.hasSuffix(":free"),
-            contextLength: nil
+            contextLength: nil,
+            supportedParameters: nil    // unknown until fetched
         )
     }
 
@@ -125,6 +130,11 @@ final class OpenRouterCatalog {
     private static let fetchedOnKey = "openRouterCatalog.fetchedAt"
     private static let modelsURL = URL(string: "https://openrouter.ai/api/v1/models")!
 
+    /// Ids OpenRouter advertises as honouring `reasoning_effort`, as a
+    /// nonisolated mirror of the cached catalogue. `AIManager.reasoning(for:)`
+    /// is consulted on the request path, which is not main-actor isolated, so
+    /// it reads this rather than hopping actors for every request.
+    nonisolated(unsafe) static var reasoningEffortIDs: Set<String> = []
     /// Models downloaded from OpenRouter, newest catalogue first.
     private(set) var fetched: [OpenRouterModel] = []
     /// Models the user added by hand. Always visible; never hidden.
@@ -137,6 +147,7 @@ final class OpenRouterCatalog {
         if let data = UserDefaults.standard.data(forKey: Self.cacheKey),
            let decoded = try? JSONDecoder().decode([OpenRouterModel].self, from: data) {
             fetched = decoded
+            rebuildReasoningIndex()
         }
         if let data = UserDefaults.standard.data(forKey: Self.customKey),
            let decoded = try? JSONDecoder().decode([OpenRouterModel].self, from: data) {
@@ -171,10 +182,6 @@ final class OpenRouterCatalog {
         ("meta/muse-spark-1.3",          "Muse Spark 1.3",        "Meta"),
         ("moonshotai/kimi-k2.6",         "Kimi K2.6",             "Kimi"),
     ].map { OpenRouterModel.make(slug: $0.0, name: $0.1) }
-        .map { m in
-            OpenRouterModel(id: m.id, name: m.name, provider: m.provider,
-                            supportsImages: true, isFree: m.isFree, contextLength: nil)
-        }
 
     /// Everything selectable: custom first, then built-ins, then the fetched
     /// catalogue. De-duplicated by id, earliest definition winning.
@@ -209,6 +216,7 @@ final class OpenRouterCatalog {
             }
             let parsed = try Self.decode(data)
             fetched = parsed
+            rebuildReasoningIndex()
             lastFetchedAt = Date()
             UserDefaults.standard.set(try? JSONEncoder().encode(parsed), forKey: Self.cacheKey)
             UserDefaults.standard.set(lastFetchedAt, forKey: Self.fetchedOnKey)
@@ -216,6 +224,15 @@ final class OpenRouterCatalog {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    /// Rebuilds the nonisolated reasoning index from the cached catalogue.
+    private func rebuildReasoningIndex() {
+        Self.reasoningEffortIDs = Set(
+            fetched
+                .filter { $0.supportedParameters?.contains("reasoning_effort") == true }
+                .map(\.id)
+        )
     }
 
     nonisolated static func decode(_ data: Data) throws -> [OpenRouterModel] {
@@ -231,9 +248,11 @@ final class OpenRouterCatalog {
                 let name: String
                 let contextLength: Int?
                 let architecture: Architecture?
+                let supportedParameters: [String]?
                 enum CodingKeys: String, CodingKey {
                     case id, name, architecture
                     case contextLength = "context_length"
+                    case supportedParameters = "supported_parameters"
                 }
             }
             let data: [Model]
@@ -247,7 +266,8 @@ final class OpenRouterCatalog {
                 provider: OpenRouterModel.provider(fromSlug: m.id),
                 supportsImages: modalities.contains("image"),
                 isFree: m.id.hasSuffix(":free"),
-                contextLength: m.contextLength
+                contextLength: m.contextLength,
+                supportedParameters: m.supportedParameters
             )
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -301,6 +321,16 @@ final class OpenRouterCatalog {
 
     /// True when a screenshot can be sent to this model. Unknown ids are
     /// allowed — the user typed them in, so they know what they picked.
+    /// True when OpenRouter advertises that this model honours a reasoning
+    /// effort level, which is the only safe signal that turning thinking down
+    /// will actually take effect. Models that advertise `reasoning` without
+    /// `reasoning_effort` (deepseek-r1 and friends) still *compute* their
+    /// reasoning when `exclude` is set — measured at 197 s to first token —
+    /// so they are deliberately left alone.
+    func supportsReasoningEffort(_ id: String) -> Bool {
+        Self.reasoningEffortIDs.contains(OpenRouterModel.make(slug: id).id)
+    }
+
     func supportsImages(_ id: String) -> Bool {
         model(id: id)?.supportsImages ?? true
     }

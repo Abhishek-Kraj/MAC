@@ -440,6 +440,24 @@ struct PreferencesView: View {
         let store = vm.promptStore
 
 
+        section(title: "Answer speed",
+                subtitle: "Ask models that can to answer without a long thinking block first.") {
+            Toggle(isOn: Binding(
+                get: { AIManager.allowModelThinking },
+                set: { AIManager.allowModelThinking = $0 })) {
+                labelTwoLine(title: "Let models think first",
+                             subtitle: "Off is faster for interview questions. Turn on for open-ended or maths questions.")
+            }
+            .toggleStyle(.switch)
+
+            let fast = OpenRouterCatalog.reasoningEffortIDs.count
+            Text(fast == 0
+                 ? "No model metadata yet — fetch the OpenRouter catalogue to apply this to every model that supports it."
+                 : "Applied to \(fast) of \(OpenRouterCatalog.shared.allModels.count) models. Models that still think regardless are left alone.")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+
         section(title: "Model picker",
                 subtitle: "Choose which models show in the model menu.") {
             modelCatalog
