@@ -1046,6 +1046,73 @@ func testPanelMovesBetweenVerticallyStackedDisplays() throws {
         for: NSRect(x: 100, y: 100,  width: 400, height: 200), screens: screens), 0, "on the bottom display")
 }
 
+/// The interview prompt used to hard-code "at most 3 short bullets" for every
+/// question. Depth must now be what varies, and the shared skeleton — the
+/// verbatim opener in particular — must survive all three levels, because a
+/// user still has to be able to read the first line at a glance.
+func testAnswerDepthScalesThePrompt() throws {
+    let depths = AnswerDepth.allCases
+    try assertEq(depths.count, 3, "three depths offered")
+
+    for d in depths {
+        let text = d.instruction
+        try assertTrue(text.contains("FIRST LINE"),
+                      "\(d.rawValue) keeps the verbatim opener")
+        try assertTrue(text.lowercased().contains("verbatim"),
+                       "\(d.rawValue) tells the model it is sayable")
+        try assertFalse(text.contains("at most 3"),
+                        "\(d.rawValue) no longer carries the old fixed cap")
+        try assertTrue(text.contains("Bold"), "\(d.rawValue) still bolds keywords")
+    }
+
+    // Brief is the tightest, deep the loosest.
+    try assertTrue(AnswerDepth.brief.instruction.contains("at most 2"),
+                   "brief caps at two bullets")
+    try assertTrue(AnswerDepth.standard.instruction.contains("2-4"),
+                   "standard gives a small range")
+    for marker in ["claim", "trade-off", "go wrong"] {
+        try assertTrue(AnswerDepth.deep.instruction.contains(marker),
+                       "deep asks for \(marker)")
+    }
+    // Depth must never be a length quota — that was the original sin.
+    try assertTrue(AnswerDepth.deep.instruction.contains("not by a quota"),
+                   "deep explicitly refuses a quota")
+    try assertTrue(AnswerDepth.standard.instruction.contains("Do not pad"),
+                   "standard refuses padding")
+
+    // Distinct text per level, so the switch is doing real work.
+    try assertTrue(AnswerDepth.brief.instruction != AnswerDepth.standard.instruction)
+    try assertTrue(AnswerDepth.standard.instruction != AnswerDepth.deep.instruction)
+}
+
+/// The choice has to survive relaunch, and the interview prompt has to pick it
+/// up — otherwise the segmented control would lie.
+@MainActor
+func testAnswerDepthPersistsAndFeedsThePrompt() throws {
+    let key = AnswerDepth.storageKey
+    let saved = UserDefaults.standard.string(forKey: key)
+    defer {
+        if let saved { UserDefaults.standard.set(saved, forKey: key) }
+        else { UserDefaults.standard.removeObject(forKey: key) }
+    }
+
+    // Default when unset.
+    UserDefaults.standard.removeObject(forKey: key)
+    try assertEq(AnswerDepth.current, .standard, "standard is the default")
+
+    UserDefaults.standard.set(AnswerDepth.deep.rawValue, forKey: key)
+    try assertEq(AnswerDepth.current, .deep, "saved choice is read back")
+
+    // And the interview prompt reflects it.
+    let prompt = SessionMode.interview.systemPrompt
+    try assertTrue(prompt.contains("go wrong"), "interview prompt uses the deep clause")
+    try assertFalse(prompt.contains("at most 2"), "not the brief clause")
+
+    UserDefaults.standard.set(AnswerDepth.brief.rawValue, forKey: key)
+    try assertTrue(SessionMode.interview.systemPrompt.contains("at most 2"),
+                   "brief clause now")
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -1152,6 +1219,8 @@ struct TestsMain {
         TestRunner.run("Show all is scoped to the filters", testShowAllIsScopedToTheGivenIds)
         TestRunner.run("Model tier thresholds", testModelTierThresholds)
         TestRunner.run("Shared model filter store", testSharedModelFilterStore)
+        TestRunner.run("Answer depth scales the prompt", testAnswerDepthScalesThePrompt)
+        TestRunner.run("Answer depth persists and feeds the prompt", testAnswerDepthPersistsAndFeedsThePrompt)
         TestRunner.run("Panel can move between displays", testPanelCanMoveBetweenDisplays)
         TestRunner.run("Panel moves between stacked displays", testPanelMovesBetweenVerticallyStackedDisplays)
         TestRunner.run("Model tier rejects router pricing", testModelTierRejectsRouterPricing)

@@ -138,6 +138,11 @@ final class OverlayViewModel {
     var aiResponse     = "" { didSet { scheduleBroadcast() } }
     var isSendingToAI  = false { didSet { scheduleBroadcast() } }
     var pendingQuickAction: QuickAction? = nil
+    /// How much an interview answer should say. See `AnswerDepth`.
+    var answerDepth: AnswerDepth = AnswerDepth.current {
+        didSet { UserDefaults.standard.set(answerDepth.rawValue, forKey: AnswerDepth.storageKey) }
+    }
+
     var pendingScreenshot: NSImage? = nil
     /// True when Screen Recording is needed but has not been granted. The app
     /// deliberately stops re-prompting once the user has had one chance, so

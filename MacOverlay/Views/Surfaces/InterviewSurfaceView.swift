@@ -105,6 +105,7 @@ private struct InterviewSetupForm: View {
                 promptPicker
                 autoGenerateRow
                 modelPickerRow
+                depthRow
                 startRow
             }
             .padding(.horizontal, 22)
@@ -468,6 +469,32 @@ private struct InterviewSetupForm: View {
     /// control at all, so the only way to change it was after starting, from
     /// the bar. Now it sits directly above Start and uses the same shared
     /// picker as Settings and the bar, so all four surfaces agree.
+    /// How much each answer should say. The prompt used to hard-code "at most
+    /// 3 short bullets" for every question, which suited a yes/no question
+    /// and starved a design question. Chosen per interview, because nobody is
+    /// picking this mid-answer.
+    private var depthRow: some View {
+        @Bindable var vm = vm
+        return sectionCard(title: "Answer depth", systemImage: "text.alignleft") {
+            HStack(spacing: 10) {
+                Picker("", selection: $vm.answerDepth) {
+                    ForEach(AnswerDepth.allCases) { d in
+                        Text(d.displayName).tag(d)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 220)
+                .help("How much each answer should say")
+
+                Text(vm.answerDepth.blurb)
+                    .font(.system(size: 11))
+                    .foregroundColor(Design.Ink.secondary)
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
     private var modelPickerRow: some View {
         sectionCard(title: "Answer model", systemImage: "cpu") {
             HStack(spacing: 10) {

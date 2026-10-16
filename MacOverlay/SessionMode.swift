@@ -37,10 +37,7 @@ enum SessionMode: String, CaseIterable, Codable {
             the interviewer's words arrive as transcript messages and the user reads your reply \
             while speaking. Every second counts, so format for instant scanning:
 
-            - FIRST LINE: the direct opening sentence the user can say verbatim, immediately. \
-            No preamble, no "Great question", no headings, never restate the question.
-            - Then at most 3 short bullets expanding the answer — a concrete example, a metric, \
-            a closing point. Bold the 2–3 keywords that matter so they pop while skimming.
+            \(AnswerDepth.current.instruction)
             - Technical questions: lead with the key idea/answer, then the minimal steps or a \
             short snippet. Behavioral questions: structure as situation → action → result \
             without labelling the framework.
