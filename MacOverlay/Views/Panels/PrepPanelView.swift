@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 /// Interview preparation, on the interview setup screen.
 ///
@@ -339,8 +341,11 @@ struct PrepPanelView: View {
 /// so the setup screen stays about starting the interview.
 struct PrepSetupView: View {
     @Environment(OverlayViewModel.self) private var vm
+    @State private var isImporting = false
     /// Shared, so closing this sheet mid-run does not abandon the work.
     @Bindable private var generator = PrepGenerator.shared
+    @State private var pastedQuestions = ""
+    @State private var importMessage: String?
 
     var onDone: () -> Void
 
@@ -349,18 +354,27 @@ struct PrepSetupView: View {
             VStack(alignment: .leading, spacing: 14) {
                 header
 
-                // Required, and marked as such. It gates generation, and as a
-                // bare placeholder it read as optional — leaving it blank
-                // disabled the button with no visible reason.
                 HStack(spacing: 5) {
                     Text("Role")
                         .font(.system(size: 11, weight: .medium))
-                    Text("required").font(.system(size: 9)).foregroundColor(.secondary)
+                    if generator.roleSource == .detected {
+                        // Says where it came from, so it can be checked rather
+                        // than trusted.
+                        Label("from your job description", systemImage: "sparkles")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    }
                     Spacer()
                 }
-                TextField("e.g. Fabric Platform Lead", text: $generator.roleName)
+                TextField("reading from your job description…", text: $generator.roleName)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 12))
+                    .disabled(generator.isDetectingRole)
+                    .onChange(of: generator.roleName) { _, _ in
+                        // Once it is edited by hand it is the user's name, and
+                        // detection stops second-guessing them.
+                        if !generator.isDetectingRole { generator.markRoleTyped() }
+                    }
                     .help("The bank is filed under this, so name the role, not the posting.")
 
                 posting
@@ -400,11 +414,20 @@ struct PrepSetupView: View {
                         .buttonStyle(.secondaryCompact)
                 }
 
+                Divider().padding(.vertical, 2)
+                importSection
                 status
             }
             .padding(18)
         }
-        .frame(width: 560, height: 560)
+        .frame(width: 560, height: 620)
+        .task {
+            let key = UserDefaults.standard.string(forKey: "openRouterAPIKey")?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            await generator.detectRole(context: vm.interviewContext,
+                                       resume: vm.interviewResumeText,
+                                       key: key)
+        }
     }
 
     private var header: some View {
@@ -465,6 +488,128 @@ struct PrepSetupView: View {
                 .foregroundColor(failed ? .orange : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
+        }
+    }
+
+    /// Bring your own questions.
+    ///
+    /// A mock interview run on another tool is worth more than a fresh research
+    /// pass: those are the questions a real interviewer asked, and the answers
+    /// are already in your own words. Pasting them in beats paying a model to
+    /// guess at them again.
+    @ViewBuilder
+    private var importSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: 11))
+                    .foregroundColor(Design.Ink.secondary)
+                Text("Bring your own questions")
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Button("Choose file…") { pickImportFile() }
+                    .buttonStyle(.secondaryCompact)
+            }
+
+            TextEditor(text: $pastedQuestions)
+                .scrollContentBackground(.hidden)
+                .font(.system(size: 11))
+                .padding(6)
+                .frame(height: 74)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Design.Surface.inputFill))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+                .overlay(alignment: .topLeading) {
+                    if pastedQuestions.isEmpty {
+                        Text("Paste questions and answers here — Q: … / A: … is the easiest.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 11).padding(.vertical, 12)
+                            .allowsHitTesting(false)
+                    }
+                }
+
+            if let message = importMessage {
+                Text(message)
+                    .font(.system(size: 10))
+                    .foregroundColor(importSucceeded ? .green : .orange)
+            }
+
+            HStack(spacing: 8) {
+                Button("Add pasted") { importPasted() }
+                    .buttonStyle(.primaryCompact)
+                    .disabled(pastedQuestions.trimmingCharacters(
+                        in: .whitespacesAndNewlines).isEmpty || isImporting)
+                Spacer()
+                if isImporting { ProgressView().controlSize(.mini) }
+            }
+        }
+    }
+
+    private var importSucceeded: Bool {
+        if case .some(let m) = importMessage { return m.hasPrefix("Added ") }
+        return false
+    }
+
+    private func pickImportFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        // Built by extension rather than by constant: .json5 and .markdown have
+        // no UTType static on the deployment target, and a question bank
+        // arrives as whatever the other tool exported.
+        let extras = ["txt", "md", "json", "markdown", "csv", "text"]
+            .compactMap { UTType(filenameExtension: $0) }
+        panel.allowedContentTypes = [.plainText, .json] + extras
+        panel.message = "Choose a question bank exported from a mock interview."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let text = try PrepBankImporter.readFile(at: url)
+            pastedQuestions = text
+            importMessage = nil
+        } catch {
+            importMessage = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+        }
+    }
+
+    private func importPasted() {
+        let text = pastedQuestions.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let role = generator.roleName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bank = role.isEmpty ? "Imported" : role
+        let result = PrepBankImporter.parse(text)
+        guard !result.pairs.isEmpty else {
+            importMessage = "No question-and-answer pairs found. Try Q: … / A: … on separate lines."
+            return
+        }
+        PrepBank.shared.activeBankID = bank
+        PrepBank.shared.add(questions: result.pairs.map {
+            PrepQuestion(question: $0.question, answer: $0.answer,
+                         source: .user, topic: $0.topic, bankID: bank)
+        })
+        // Embedding is what makes imported questions matchable live, so it is
+        // the last step and not an afterthought — without it they sit in the
+        // bank doing nothing.
+        isImporting = true
+        Task {
+            await PreparedAnswerLookup.shared.embedBank(bank)
+            isImporting = false
+            let failed = PreparedAnswerLookup.shared.lastError != nil
+            importMessage = failed
+                ? "Added \(result.pairs.count), but matching is not ready: "
+                  + (PreparedAnswerLookup.shared.lastError ?? "unknown error")
+                : "Added \(result.pairs.count) questions to \(bank) (\(formatName(result.format)))."
+            if !failed { pastedQuestions = "" }
+        }
+    }
+
+    private func formatName(_ f: PrepBankImporter.Format) -> String {
+        switch f {
+        case .json:       return "JSON"
+        case .labelled:   return "Q:/A: text"
+        case .markdown:   return "markdown"
+        case .transcript: return "transcript"
         }
     }
 

@@ -45,7 +45,9 @@ final class PrepGenerator {
     /// The role name is the bank key. Deliberately not the posting: a bank
     /// scoped to one JD has to be regenerated for every interview and never
     /// compounds, while a role bank is reused and grows.
-    var roleName = ""
+    var roleName = "" {
+        didSet { if roleSource != .typed && roleName != oldValue { roleSource = .none } }
+    }
 
     /// What the questions are generated *from*. Left empty on purpose: the
     /// panel reads the interview's existing Context field instead, so the JD
@@ -78,12 +80,28 @@ final class PrepGenerator {
             && jobDescription.trimmingCharacters(in: .whitespacesAndNewlines).count > 40
     }
 
+    /// True while the role is being worked out from the posting.
+    private(set) var isDetectingRole = false
+    /// How the current role name was arrived at, so the sheet can say so.
+    /// `.none` means the user typed it, which is never overwritten.
+    enum RoleSource: Equatable { case none, detected, typed }
+
+    private(set) var roleSource: RoleSource = .none
+
+    /// The user took the field over. Detection must never overwrite it after
+    /// this — an auto-filled name that silently changes under your hands is
+    /// worse than no automation.
+    func markRoleTyped() { roleSource = .typed }
+
     /// Why the button is disabled, shown under it rather than left as a dead
-    /// control.
+    /// control. Role is auto-derived, so this should never be the thing you
+    /// are asked to do by hand.
     var guidance: String? {
         guard !isRunning else { return nil }
         if roleName.trimmingCharacters(in: .whitespacesAndNewlines).count <= 2 {
-            return "Name the role — this is how the bank is filed and reused."
+            return isDetectingRole
+                ? "Working out the role from your job description…"
+                : "Your job description names the role — it is being read from there."
         }
         if jobDescription.trimmingCharacters(in: .whitespacesAndNewlines).count <= 40 {
             return "Paste the job description, or at least the responsibilities."
@@ -91,13 +109,114 @@ final class PrepGenerator {
         return nil
     }
 
+    // MARK: - Role detection
+
+    /// Works the role out of the posting, so it is not typed a second time.
+    ///
+    /// The role is the bank key — it decides which prepared questions get
+    /// reused — and it is already stated in the job description on the same
+    /// screen. Asking for it again was pure duplication, and it blocked
+    /// generation outright when left blank.
+    ///
+    /// The model is asked because the answer is a judgement about text, and a
+    /// regex cannot tell "Fabric CoE Lead" from "Lead the design, build and
+    /// rollout of Microsoft Fabric". It is one short call, capped at a handful
+    /// of tokens, made once and cached on the field. Anything typed by hand
+    /// always wins.
+    func detectRole(context: String, resume: String, key: String) async {
+        guard !isDetectingRole else { return }
+        let jd = jobDescription.isEmpty
+            ? context.trimmingCharacters(in: .whitespacesAndNewlines) : jobDescription
+        guard jd.count > 40 || resume.count > 80 else { return }
+        // A name the user gave is not overwritten by a guess.
+        guard roleSource != .typed, roleName.trimmingCharacters(in: .whitespacesAndNewlines).count <= 2
+        else { return }
+
+        isDetectingRole = true
+        defer { isDetectingRole = false }
+
+        if let detected = await Self.askRole(key: key, jd: jd, resume: resume),
+           detected.count > 2, detected.count < 60 {
+            roleName = detected
+            roleSource = .detected
+        } else if roleName.isEmpty {
+            roleName = Self.fallbackRole(from: jd, resume: resume) ?? ""
+        }
+    }
+
+    /// Cheap local guess, used when the model call fails. Deliberately dull:
+    /// a plain but harmless name beats no name and a disabled button.
+    static func fallbackRole(from jd: String, resume: String) -> String? {
+        // A line that is short and title-cased is usually the heading.
+        for line in jd.split(separator: "\n").map({
+            $0.trimmingCharacters(in: .whitespaces) }) where line.count > 3 && line.count < 60 {
+            let words = line.split(separator: " ").map(String.init)
+            let titleish = words.count <= 6
+                && words.allSatisfy { w in
+                    w.first?.isUppercase == true || w.lowercased() == "of"
+                        || w.lowercased() == "and" || w.first == "(" || w.last == ")" }
+            if titleish, !line.lowercased().hasPrefix("role purpose") {
+                return line
+            }
+        }
+        // Otherwise the résumé filename is a better label than nothing.
+        return nil
+    }
+
+    private static func askRole(key: String, jd: String, resume: String) async -> String? {
+        let cv = String(resume.prefix(400))
+        let user = """
+        Job description:
+        \(String(jd.prefix(1200)))
+
+        Candidate's résumé (first lines):
+        \(cv)
+
+        Name the role this interview is FOR — the job being applied for, not the
+        candidate's current title. Reply with the title only, in at most six
+        words, no quotes, no explanation. If you cannot tell, reply NONE.
+        """
+        let body: [String: Any] = [
+            "model": "google/gemini-3.8-flash:online",
+            "temperature": 0,
+            "messages": [["role": "user", "content": user]],
+            "max_tokens": 24,
+        ]
+        var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, response) = try? await URLSession.shared.data(for: request) else {
+            return nil
+        }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        let content = (json["choices"] as? [[String: Any]])?
+            .first?["message"] as? [String: Any]
+        let raw = (content?["content"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cleaned = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`*."))
+        return (cleaned.isEmpty || cleaned.uppercased() == "NONE") ? nil : cleaned
+    }
+
     // MARK: - Generate
 
     /// Starts a run and returns immediately. Use this from a button: the work
     /// belongs to the generator, not to whatever sheet started it.
     func start(context: String, resume: String) {
-        guard canGenerate else { return }
+        // A blank role used to abort the run silently. It is now either
+        // detected or given a dull fallback, so pressing the button always
+        // does something.
+        if roleName.trimmingCharacters(in: .whitespacesAndNewlines).count <= 2,
+           let fallback = Self.fallbackRole(from: context, resume: resume) {
+            roleName = fallback
+            roleSource = .detected
+        }
         jobDescription = jobDescription.isEmpty ? context : jobDescription
+        guard canGenerate else { return }
         resumeText = resume
         run?.cancel()
         run = Task { await generate() }
@@ -115,16 +234,19 @@ final class PrepGenerator {
             return
         }
 
+        // Questions already in the bank are shown to the model so a top-up
+        // extends the bank instead of regenerating it.
+        let currentBank = PrepBank.shared
+            .questions(inBank: role)
+            .map(\.question)
+
         do {
             // No separate JD box: whatever the interview setup already holds in
             // Context is the posting, unless one was pasted in specifically.
             let jd = jobDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-            let raw = try await Self.ask(
-                key: key,
-                system: "You write interview questions and model answers. You reply with JSON only.",
-                user: Self.prompt(role: role, jd: jd,
-                                  resume: resumeText, count: questionCount))
-            let parsed = Self.parse(raw)
+            let parsed = await Self.askInBatches(
+                key: key, role: role, jd: jd, resume: resumeText,
+                want: questionCount, existing: currentBank)
             guard !parsed.isEmpty else {
                 stage = .failed("The model returned no usable questions. Try again.")
                 return
@@ -155,6 +277,61 @@ final class PrepGenerator {
             stage = .failed((error as? LocalizedError)?.errorDescription
                             ?? error.localizedDescription)
         }
+    }
+
+    // MARK: - Batched generation
+
+    /// Asks for the questions in several rounds rather than one.
+    ///
+    /// Asking for 40 in a single call does not produce 40. The model writes a
+    /// handful, runs out of answerable breath and stops — measured against a
+    /// real 40-question request it returned 7. Asking for a smaller number per
+    /// round, and telling it what has already been covered, gets the count the
+    /// user actually asked for.
+    static func askInBatches(key: String, role: String, jd: String, resume: String,
+                             want: Int, existing: [String]) async -> [Generated] {
+        let perBatch = 8
+        var out: [Generated] = []
+        var seen = Set(existing.map { $0.lowercased() })
+
+        var rounds = 0
+        while out.count < want && rounds < 12 {
+            rounds += 1
+            let remaining = want - out.count
+            let ask = min(perBatch, remaining)
+
+            var user = Self.prompt(role: role, jd: jd, resume: resume, count: ask)
+            if !out.isEmpty || !existing.isEmpty {
+                let covered = (existing + out.map(\.q)).suffix(60)
+                user += "\n\nAlready written — do not repeat these:\n"
+                    + covered.map { "· \($0)" }.joined(separator: "\n")
+            }
+
+            let raw: String
+            do {
+                raw = try await Self.ask(
+                    key: key,
+                    system: "You write interview questions and model answers. "
+                          + "You reply with JSON only.",
+                    user: user)
+            } catch {
+                // Keep whatever earlier rounds produced. A run that gets 16 of
+                // 40 through one bad response is worth more than one that
+                // throws all of it away.
+                break
+            }
+
+            var added = 0
+            for g in Self.parse(raw) where !seen.contains(g.q.lowercased()) {
+                seen.insert(g.q.lowercased())
+                out.append(g)
+                added += 1
+                if out.count >= want { break }
+            }
+            // A round that returns nothing new will not do better next time.
+            if added == 0 { break }
+        }
+        return Array(out.prefix(want))
     }
 
     // MARK: - Model call

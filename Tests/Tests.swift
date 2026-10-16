@@ -1467,6 +1467,131 @@ func testPrepGeneratorParsesWrappedJSON() throws {
     try assertTrue(PrepGenerator.parse("[broken").isEmpty, "unterminated")
 }
 
+/// One vector in, one vector out.
+///
+/// The bug this pins was two independent casts in the response reader: on
+/// Apple platforms a JSON `[Double]` also satisfies `as? [NSNumber]`, so every
+/// vector was appended a second time. The count check then failed on every
+/// bank, embedding never completed, and the live matcher had nothing to match
+/// against — so the entire prepared-answer path was dead while every test that
+/// did not touch the network passed.
+func testEmbeddingResponseYieldsOneVectorPerRow() throws {
+    // A row as JSONSerialization actually produces it.
+    let rows: [[String: Any]] = [
+        ["embedding": [0.1, 0.2, 0.3] as [Double]],
+        ["embedding": [0.4, 0.5, 0.6] as [Double]],
+        ["embedding": [0.7, 0.8, 0.9] as [Double]],
+    ]
+    let got = EmbeddingService.vectors(in: rows)
+    try assertEq(got.count, 3, "three rows give three vectors, not six")
+    try assertEq(got[1], [0.4, 0.5, 0.6], "and the right one is in the right place")
+
+    // A single row must not double either — that was the smallest case that
+    // still failed.
+    try assertEq(EmbeddingService.vectors(in: [["embedding": [1.0, 2.0] as [Double]]]).count, 1,
+                 "one row gives one vector")
+
+    // Rows that genuinely carry NSNumber still work.
+    let nsRows: [[String: Any]] = [["embedding": [1, 2, 3] as [NSNumber]]]
+    try assertEq(EmbeddingService.vectors(in: nsRows).count, 1,
+                 "an NSNumber row gives one vector")
+    try assertEq(EmbeddingService.vectors(in: nsRows).first ?? [], [1.0, 2.0, 3.0],
+                 "and keeps its values")
+
+    // A malformed row is skipped rather than crashing, and the count check
+    // upstream is what catches the shortfall.
+    try assertEq(EmbeddingService.vectors(in: [["embedding": "not a vector" as Any],
+                                              ["embedding": [1.0] as [Double]]]).count, 1,
+                 "a bad row is skipped")
+}
+
+/// A question bank from another tool has to come in whatever shape it
+/// arrives. The realistic input is a mock interview exported from a different
+/// AI, so every one of these is a format that tool has actually produced.
+func testPrepBankImporterReadsTheShapesRealToolsExport() throws {
+    // 1. Labelled lines, the most common export and the easiest to paste.
+    let labelled = """
+    Q: How would you structure the Centre of Excellence?
+    A: Federated hub and spoke, with the hub setting guardrails.
+
+    Q2: What happens after the engagement ends?
+    A: The CoE owns the standards, so teams extend the platform themselves.
+    """
+    let l = PrepBankImporter.parse(labelled)
+    try assertEq(l.format, .labelled, "recognised as labelled")
+    try assertEq(l.pairs.count, 2, "both questions found")
+    try assertTrue(l.pairs[0].question.contains("Centre of Excellence"), "q kept")
+    try assertTrue(l.pairs[0].answer.contains("Federated"), "a kept")
+    try assertEq(l.pairs[1].question, "What happens after the engagement ends?",
+                 "a numbered marker is stripped like a plain one")
+
+    // 2. Multi-line answers — the most common thing to get wrong, because a
+    //    naive reader treats every line as a new record.
+    let wrapped = """
+    Q: Walk me through the migration.
+    A: I started by inventorying every estate.
+    Then I grouped them by platform.
+    Finally I migrated in waves.
+    """
+    let w = PrepBankImporter.parse(wrapped)
+    try assertEq(w.pairs.count, 1, "a wrapped answer is one question, not three")
+    try assertTrue(w.pairs[0].answer.contains("waves"), "the last line survives")
+
+    // 3. JSON, using another model's key names.
+    let json = #"{"qa":[{"question":"Why Fabric?","answer":"Governance.","category":"fit"}]}"#
+    let j = PrepBankImporter.parse(json)
+    try assertEq(j.format, .json, "recognised as JSON")
+    try assertEq(j.pairs.count, 1, "wrapped JSON object read")
+    try assertEq(j.pairs[0].topic, "fit", "topic from `category`")
+
+    // 4. JSON with a bracket inside an answer.
+    let tricky = #"[{"q":"Indexing?","a":"Use [0] through [2], not [3]."}]"#
+    let t2 = PrepBankImporter.parse(tricky)
+    try assertEq(t2.pairs.count, 1, "brackets inside strings do not truncate")
+    try assertTrue(t2.pairs[0].answer.contains("[3]"), "answer intact")
+
+    // 5. Markdown headings.
+    let md = """
+    # Mock interview — Fabric CoE
+
+    ## How do you govern a shared platform?
+    I publish golden paths and enforce them with pipeline tests.
+
+    ## What is your biggest risk?
+    Adoption. I run office hours and track workspace activation weekly.
+    """
+    let m = PrepBankImporter.parse(md)
+    try assertEq(m.pairs.count, 2, "both markdown questions found")
+    try assertTrue(m.pairs[0].answer.contains("golden paths"), "first answer")
+    try assertTrue(m.pairs[1].question.contains("biggest risk"), "second question")
+
+    // 6. Prose transcript — the fallback, and the least certain, so it is only
+    //    reached when nothing better matched.
+    let prose = """
+    So, tell me about the Centre of Excellence you set up.
+
+    I ran a hub and spoke model with a central standards team.
+
+    And how did you handle adoption across legal entities?
+
+    Office hours, plus activation metrics per entity each week.
+    """
+    let pr = PrepBankImporter.parse(prose)
+    try assertEq(pr.format, .transcript, "falls back to transcript")
+    try assertEq(pr.pairs.count, 2, "alternating blocks become two pairs")
+    try assertTrue(pr.pairs[1].question.contains("adoption"), "second question kept")
+
+    // 7. A question with no answer is not importable — a blank slot in the
+    //    bank would match live and show nothing.
+    try assertEq(PrepBankImporter.parse("Q: Something").pairs.count, 0,
+                 "a question with no answer is dropped")
+
+    // 8. Empty and junk input fail quietly rather than throwing.
+    try assertEq(PrepBankImporter.parse("").pairs.count, 0, "empty is empty")
+    try assertEq(PrepBankImporter.parse("Just a note to self.").pairs.count, 0,
+                 "a single stray line yields nothing")
+}
+
 /// The parser must survive whatever shape the model actually replies in.
 ///
 /// This is a regression on real output, not a hypothetical: asked for
@@ -1934,6 +2059,8 @@ struct TestsMain {
         TestRunner.run("Bank is keyed by role not by posting", testBankIsKeyedByRoleNotByPosting)
         TestRunner.run("Bank records matches", testBankRecordsMatches)
         TestRunner.run("Missed questions are captured, not auto-banked", testMissedQuestionsAreCapturedNotAutoBanked)
+        TestRunner.run("Embedding response gives one vector per row", testEmbeddingResponseYieldsOneVectorPerRow)
+        TestRunner.run("Question bank importer reads real exports", testPrepBankImporterReadsTheShapesRealToolsExport)
         TestRunner.run("Prep parser accepts real model shapes", testPrepParserAcceptsRealModelShapes)
         TestRunner.run("Preparation failure is distinguishable", testPreparationFailureIsDistinguishableFromNeverStarting)
         TestRunner.run("Prep prompt has no collapsed whitespace", testPrepPromptHasNoCollapsedWhitespace)

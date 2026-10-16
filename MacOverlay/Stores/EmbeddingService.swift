@@ -36,6 +36,21 @@ enum EmbeddingService {
         return first
     }
 
+    /// Pulls the vectors out of an embeddings response.
+    ///
+    /// Split out so it can be tested, and because this is where a subtle bug
+    /// once lived: two independent casts (`as? [Double]` then `as? [NSNumber]`)
+    /// both succeed on Apple platforms, so every vector was appended twice and
+    /// the count check failed on every bank. Embedding therefore never
+    /// completed, and live matching could never run at all.
+    static func vectors(in rows: [[String: Any]]) -> [[Double]] {
+        rows.compactMap { row in
+            if let v = row["embedding"] as? [Double] { return v }
+            if let v = row["embedding"] as? [NSNumber] { return v.map(\.doubleValue) }
+            return nil
+        }
+    }
+
     /// Embeds a batch. The bank is embedded once when it is built, so this is
     /// called with tens of entries at a time and once per live question with
     /// a single entry.
@@ -71,10 +86,7 @@ enum EmbeddingService {
                   let rows = parsed["data"] as? [[String: Any]] else {
                 throw Failure(underlying: "unexpected response shape")
             }
-            for row in rows {
-                if let v = row["embedding"] as? [Double] { out.append(v) }
-                if let v = row["embedding"] as? [NSNumber] { out.append(v.map(\.doubleValue)) }
-            }
+            out.append(contentsOf: vectors(in: rows))
         }
         guard out.count == texts.count else {
             throw Failure(underlying: "got \(out.count) vectors for \(texts.count) inputs")
