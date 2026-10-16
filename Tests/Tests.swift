@@ -1440,6 +1440,49 @@ func testBankBackupPrunesOldSnapshots() throws {
                    "snapshots are capped at \(PrepBankBackup.keep)")
 }
 
+/// The generator's output arrives wrapped in prose or a fenced block often
+/// enough that assuming it is bare JSON would break real runs.
+@MainActor
+func testPrepGeneratorParsesWrappedJSON() throws {
+    let clean = #"[{"q":"Q1","a":"A1","topic":"cost"}]"#
+    try assertEq(PrepGenerator.parse(clean).count, 1, "bare JSON")
+
+    let wrapped = """
+    Sure! Here are your questions:
+    ```json
+    [{"q":"Q1","a":"A1","topic":"cost"},{"q":"Q2","a":"A2","topic":"capacity"}]
+    ```
+    Let me know if you want more.
+    """
+    let parsed = PrepGenerator.parse(wrapped)
+    try assertEq(parsed.count, 2, "fenced block recovered")
+    try assertEq(parsed.first?.q, "Q1")
+    try assertEq(parsed.last?.topic, "capacity")
+
+    // Garbage in must not produce phantom questions.
+    try assertTrue(PrepGenerator.parse("no json here").isEmpty, "prose only")
+    try assertTrue(PrepGenerator.parse("").isEmpty, "empty")
+    try assertTrue(PrepGenerator.parse("[broken").isEmpty, "unterminated")
+}
+
+/// Answers must never be invented when no background was supplied — the bank
+/// is meant to be things the user actually says.
+@MainActor
+func testPrepGeneratorWarnsWithoutBackground() throws {
+    // The prompt text is what enforces this; assert it says so explicitly.
+    let prompt = PrepGenerator.debugPrompt(role: "R", jd: String(repeating: "x", count: 60),
+                                           background: "", count: 10)
+    try assertTrue(prompt.lowercased().contains("do not invent"),
+                   "no-background prompt forbids invention")
+    try assertTrue(prompt.lowercased().contains("keep answers general"),
+                   "and says what to do instead")
+    let withBG = PrepGenerator.debugPrompt(role: "R", jd: String(repeating: "x", count: 60),
+                                           background: "I built X at Y", count: 10)
+    try assertTrue(withBG.contains("I built X at Y"), "background is passed through")
+    try assertFalse(withBG.lowercased().contains("no extra background"),
+                    "background replaces the warning")
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -1563,6 +1606,8 @@ struct TestsMain {
         TestRunner.run("Bank is keyed by role not by posting", testBankIsKeyedByRoleNotByPosting)
         TestRunner.run("Bank records matches", testBankRecordsMatches)
         TestRunner.run("Missed questions are captured, not auto-banked", testMissedQuestionsAreCapturedNotAutoBanked)
+        TestRunner.run("Prep generator parses wrapped JSON", testPrepGeneratorParsesWrappedJSON)
+        TestRunner.run("Prep generator warns without background", testPrepGeneratorWarnsWithoutBackground)
         TestRunner.run("Cosine similarity", testCosineSimilarity)
         TestRunner.run("Semantic ranking skips unembedded and gates on margin", testSemanticRankingSkipsUnembeddedAndGatesOnMargin)
         TestRunner.run("Bank backup snapshots and restores", testBankBackupSnapshotsAndRestores)

@@ -225,7 +225,7 @@ final class OpenRouterCatalog {
     /// How old the cache may get before the app refreshes it on its own.
     /// OpenRouter's free tier turns over constantly — models are added and
     /// retired — so a week-old snapshot lists models that no longer exist.
-    private static let staleAfter: TimeInterval = 24 * 60 * 60
+    nonisolated private static let staleAfter: TimeInterval = 24 * 60 * 60
 
     /// True when the catalogue is old enough to be worth refetching, or has
     /// never been fetched at all.

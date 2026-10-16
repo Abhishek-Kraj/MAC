@@ -106,6 +106,7 @@ private struct InterviewSetupForm: View {
                 autoGenerateRow
                 modelPickerRow
                 depthRow
+                PrepPanelView()
                 startRow
             }
             .padding(.horizontal, 22)
