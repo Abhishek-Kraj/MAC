@@ -292,6 +292,29 @@ struct PreferencesView: View {
                     .labelsHidden()
                     .frame(width: 160)
             }
+
+            // Shown instead of letting the macOS dialog reappear on every
+            // launch. `x-apple.systempreferences:` is the supported way to
+            // deep-link a Privacy pane.
+            if vm.needsScreenRecordingPermission {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Screen Recording is not granted.")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.orange)
+                    Text("Needed only to capture system audio — for example when the interviewer is on the other side of a Zoom call. Text answers work without it.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Link("Open Screen Recording settings",
+                         destination: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                        .font(.system(size: 10))
+                    if CGPreflightScreenCaptureAccess() {
+                        Text("Granted — this notice will disappear.")
+                            .font(.system(size: 10))
+                            .foregroundColor(.green)
+                    }
+                }
+            }
         }
 
         section(title: "Privacy") {

@@ -139,6 +139,11 @@ final class OverlayViewModel {
     var isSendingToAI  = false { didSet { scheduleBroadcast() } }
     var pendingQuickAction: QuickAction? = nil
     var pendingScreenshot: NSImage? = nil
+    /// True when Screen Recording is needed but has not been granted. The app
+    /// deliberately stops re-prompting once the user has had one chance, so
+    /// this surfaces the requirement in the UI instead of the system dialog
+    /// reappearing on every launch.
+    var needsScreenRecordingPermission = false
     /// File attachments queued for the next outgoing message. The full
     /// extracted text is sent to the AI as part of the prompt, but only
     /// the file names are stored on the user's `ChatTurn` — keeps the

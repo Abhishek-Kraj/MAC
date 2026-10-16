@@ -229,11 +229,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        // Pre-warm Screen Recording permission so the dialog appears at launch,
-        // not mid-session when the user first tries to record system audio.
-        Task {
-            _ = try? await SCShareableContent.current
-        }
+        // Screen Recording permission for system-audio capture. This used to
+        // call `SCShareableContent.current` unconditionally at every launch
+        // "to pre-warm the dialog". If the user had not granted it, macOS
+        // showed the system prompt again on every single start, which read
+        // as the app nagging — and could not be dismissed permanently.
+        //
+        // Now: ask once, and if it is not granted afterwards, stop asking and
+        // point at System Settings from inside the app instead.
+        Task { await prewarmScreenRecordingIfNeeded() }
 
         // Accessibility permission is needed for Option-key dictation, which
         // pastes into the active app. We DON'T prompt at launch — the system
@@ -1068,6 +1072,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showOverlay()
         return false
+    }
+
+    /// Triggers the Screen Recording prompt at most once per install.
+    ///
+    /// `CGPreflightScreenCaptureAccess` answers without prompting, so a
+    /// granted permission short-circuits and the system dialog never appears
+    /// again. Once we have asked and the answer is still "not granted", we
+    /// stop: the user has the row in System Settings → Privacy & Security →
+    /// Screen Recording, and re-asking every launch does not help.
+    private func prewarmScreenRecordingIfNeeded() async {
+        guard !CGPreflightScreenCaptureAccess() else { return }
+
+        let askedKey = "screenRecording.promptedOnce"
+        guard !UserDefaults.standard.bool(forKey: askedKey) else {
+            // Already asked and still not granted — don't nag.
+            await MainActor.run { self.vm.needsScreenRecordingPermission = true }
+            return
+        }
+        UserDefaults.standard.set(true, forKey: askedKey)
+        await MainActor.run { self.vm.needsScreenRecordingPermission = true }
+        _ = try? await SCShareableContent.current
     }
 
     private func startInterviewFromCallPrompt() {
