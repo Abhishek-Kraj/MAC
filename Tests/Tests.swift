@@ -595,6 +595,122 @@ func testProScreenshotsAreShrunk() throws {
     try assertTrue(encoded.utf8.count < 4_000_000)
 }
 
+
+// MARK: - OpenRouter model catalogue
+
+/// A bare slug gets the app's routing prefix and a derived provider.
+func testOpenRouterModelFromSlug() throws {
+    let m = OpenRouterModel.make(slug: "qwen/qwen3-235b")
+    try assertEq(m.id, "openrouter/qwen/qwen3-235b")
+    try assertEq(m.provider, "Qwen")
+    try assertFalse(m.isFree, "not a free-tier id")
+}
+
+/// Free tier is detected from the `:free` suffix OpenRouter appends.
+func testOpenRouterFreeTierDetection() throws {
+    try assertTrue(OpenRouterModel.make(slug: "qwen/qwen3-235b:free").isFree)
+    try assertFalse(OpenRouterModel.make(slug: "qwen/qwen3-235b").isFree)
+}
+
+/// An id that already carries the prefix is not double-prefixed.
+func testOpenRouterModelIdempotentPrefix() throws {
+    let once = OpenRouterModel.make(slug: "meta/llama-3.3-70b:free")
+    let twice = OpenRouterModel.make(slug: once.id)
+    try assertEq(twice.id, once.id)
+    try assertEq(twice.id, "openrouter/meta/llama-3.3-70b:free")
+}
+
+/// Display names are humanised: slug tail dropped, words title-cased.
+func testOpenRouterDisplayName() throws {
+    try assertEq(OpenRouterModel.displayName(for: "qwen/qwen3-235b"), "Qwen3 235B")
+    try assertEq(OpenRouterModel.displayName(for: "qwen/qwen3-235b:free"), "Qwen3 235B (free)")
+    try assertEq(OpenRouterModel.displayName(for: "google/gemini-3.8-flash"), "Gemini 3.8 Flash")
+    try assertEq(OpenRouterModel.displayName(for: "openai/gpt-5.5"), "GPT 5.5", "acronym stays upper")
+    try assertEq(OpenRouterModel.displayName(for: "meta/llama-3.3-70b"), "Llama 3.3 70B", "unit suffix upper")
+}
+
+/// Known vendor folders map to readable names; unknown ones fall back to the
+/// folder title-cased rather than being dropped.
+func testOpenRouterProviderMapping() throws {
+    try assertEq(OpenRouterModel.provider(fromSlug: "anthropic/claude-sonnet-5"), "Anthropic")
+    try assertEq(OpenRouterModel.provider(fromSlug: "moonshotai/kimi-k2.6"), "Kimi")
+    try assertEq(OpenRouterModel.provider(fromSlug: "x-ai/grok-4.7"), "xAI")
+    try assertEq(OpenRouterModel.provider(fromSlug: "somevendor/some-model"), "Somevendor")
+}
+
+/// Merged order is custom > built-ins > fetched, de-duplicated by id with the
+/// earliest definition winning — so a hand-added model is never shadowed by a
+/// fetched copy of the same id.
+func testOpenRouterMergedOrderAndDedup() throws {
+    let custom = [OpenRouterModel.make(slug: "me/custom", name: "Custom")]
+    let fetched = [OpenRouterModel.make(slug: "vendor/new"), custom[0]]
+    let merged = OpenRouterCatalog.merged(custom: custom, fetched: fetched)
+    try assertEq(merged.count, custom.count + OpenRouterCatalog.builtins.count + 1,
+                 "custom + builtins + one new fetched, custom not duplicated")
+    try assertEq(merged[0].id, custom[0].id, "custom first")
+    try assertEq(merged[0].name, "Custom", "custom entry wins over its fetched twin")
+    let ids = Set(merged.map(\.id))
+    try assertEq(ids.count, merged.count, "no duplicate ids")
+}
+
+/// The built-in defaults must survive into the merged catalogue, because
+/// `defaultModel` and `utilityModel` point at two of them and the picker has
+/// to resolve them before any fetch has happened.
+func testOpenRouterBuiltinsCoverDefaults() throws {
+    let ids = Set(OpenRouterCatalog.builtins.map(\.id))
+    try assertTrue(ids.contains(OpenRouterDefaults.defaultModel), "defaultModel is built in")
+    try assertTrue(ids.contains(OpenRouterDefaults.utilityModel), "utilityModel is built in")
+}
+
+/// OpenRouter's payload shape, pinned by a fixture so a change in the app's
+/// decoding can't silently ship against a stale assumption. The live endpoint
+/// was verified to return 465 models, 15 of them `:free`.
+func testOpenRouterDecodesLivePayloadShape() throws {
+    let json = """
+    {"data":[
+      {"id":"qwen/qwen3-235b:free","name":"Qwen3 235B (free)","context_length":65536,
+       "architecture":{"input_modalities":["text"]}},
+      {"id":"nvidia/nemotron-3.5-super-vl:free","name":"NVIDIA: Nemotron (free)","context_length":1000000,
+       "architecture":{"input_modalities":["text","image","video"]}},
+      {"id":"somevendor/plain","name":"Plain","context_length":1024,
+       "architecture":{"input_modalities":["text"]}}
+    ]}
+    """
+    let models = try OpenRouterCatalog.decode(Data(json.utf8))
+    try assertEq(models.count, 3, "all three decoded")
+    try assertTrue(models.allSatisfy { $0.id.hasPrefix("openrouter/") }, "prefix applied")
+
+    func byID(_ id: String) throws -> OpenRouterModel {
+        try models.first { $0.id == "openrouter/\(id)" }.unwrap("missing \(id)")
+    }
+
+    let qwen = try byID("qwen/qwen3-235b:free")
+    try assertTrue(qwen.isFree, ":free detected")
+    try assertFalse(qwen.supportsImages, "text-only modality")
+    try assertEq(qwen.contextLength, 65536, "context_length decoded")
+
+    let nemo = try byID("nvidia/nemotron-3.5-super-vl:free")
+    try assertTrue(nemo.isFree, "second :free detected")
+    try assertTrue(nemo.supportsImages, "image modality detected")
+    try assertEq(nemo.contextLength, 1000000, "context_length decoded")
+    try assertEq(nemo.provider, "NVIDIA", "vendor mapped")
+
+    // The decode sorts by display name so the picker reads alphabetically.
+    // "NVIDIA:..." < "Plain" < "Qwen3..." case-insensitively.
+    try assertEq(models.map(\.name), ["NVIDIA: Nemotron (free)", "Plain", "Qwen3 235B (free)"],
+                 "sorted by name")
+}
+
+/// A model with no `architecture` block must not crash the decode — it is
+/// treated as text-only rather than assumed to read images.
+func testOpenRouterDecodeToleratesMissingArchitecture() throws {
+    let json = #"{"data":[{"id":"x/y","name":"Y","context_length":8}]}"#
+    let models = try OpenRouterCatalog.decode(Data(json.utf8))
+    try assertEq(models.count, 1)
+    try assertFalse(models[0].supportsImages, "no architecture means no image support")
+    try assertFalse(models[0].isFree, "not free")
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -687,6 +803,15 @@ struct TestsMain {
         TestRunner.run("Pro fingerprint matches the server's formula", testProFingerprint)
         TestRunner.run("Pro usage decodes from the server", testProUsageFromServer)
         TestRunner.run("Pro limits the model pickers to the plan", testProLimitsModelPickers)
+        TestRunner.run("OpenRouter model from slug", testOpenRouterModelFromSlug)
+        TestRunner.run("OpenRouter free tier detection", testOpenRouterFreeTierDetection)
+        TestRunner.run("OpenRouter prefix is idempotent", testOpenRouterModelIdempotentPrefix)
+        TestRunner.run("OpenRouter display name", testOpenRouterDisplayName)
+        TestRunner.run("OpenRouter provider mapping", testOpenRouterProviderMapping)
+        TestRunner.run("OpenRouter merged order and dedup", testOpenRouterMergedOrderAndDedup)
+        TestRunner.run("OpenRouter builtins cover the defaults", testOpenRouterBuiltinsCoverDefaults)
+        TestRunner.run("OpenRouter decodes live payload shape", testOpenRouterDecodesLivePayloadShape)
+        TestRunner.run("OpenRouter decode tolerates missing architecture", testOpenRouterDecodeToleratesMissingArchitecture)
         TestRunner.run("Pro screenshots are shrunk to fit the server", testProScreenshotsAreShrunk)
         TestRunner.run("Grok stream URL", testGrokStreamURL)
         TestRunner.run("Grok stitches an utterance from its chunks", testGrokStitchesAnUtterance)

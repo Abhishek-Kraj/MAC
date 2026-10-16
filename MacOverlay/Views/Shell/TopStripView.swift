@@ -225,8 +225,25 @@ struct TopStripView: View {
                                 Button {
                                     vm.selectedModel = m.id
                                 } label: {
-                                    HStack {
+                                    HStack(spacing: 5) {
                                         Text(m.name)
+                                        // Cheap-tier marker. Screenshot sends
+                                        // (⌘⇧⏎) only work on models whose
+                                        // input modalities include images.
+                                        if m.isFree {
+                                            Text("FREE")
+                                                .font(.system(size: 8, weight: .bold))
+                                                .padding(.horizontal, 3)
+                                                .padding(.vertical, 1)
+                                                .background(Color.green.opacity(0.22))
+                                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                        }
+                                        if m.supportsImages {
+                                            Image(systemName: "camera")
+                                                .font(.system(size: 8))
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer(minLength: 0)
                                         if vm.selectedModel == m.id {
                                             Image(systemName: "checkmark")
                                         }

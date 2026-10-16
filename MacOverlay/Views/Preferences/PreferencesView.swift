@@ -8,6 +8,13 @@ struct PreferencesView: View {
     @State private var tab: Tab = .general
     @State private var showNewWorkspaceSheet = false
     @State private var isSidebarCollapsed = true
+    // Model catalogue filters (AI tab). The OpenRouter catalogue runs to
+    // several hundred entries, so this list needs narrowing controls or it
+    // is unusable.
+    @State private var modelSearch = ""
+    @State private var freeOnly = false
+    @State private var imageOnly = false
+    @State private var customModelDraft = ""
     @AppStorage(KeywordStyle.defaultsKey) private var keywordStyle = KeywordStyle.standard
 
     enum Tab: String, CaseIterable, Identifiable {
@@ -619,21 +626,55 @@ struct PreferencesView: View {
         return components.url!
     }
 
-    /// Per-provider grid of model toggles, used by the AI tab. Reads
-    /// directly from `OverlayViewModel.availableModels` so adding a new
-    /// model to the catalogue auto-surfaces it here without a settings
-    /// migration. Each toggle flips its id in `ModelVisibility`.
+    /// Catalogue of every model the app can reach, grouped by provider.
+    ///
+    /// Before this existed the list was a hardcoded eleven entries and there
+    /// was no way to add another — the OpenRouter `:free` tier was
+    /// unreachable. Now it is the union of the built-in defaults, whatever
+    /// has been fetched from OpenRouter, and any model typed in by hand, with
+    /// search and filters so several hundred rows stay navigable.
     @ViewBuilder
     private var modelCatalog: some View {
+        let catalog = OpenRouterCatalog.shared
         let visibility = ModelVisibility.shared
-        // On Pro, only the plan's models.
+
+        let query = modelSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let matches: (OpenRouterModel) -> Bool = { m in
+            guard visibility.isAllowed(m.id) else { return false }
+            if freeOnly && !m.isFree { return false }
+            if imageOnly && !m.supportsImages { return false }
+            guard !query.isEmpty else { return true }
+            return m.name.lowercased().contains(query)
+                || m.id.lowercased().contains(query)
+                || m.provider.lowercased().contains(query)
+        }
+
+        let filtered = OverlayViewModel.availableModels.filter(matches)
         let allIDs = OverlayViewModel.availableModels.map(\.id).filter(visibility.isAllowed)
-        let providers = OverlayViewModel.modelProviders
+        let providers = filtered.reduce(into: [String]()) { g, m in
+            if !g.contains(m.provider) { g.append(m.provider) }
+        }
 
         VStack(alignment: .leading, spacing: 12) {
+            catalogueToolbar(catalog: catalog)
+
+            if let error = catalog.lastError {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
+            }
+
+            if filtered.isEmpty {
+                Text(query.isEmpty && !freeOnly && !imageOnly
+                     ? "No models available."
+                     : "No models match these filters.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .padding(.vertical, 8)
+            }
+
             ForEach(providers, id: \.self) { provider in
-                let models = OverlayViewModel.availableModels
-                    .filter { $0.provider == provider && visibility.isAllowed($0.id) }
+                let models = filtered.filter { $0.provider == provider }
                 if !models.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(provider)
@@ -643,8 +684,7 @@ struct PreferencesView: View {
                             .kerning(0.4)
                         VStack(spacing: 1) {
                             ForEach(models, id: \.id) { m in
-                                modelToggleRow(id: m.id, name: m.name,
-                                               visibility: visibility,
+                                modelToggleRow(model: m, visibility: visibility,
                                                allIDs: allIDs)
                             }
                         }
@@ -659,6 +699,115 @@ struct PreferencesView: View {
                     .disabled(visibility.hidden.isEmpty)
             }
         }
+    }
+
+    /// Fetch / add-custom / search controls above the model list.
+    private func catalogueToolbar(catalog: OpenRouterCatalog) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button {
+                    Task { await catalog.fetchCatalogue() }
+                } label: {
+                    if catalog.isFetching {
+                        Text("Fetching…").font(.system(size: 12))
+                    } else if catalog.fetched.isEmpty {
+                        Text("Fetch OpenRouter models").font(.system(size: 12))
+                    } else {
+                        Text("Refresh (\(catalog.fetched.count))").font(.system(size: 12))
+                    }
+                }
+                .buttonStyle(.secondaryCompact)
+                .disabled(catalog.isFetching)
+
+                if catalog.freeCount > 0 {
+                    Text("\(catalog.freeCount) free")
+                        .font(.system(size: 11))
+                        .foregroundColor(.green)
+                }
+
+                Spacer()
+            }
+
+            // Hand-added model. Accepts a bare OpenRouter slug; the
+            // "openrouter/" prefix is added for you.
+            HStack(spacing: 6) {
+                TextField("Add model id, e.g. qwen/qwen3-235b:free",
+                          text: $customModelDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11, design: .monospaced))
+                    .onSubmit(addCustomModel)
+                Button("Add", action: addCustomModel)
+                    .buttonStyle(.secondaryCompact)
+                    .disabled(customModelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            HStack(spacing: 8) {
+                TextField("Search models", text: $modelSearch)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11))
+                Toggle("Free only", isOn: $freeOnly)
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 11))
+                Toggle("Images", isOn: $imageOnly)
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 11))
+                    .help("Only models that accept image input, so ⌘⇧⏎ screenshots work")
+            }
+        }
+    }
+
+    private func addCustomModel() {
+        let draft = customModelDraft
+        if OpenRouterCatalog.shared.addCustom(slug: draft) {
+            customModelDraft = ""
+        }
+    }
+
+    private func modelToggleRow(model: OpenRouterModel, visibility: ModelVisibility,
+                                allIDs: [String]) -> some View {
+        let id = model.id
+        let on = visibility.isVisible(id)
+        // The picker has to render at least one option, so we can't let the
+        // user hide the last visible model. Disable the row instead of
+        // letting the click silently no-op.
+        let isLast = visibility.isOnlyVisible(id, allModelIDs: allIDs)
+        return Button {
+            visibility.toggle(id, allModelIDs: allIDs)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13))
+                    .foregroundColor(on ? .accentColor : .secondary.opacity(0.5))
+                Text(model.name)
+                    .font(.system(size: 12))
+                    .foregroundColor(.primary)
+                if model.isFree {
+                    Text("FREE")
+                        .font(.system(size: 8, weight: .bold))
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 1)
+                        .background(Color.green.opacity(0.22))
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+                if model.supportsImages {
+                    Image(systemName: "camera")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary.opacity(0.7))
+                }
+                Spacer()
+                Text(id)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .opacity(isLast ? 0.5 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .disabled(isLast)
+        .help(isLast ? "At least one model must remain visible"
+              : model.supportsImages ? model.id : model.id + " — text only, no screenshots")
     }
 
     private func modelToggleRow(id: String, name: String,

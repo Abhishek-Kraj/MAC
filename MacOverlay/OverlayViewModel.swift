@@ -11,40 +11,32 @@ import UniformTypeIdentifiers
 final class OverlayViewModel {
 
     // MARK: - Model catalogue
-    /// Full catalogue of models the app can route requests to. The model
-    /// picker filters this list against `ModelVisibility.shared` so users
-    /// can hide models they don't use without losing them — flipping the
-    /// switch in Settings → AI brings any of them back instantly.
-    /// Routing: ids prefixed `gpt-` / `o1` / `o3` / `o4` go through the
-    /// OpenAI path; ids prefixed `kimi` / `moonshot-` go through the Moonshot
-    /// (Kimi) path; everything else goes to Anthropic. See `AIManager`.
-    /// Every model goes through OpenRouter, so one OpenRouter key covers
-    /// the whole list. Ids are "openrouter/<openrouter-model-id>"; the third
-    /// field only groups the picker. Only models that accept images are
-    /// listed, so screenshot sends (⌘⇧⏎) work with any of them.
-    static let availableModels: [(id: String, name: String, provider: String)] = [
-        ("openrouter/anthropic/claude-sonnet-5",   "Claude Sonnet 5",       "Anthropic"),
-        ("openrouter/anthropic/claude-opus-5.5",   "Claude Opus 5.5",       "Anthropic"),
-        ("openrouter/anthropic/claude-fable-5.1",  "Claude Fable 5.1",      "Anthropic"),
-        ("openrouter/anthropic/claude-haiku-4.5",  "Claude Haiku 4.5",      "Anthropic"),
-        ("openrouter/openai/gpt-5.5",              "GPT-5.5",               "OpenAI"),
-        ("openrouter/openai/gpt-5.4-mini",         "GPT-5.4 mini",          "OpenAI"),
-        ("openrouter/google/gemini-3.8-flash",     "Gemini 3.8 Flash",      "Google"),
-        ("openrouter/google/gemini-3.5-flash-lite","Gemini 3.5 Flash Lite", "Google"),
-        ("openrouter/x-ai/grok-4.7",               "Grok 4.7",              "xAI"),
-        ("openrouter/meta/muse-spark-1.3",         "Muse Spark 1.3",        "Meta"),
-        ("openrouter/moonshotai/kimi-k2.6",        "Kimi K2.6",             "Kimi"),
-    ]
+    /// Every model the app can route requests to: hand-added models, the
+    /// built-in defaults, and whatever has been fetched from the OpenRouter
+    /// catalogue. See `OpenRouterCatalog`.
+    ///
+    /// Routing is by prefix, not by this list — `AIManager.isOpenRouterModel`
+    /// accepts any `openrouter/`-prefixed id, so every OpenRouter model is
+    /// reachable, including the `:free` tier the old hardcoded list of eleven
+    /// models left out entirely.
+    ///
+    /// Ids are "openrouter/<openrouter-model-id>". `provider` only groups the
+    /// picker. Image support is tracked per model so a screenshot send
+    /// (⌘⇧⏎) can refuse a model that cannot read images, rather than the
+    /// whole catalogue being filtered down to image-capable models.
+    static var availableModels: [OpenRouterModel] { OpenRouterCatalog.shared.allModels }
 
-    static let defaultModel = "openrouter/anthropic/claude-sonnet-5"
+    static let defaultModel = OpenRouterDefaults.defaultModel
 
     /// Small fast model for background jobs (the response gate, session
     /// titles). Reached through OpenRouter like everything else.
-    static let utilityModel = "openrouter/anthropic/claude-haiku-4.5"
+    static let utilityModel = OpenRouterDefaults.utilityModel
 
     /// Picker groups, in catalogue order.
-    static let modelProviders: [String] = availableModels.reduce(into: []) { groups, model in
-        if !groups.contains(model.provider) { groups.append(model.provider) }
+    static var modelProviders: [String] {
+        availableModels.reduce(into: []) { groups, model in
+            if !groups.contains(model.provider) { groups.append(model.provider) }
+        }
     }
 
     // MARK: - Session
@@ -1738,7 +1730,18 @@ final class OverlayViewModel {
 
         if !showManualInput { transcription = "" }
 
-        let snapshot = pendingScreenshot
+        // A model whose input modalities exclude images cannot be sent a
+        // screenshot. Drop the image and say so, rather than letting the
+        // provider reject the entire request — the typed prompt still goes
+        // through, so the user isn't left with nothing.
+        var snapshot = pendingScreenshot
+        if snapshot != nil,
+           !OpenRouterCatalog.shared.supportsImages(selectedModel) {
+            let name = OpenRouterCatalog.shared.model(id: selectedModel)?.name
+                ?? selectedModel
+            snapshot = nil
+            statusMessage = "Error: \(name) is text-only — sent without the screenshot. Pick a model with the camera badge to include images."
+        }
         pendingQuickAction = nil
         if showManualInput { manualInput = "" }
         pendingScreenshot = nil

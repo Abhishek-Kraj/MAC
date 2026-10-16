@@ -62,6 +62,19 @@ final class ModelVisibility {
     /// Settings.
     func showAll() { hidden.removeAll() }
 
+    /// Hide a model outside the normal toggle flow — used when the OpenRouter
+    /// catalogue is fetched and its several hundred entries need to stay out
+    /// of the picker menu until the user opts into them.
+    func hide(_ id: String) { hidden.insert(id) }
+
+    /// Force a model visible, clearing both the hidden set and any Pro
+    /// allow-list. Used for hand-added models, which the user picked
+    /// deliberately and so should never be filtered out from under them.
+    func show(_ id: String) {
+        hidden.remove(id)
+        if var allowed { allowed.insert(id); self.allowed = allowed }
+    }
+
     private func persist() {
         UserDefaults.standard.set(Array(hidden), forKey: Self.storageKey)
     }
