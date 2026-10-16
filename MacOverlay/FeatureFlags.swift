@@ -38,6 +38,17 @@ enum FeatureFlags {
     /// plans as coming soon (the tester code still works).
     static let proSubscriptionsEnabled = true
 
+    /// Remove the paid tier from the interface entirely — no plan cards, no
+    /// price, no "coming soon" teaser, no upgrade or manage-subscription
+    /// buttons. Bring-your-own-keys becomes the only path.
+    ///
+    /// This hides the *UI* only. `ProAccount` keeps working unchanged, so a
+    /// Mac that already has a subscription (or a tester code) still gets Pro
+    /// behaviour with no keys; there is simply no way to buy from the app.
+    /// Set `proSubscriptionsEnabled = false` as well if you want the plans
+    /// gone *and* the Stripe checkout unreachable from the codebase.
+    static let proHiddenFromUI = true
+
     // MARK: - Off in every build while v1 focuses on the interview helper
 
     /// Quick Ask: hold Fn/🌐 (or ⌃⌥Q) to ask by voice, plus its Preferences

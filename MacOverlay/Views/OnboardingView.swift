@@ -38,19 +38,19 @@ struct OnboardingView: View {
     #endif
 
     enum Step {
-        case welcome, choose, keys, plans
+        case welcome, choose, keys
 
         /// Position in the three-dot progress indicator.
         var dot: Int {
             switch self {
-            case .welcome:     return 0
-            case .choose:      return 1
-            case .keys, .plans: return 2
+            case .welcome: return 0
+            case .choose:  return 1
+            case .keys:    return 2
             }
         }
     }
 
-    enum Path { case ownKeys, managed }
+    enum Path { case ownKeys }
 
     var body: some View {
         @Bindable var vm = vm
@@ -60,7 +60,6 @@ struct OnboardingView: View {
                 case .welcome: WelcomeStep()
                 case .choose:  ChooseStep(path: $path)
                 case .keys:    KeyStep(openRouter: $vm.openRouterAPIKey, elevenLabs: $vm.elevenLabsAPIKey, xai: $vm.grokAPIKey)
-                case .plans:   PlansStep()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -104,17 +103,10 @@ struct OnboardingView: View {
                     .buttonStyle(.secondary)
             }
 
-            // On the plans step, Subscribe is the main action, so the way
-            // out ("Use my own keys") is the quieter button.
-            if step == .plans && FeatureFlags.proSubscriptionsEnabled && !ProAccount.shared.isActive {
-                Button(primaryLabel) { advance() }
-                    .buttonStyle(.secondary)
-            } else {
-                Button(primaryLabel) { advance() }
-                    .buttonStyle(.primary)
-                    .disabled(step == .choose && path == nil)
-                    .keyboardShortcut(.defaultAction)
-            }
+            Button(primaryLabel) { advance() }
+                .buttonStyle(.primary)
+                .disabled(step == .choose && path == nil)
+                .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
@@ -124,7 +116,7 @@ struct OnboardingView: View {
     private var previousStep: Step {
         switch step {
         case .welcome, .choose: return .welcome
-        case .keys, .plans:     return .choose
+        case .keys:             return .choose
         }
     }
 
@@ -133,16 +125,14 @@ struct OnboardingView: View {
         case .welcome: return "Get Started"
         case .choose:  return "Continue"
         case .keys:    return vm.missingRequiredKeys.isEmpty ? "Done" : "Skip for now"
-        case .plans:   return ProAccount.shared.isActive ? "Done" : "Use my own keys"
         }
     }
 
     private func advance() {
         switch step {
         case .welcome: go(to: .choose)
-        case .choose:  go(to: path == .managed ? .plans : .keys)
+        case .choose:  go(to: .keys)
         case .keys:    finish()
-        case .plans:   ProAccount.shared.isActive ? finish() : go(to: .keys)
         }
     }
 
@@ -240,19 +230,13 @@ private struct ChooseStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             StepHeader(title: "How do you want to use it?",
-                       subtitle: "You can switch later in Settings.")
+                       subtitle: "You can change your keys any time in Settings.")
 
             ChoiceCard(icon: "key.fill",
                        title: "Bring your own keys",
                        badge: "Free",
                        detail: "Use your own OpenRouter and ElevenLabs keys. You pay them directly for what you use.",
                        selected: path == .ownKeys) { path = .ownKeys }
-
-            ChoiceCard(icon: "sparkles",
-                       title: "We handle everything",
-                       badge: FeatureFlags.proSubscriptionsEnabled ? "Pro" : "Coming soon",
-                       detail: "No keys, no setup. Top models and transcription, managed for you. From $19/month.",
-                       selected: path == .managed) { path = .managed }
 
             Spacer(minLength: 0)
         }
@@ -393,52 +377,6 @@ private struct KeyInput: View {
                 .buttonStyle(.plain)
             }
         }
-    }
-}
-
-// MARK: - Step 3b · Plans (we handle everything)
-
-private struct PlansStep: View {
-    var body: some View {
-        let account = ProAccount.shared
-        VStack(alignment: .leading, spacing: 12) {
-            if let plan = account.plan {
-                StepHeader(title: account.isTester ? "You have tester access" : "You're on \(plan.name)",
-                           subtitle: account.isTester
-                               ? "No keys needed. The test budget is shared by all testers."
-                               : "No keys needed. You're ready for your next interview.")
-                ProPlanCard(plan: plan, isCurrent: true)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if FeatureFlags.proSubscriptionsEnabled {
-                StepHeader(title: "We handle everything",
-                           subtitle: "Checkout opens in your browser. The app switches over once it's paid.")
-                ProPlanPicker()
-            } else {
-                StepHeader(title: "We handle everything",
-                           subtitle: "Coming soon. Until then, it's free with your own keys.")
-
-                HStack(alignment: .top, spacing: 10) {
-                    ForEach(ProAccount.Plan.allCases) { ProPlanCard(plan: $0) }
-                }
-                .fixedSize(horizontal: false, vertical: true)
-
-                Link(destination: proInterestURL) {
-                    Text("I'm interested. Tell me when it launches →")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Design.Accent.brand)
-                }
-
-                TesterCodeEntry()
-                if let problem = account.problem {
-                    Text(problem)
-                        .font(.system(size: 11))
-                        .foregroundColor(Design.Accent.amber)
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(24)
     }
 }
 

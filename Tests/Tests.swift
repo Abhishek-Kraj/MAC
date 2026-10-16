@@ -711,6 +711,38 @@ func testOpenRouterDecodeToleratesMissingArchitecture() throws {
     try assertFalse(models[0].isFree, "not free")
 }
 
+/// Regression guard for `FeatureFlags.proHiddenFromUI`: the paid tier must
+/// not reappear in the interface. Scans the view layer for the strings that
+/// used to ship it — plan cards, prices, upgrade buttons.
+///
+/// The only legitimate hits are inside the already-subscribed branch, which
+/// a non-subscriber can never reach, so those files are allowed to mention
+/// "Upgrade"/"Pro Max" only inside a `if let plan = pro.plan` block. This
+/// test asserts the *entry points* are gone instead, which is what actually
+/// decides whether a user ever sees a paywall.
+func testProHiddenFromUIRemovesEntryPoints() throws {
+    let root = URL(fileURLWithPath: #filePath)      // Tests/Tests.swift
+        .deletingLastPathComponent()                 // Tests/
+        .deletingLastPathComponent()                 // repo root
+    let views = root.appending(path: "MacOverlay/Views")
+    let onboarding = root.appending(path: "MacOverlay/Views/OnboardingView.swift")
+
+    // The two views that used to host the paywall.
+    let prefs = try String(contentsOf: views.appending(path: "Preferences/PreferencesView.swift"), encoding: .utf8)
+    try assertFalse(prefs.contains("ProPlanPicker"), "no plan picker in Settings")
+    try assertFalse(prefs.contains("TesterCodeEntry"), "no tester-code entry in Settings")
+
+    let onb = try String(contentsOf: onboarding, encoding: .utf8)
+    try assertFalse(onb.contains("We handle everything"), "no managed-tier choice in onboarding")
+    try assertFalse(onb.contains("PlansStep"), "no plans step in onboarding")
+    try assertFalse(onb.contains("$19/month"), "no price in onboarding")
+    try assertFalse(onb.contains("ProPlanPicker"), "no plan picker in onboarding")
+
+    // The paid path must be unreachable from the step machine.
+    try assertFalse(onb.contains(".managed"), "no managed path")
+    try assertFalse(onb.contains(".plans"), "no plans step")
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -812,6 +844,7 @@ struct TestsMain {
         TestRunner.run("OpenRouter builtins cover the defaults", testOpenRouterBuiltinsCoverDefaults)
         TestRunner.run("OpenRouter decodes live payload shape", testOpenRouterDecodesLivePayloadShape)
         TestRunner.run("OpenRouter decode tolerates missing architecture", testOpenRouterDecodeToleratesMissingArchitecture)
+        TestRunner.run("Pro is hidden from the UI", testProHiddenFromUIRemovesEntryPoints)
         TestRunner.run("Pro screenshots are shrunk to fit the server", testProScreenshotsAreShrunk)
         TestRunner.run("Grok stream URL", testGrokStreamURL)
         TestRunner.run("Grok stitches an utterance from its chunks", testGrokStitchesAnUtterance)

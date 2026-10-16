@@ -511,22 +511,6 @@ struct PreferencesView: View {
                 }
             }
             .task { await pro.refreshUsage() }
-        } else if FeatureFlags.proSubscriptionsEnabled {
-            section(title: "TheCloser Pro",
-                    subtitle: "No keys: we run the models and transcription.") {
-                ProPlanPicker()
-            }
-        } else {
-            // Production: no Subscribe yet, but a tester code works.
-            section(title: "TheCloser Pro",
-                    subtitle: "Coming soon: no keys, with the models and transcription included.") {
-                TesterCodeEntry()
-                if let problem = pro.problem {
-                    Text(problem)
-                        .font(.system(size: 10))
-                        .foregroundColor(.orange)
-                }
-            }
         }
 
         section(title: "Model picker",
