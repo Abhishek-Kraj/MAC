@@ -1674,6 +1674,55 @@ func testLongAnswersGetASpeakableFormAndTheOriginalIsKept() throws {
     try assertEq(back.answer.count, 9_000, "with the original intact")
 }
 
+/// Coverage, judged by risk rather than by scanning prose for "None".
+///
+/// The model says "well covered" as readily as it says "None", so classifying
+/// on the word marked all nine areas of a real posting as gaps. The risk score
+/// is the model's own verdict and is what the sheet should trust.
+@MainActor
+func testGapClassificationUsesRiskNotProse() throws {
+    let covered = GapAnalyser.Gap(area: "Capacity planning", priority: "Essential",
+                                  covered: ["a", "b"], gap: "This area is well covered.",
+                                  risk: 0)
+    let thin = GapAnalyser.Gap(area: "Semantic models", priority: "Essential",
+                               covered: ["c"], gap: "DAX depth not explored.", risk: 1)
+    let urgent = GapAnalyser.Gap(area: "Data quality and lineage", priority: "Essential",
+                                 covered: [], gap: "Not covered at all.", risk: 3)
+
+    try assertTrue(covered.isCovered, "risk 0 is covered even when it says 'well covered'")
+    try assertFalse(thin.isCovered, "risk 1 is not")
+    try assertFalse(urgent.isCovered, "risk 3 is not")
+
+    let report = GapAnalyser.Report(gaps: [covered, thin, urgent])
+    try assertEq(report.needsWork.count, 2, "two areas need work")
+    try assertEq(report.needsWork.first?.area, "Data quality and lineage",
+                 "worst first, so the sheet leads with what costs the interview")
+    try assertEq(report.solid.count, 1, "and one is solid")
+
+    // `covered` is counted locally, never asked of the model — the model was
+    // given the questions and returns prose, and prose cannot say "you have
+    // three questions on this".
+    let bank = [
+        PrepQuestion(question: "How do you build a cost chargeback model?",
+                     answer: "", bankID: "b"),
+        PrepQuestion(question: "Tell me about governance.",
+                     answer: "", bankID: "b"),
+    ]
+    let hits = GapAnalyser.matchingQuestions(
+        for: .init(area: "Capacity planning",
+                   priority: "Essential",
+                   gap: "chargeback and cost allocation", risk: 1),
+        in: bank)
+    try assertEq(hits.count, 1, "the chargeback question matches")
+    try assertTrue(hits[0].contains("chargeback"), "and it is the right one")
+
+    let noOverlap = GapAnalyser.matchingQuestions(
+        for: .init(area: "Quantum entanglement", priority: nil,
+                   gap: "spin states", risk: 3),
+        in: bank)
+    try assertEq(noOverlap.count, 0, "an unrelated area matches nothing")
+}
+
 /// A bank filed under a placeholder is a bank that has stopped working.
 ///
 /// Questions imported before the role could be detected were filed under
@@ -2362,6 +2411,7 @@ struct TestsMain {
         TestRunner.run("Role detection avoids reasoning models", testRoleDetectionDoesNotUseAReasoningModel)
         TestRunner.run("Role detection budgets for reasoning", testRoleDetectionBudgetLeavesRoomForReasoning)
         TestRunner.run("Prepared banner breaks down sources", testPreparedBannerBreaksDownSources)
+        TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)
         TestRunner.run("Prepared questions are reachable", testPreparedQuestionsAreReachableFromTheSetupScreen)

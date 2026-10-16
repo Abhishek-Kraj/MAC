@@ -43,6 +43,7 @@ SOURCES=(
     "$SRC_DIR/Stores/PrepBankImporter.swift"
     "$SRC_DIR/Stores/PreparedAnswerSlot.swift"
     "$SRC_DIR/Stores/AnswerCondenser.swift"
+    "$SRC_DIR/Stores/GapAnalyser.swift"
     "$SRC_DIR/Stores/PrepMatcher.swift"
     "$SRC_DIR/Stores/PrepBank.swift"
     "$SRC_DIR/Stores/PrepBankBackup.swift"

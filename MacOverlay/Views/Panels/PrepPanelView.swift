@@ -524,13 +524,15 @@ struct PrepSetupView: View {
                         .buttonStyle(.secondaryCompact)
                 }
 
+                gapSection
+
                 Divider().padding(.vertical, 2)
                 importSection
                 status
             }
             .padding(18)
         }
-        .frame(width: 560, height: 620)
+        .frame(width: 560, height: 720)
         .task {
             let key = UserDefaults.standard.string(forKey: "openRouterAPIKey")?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -608,6 +610,90 @@ struct PrepSetupView: View {
                 .foregroundColor(failed ? .orange : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
+        }
+    }
+
+    /// What the bank does not cover.
+    ///
+    /// Asked for twice: "will it understand what I know and what I don't?"
+    /// Importing a bank answers only the first half. This answers the second,
+    /// and it is the half that matters — nobody is caught out by a question
+    /// they prepared for; they are caught out by a capability area nothing in
+    /// their preparation touches.
+    @ViewBuilder
+    private var gapSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "scope")
+                    .font(.system(size: 11))
+                    .foregroundColor(Design.Ink.secondary)
+                Text("Coverage gaps")
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                if gapsLoading {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Button(gapReport == nil ? "Check" : "Re-check") { runGapAnalysis() }
+                        .buttonStyle(.secondaryCompact)
+                        .disabled(gapsLoading)
+                }
+            }
+
+            if let report = gapReport {
+                if report.gaps.isEmpty {
+                    Text("Could not read the posting's capability areas. Try again.")
+                        .font(.system(size: 10)).foregroundColor(.orange)
+                } else {
+                    Text(report.needsWork.isEmpty
+                         ? "Every capability area in the posting has a prepared question."
+                         : "\(report.needsWork.count) of \(report.gaps.count) areas need more.")
+                        .font(.system(size: 10)).foregroundColor(.secondary)
+                    ForEach(report.needsWork.prefix(8)) { g in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(g.line)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(g.risk >= 3 ? .orange : .primary)
+                            Text(g.gap)
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if report.solid.isEmpty == false {
+                        Text("Covered: \(report.solid.count) areas")
+                            .font(.system(size: 9)).foregroundColor(.secondary)
+                    }
+                }
+            } else {
+                Text("Checks which capability areas this posting tests, against what you have prepared.")
+                    .font(.system(size: 10)).foregroundColor(.secondary)
+            }
+        }
+    }
+
+    @State private var gapReport: GapAnalyser.Report?
+    @State private var gapsLoading = false
+
+    private func runGapAnalysis() {
+        let role = generator.roleName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bank = role.isEmpty ? (PrepBank.shared.activeBankID.isEmpty
+            ? (PrepBank.shared.banks.first?.id ?? "") : PrepBank.shared.activeBankID) : role
+        let questions = PrepBank.shared.questions(inBank: bank)
+        guard !questions.isEmpty else {
+            gapReport = nil
+            return
+        }
+        gapsLoading = true
+        let key = UserDefaults.standard.string(forKey: "openRouterAPIKey")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        Task {
+            let report = await GapAnalyser.analyse(
+                jd: vm.interviewContext, role: role.isEmpty ? bank : role,
+                bank: questions, key: key)
+            gapReport = report
+            gapsLoading = false
         }
     }
 
