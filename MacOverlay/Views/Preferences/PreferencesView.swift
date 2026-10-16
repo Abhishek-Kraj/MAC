@@ -610,6 +610,21 @@ struct PreferencesView: View {
         return components.url!
     }
 
+    /// Groups models by provider in a single pass, preserving the order the
+    /// providers first appear in. `@ViewBuilder` rejects a bare `for` loop,
+    /// so this lives outside the view.
+    private static func groupByProvider(
+        _ models: [OpenRouterModel]
+    ) -> [(provider: String, models: [OpenRouterModel])] {
+        var order: [String] = []
+        var map: [String: [OpenRouterModel]] = [:]
+        for m in models {
+            if map[m.provider] == nil { order.append(m.provider) }
+            map[m.provider, default: []].append(m)
+        }
+        return order.map { (provider: $0, models: map[$0] ?? []) }
+    }
+
     /// Catalogue of every model the app can reach, grouped by provider.
     ///
     /// Before this existed the list was a hardcoded eleven entries and there
@@ -635,11 +650,18 @@ struct PreferencesView: View {
 
         let filtered = OverlayViewModel.availableModels.filter(matches)
         let allIDs = OverlayViewModel.availableModels.map(\.id).filter(visibility.isAllowed)
-        let providers = filtered.reduce(into: [String]()) { g, m in
-            if !g.contains(m.provider) { g.append(m.provider) }
-        }
+        // One pass to group, instead of re-filtering the whole catalogue for
+        // every provider — that was 465 x ~60 comparisons on every render.
+        let groups = Self.groupByProvider(filtered)
+        let visibleCount = filtered.filter { visibility.isVisible($0.id) }.count
+        let filteredIDs = filtered.map(\.id)
 
-        VStack(alignment: .leading, spacing: 12) {
+        // Lazy: the list costs what is on screen, not what is in the
+        // catalogue. The plain VStack this replaced eagerly built all 465
+        // rows on every keystroke in the search box, which is why "Show all"
+        // looked like it had stopped working — it did work, the window just
+        // stopped responding while it drew them.
+        LazyVStack(alignment: .leading, spacing: 12) {
             catalogueToolbar(catalog: catalog)
 
             if let error = catalog.lastError {
@@ -655,32 +677,41 @@ struct PreferencesView: View {
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .padding(.vertical, 8)
+            } else {
+                Text("\(visibleCount) of \(filtered.count) shown in the model menu")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.8))
             }
 
-            ForEach(providers, id: \.self) { provider in
-                let models = filtered.filter { $0.provider == provider }
-                if !models.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(provider)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.secondary.opacity(0.85))
-                            .textCase(.uppercase)
-                            .kerning(0.4)
-                        VStack(spacing: 1) {
-                            ForEach(models, id: \.id) { m in
-                                modelToggleRow(model: m, visibility: visibility,
-                                               allIDs: allIDs)
-                            }
+            ForEach(groups, id: \.0) { provider, models in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(provider)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary.opacity(0.85))
+                        .textCase(.uppercase)
+                        .kerning(0.4)
+                    LazyVStack(spacing: 1) {
+                        ForEach(models, id: \.id) { m in
+                            modelToggleRow(model: m, visibility: visibility,
+                                           allIDs: allIDs)
                         }
                     }
                 }
             }
 
-            HStack {
-                Spacer()
-                Button("Show all") { visibility.showAll() }
+            HStack(spacing: 6) {
+                // Scoped to the active filters — see `showAll(among:)`.
+                Button("Show all \(filtered.count)") {
+                    visibility.showAll(among: filteredIDs)
+                }
+                .buttonStyle(.secondaryCompact)
+                .disabled(filteredIDs.allSatisfy(visibility.isVisible))
+
+                Button("Hide all") { visibility.hideAll(among: filteredIDs) }
                     .buttonStyle(.secondaryCompact)
-                    .disabled(visibility.hidden.isEmpty)
+                    .disabled(filteredIDs.allSatisfy { !visibility.isVisible($0) })
+
+                Spacer()
             }
         }
     }

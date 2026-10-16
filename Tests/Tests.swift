@@ -743,6 +743,38 @@ func testProHiddenFromUIRemovesEntryPoints() throws {
     try assertFalse(onb.contains(".plans"), "no plans step")
 }
 
+/// "Show all" must reveal only the models matching the active filters, not
+/// the whole catalogue. `showAll()` on its own revealed all 465 OpenRouter
+/// models, which is what froze the Settings window.
+@MainActor
+func testShowAllIsScopedToTheGivenIds() throws {
+    let v = ModelVisibility.shared
+    let savedHidden = v.hidden
+    let savedAllowed = v.allowed
+    defer { v.allowed = savedAllowed }
+
+    let free = ["openrouter/qwen/qwen3-235b:free", "openrouter/vendor/a:free"]
+    let paid = ["openrouter/anthropic/claude-sonnet-5", "openrouter/openai/gpt-5.5"]
+
+    v.allowed = nil
+    v.hideAll(among: free + paid)
+    try assertFalse(v.isVisible(free[0]), "hidden to start")
+
+    // Filtered to free only -> Show all reveals just those two.
+    v.showAll(among: free)
+    try assertTrue(v.isVisible(free[0]), "free revealed")
+    try assertTrue(v.isVisible(free[1]), "free revealed")
+    try assertFalse(v.isVisible(paid[0]), "paid untouched, still hidden")
+    try assertFalse(v.isVisible(paid[1]), "paid untouched, still hidden")
+
+    // A second scoped pass must not disturb what is already visible.
+    v.showAll(among: paid)
+    try assertTrue(v.isVisible(free[0]), "earlier reveal preserved")
+    try assertTrue(v.isVisible(paid[0]), "paid now revealed")
+
+    _ = savedHidden
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -845,6 +877,7 @@ struct TestsMain {
         TestRunner.run("OpenRouter decodes live payload shape", testOpenRouterDecodesLivePayloadShape)
         TestRunner.run("OpenRouter decode tolerates missing architecture", testOpenRouterDecodeToleratesMissingArchitecture)
         TestRunner.run("Pro is hidden from the UI", testProHiddenFromUIRemovesEntryPoints)
+        TestRunner.run("Show all is scoped to the filters", testShowAllIsScopedToTheGivenIds)
         TestRunner.run("Pro screenshots are shrunk to fit the server", testProScreenshotsAreShrunk)
         TestRunner.run("Grok stream URL", testGrokStreamURL)
         TestRunner.run("Grok stitches an utterance from its chunks", testGrokStitchesAnUtterance)

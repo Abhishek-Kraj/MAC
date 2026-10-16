@@ -62,6 +62,23 @@ final class ModelVisibility {
     /// Settings.
     func showAll() { hidden.removeAll() }
 
+    /// Reveal only the given ids, leaving everything else as it is.
+    ///
+    /// The Settings "Show all" button uses this instead of `showAll()`: the
+    /// OpenRouter catalogue is 465 models, and revealing all of them at once
+    /// turns the picker menu into an unusable wall of rows. Scoping the reveal
+    /// to whatever the user is currently filtering by means ticking
+    /// "Free only" and pressing Show all surfaces the 15 free models and
+    /// nothing else.
+    func showAll(among ids: [String]) {
+        for id in ids { hidden.remove(id) }
+    }
+
+    /// Hide the given ids, leaving everything else as it is.
+    func hideAll(among ids: [String]) {
+        for id in ids { hidden.insert(id) }
+    }
+
     /// Hide a model outside the normal toggle flow — used when the OpenRouter
     /// catalogue is fetched and its several hundred entries need to stay out
     /// of the picker menu until the user opts into them.
