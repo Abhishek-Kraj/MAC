@@ -50,8 +50,7 @@ struct PreferencesView: View {
             switch self {
             case .panel, .profile:
                 return false
-            // Pro manages memory itself.
-            case .memory:     return !ProAccount.shared.isActive
+            case .memory:     return true
             case .workspaces: return FeatureFlags.workspacesEnabled
             case .peer:       return FeatureFlags.peerControlEnabled
             case .quickAsk:   return FeatureFlags.quickAskEnabled
@@ -278,23 +277,7 @@ struct PreferencesView: View {
             }
             .toggleStyle(.switch)
 
-            if ProAccount.shared.isActive {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    labelTwoLine(title: "Transcription engine",
-                                 subtitle: "Grok and ElevenLabs are included with Pro. Apple runs on this Mac.")
-                        .layoutPriority(1)
-                    Spacer(minLength: 8)
-                    Picker("", selection: $vm.proTranscription) {
-                        ForEach(OverlayViewModel.ProTranscription.allCases) { p in
-                            Text(p.displayName).tag(p)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(width: 160)
-                }
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                     labelTwoLine(title: "Transcription engine",
                                  subtitle: "Apple runs on this Mac. ElevenLabs and Grok need a key.")
                         .layoutPriority(1)
@@ -307,7 +290,6 @@ struct PreferencesView: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .frame(width: 160)
-                }
             }
         }
 
@@ -456,62 +438,7 @@ struct PreferencesView: View {
     private var aiTab: some View {
         @Bindable var vm = vm
         let store = vm.promptStore
-        let pro = ProAccount.shared
 
-        if let plan = pro.plan {
-            section(title: pro.isTester ? "TheCloser Pro · Tester" : "TheCloser \(plan.name)",
-                    subtitle: pro.isTester
-                        ? "Tester access, from a budget shared by all testers. Thanks for helping!"
-                        : "Models and transcription included. Tied to this Mac.") {
-                if let usage = pro.usage {
-                    ProUsageMeter(usage: usage)
-                } else {
-                    Text("Checking this month's usage…")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                // Testers have no subscription to manage or upgrade.
-                if !pro.isTester {
-                HStack {
-                    Text("Change plan, card, or cancel.")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Button("Manage subscription") { Task { await pro.openManageSubscription() } }
-                        .buttonStyle(.secondaryCompact)
-                }
-                }
-                if plan == .pro && !pro.isTester {
-                    Divider().opacity(0.4)
-                    HStack {
-                        if pro.isWaitingForUpgrade {
-                            ProgressView().controlSize(.small)
-                            Text("Confirm in your browser. This updates once it's done.")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Button("Cancel") { pro.stopWaitingForUpgrade() }
-                                .buttonStyle(.plain)
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
-                        } else {
-                            Text("Pro Max: the most powerful models and 2.5× the usage.")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Button("Upgrade to Pro Max") { Task { await pro.upgradeToProMax() } }
-                                .buttonStyle(.primaryCompact)
-                        }
-                    }
-                }
-                if let problem = pro.problem {
-                    Text(problem)
-                        .font(.system(size: 10))
-                        .foregroundColor(.orange)
-                }
-            }
-            .task { await pro.refreshUsage() }
-        }
 
         section(title: "Model picker",
                 subtitle: "Choose which models show in the model menu.") {
@@ -524,13 +451,11 @@ struct PreferencesView: View {
             .font(.system(size: 11))
         }
 
-        if !pro.isActive {
         section(title: "API keys",
                 subtitle: "OpenRouter runs the models. ElevenLabs or xAI (Grok) transcribes: add the one you use. Stored only on this Mac.") {
             KeyFieldView(label: "OpenRouter", placeholder: "sk-or-…",     text: $vm.openRouterAPIKey)
             KeyFieldView(label: "ElevenLabs", placeholder: "sk_…",        text: $vm.elevenLabsAPIKey)
             KeyFieldView(label: "xAI (Grok)", placeholder: "xai-…",       text: $vm.grokAPIKey)
-        }
         }
 
         if FeatureFlags.resumesEnabled {
@@ -599,13 +524,13 @@ struct PreferencesView: View {
         } // if FeatureFlags.resumesEnabled
     }
 
-    /// The website's model request form. Says which plan is asking, and
+    /// The website's model request form. Says which source is asking, and
     /// nothing about who.
     private var modelRequestURL: URL {
         var components = URLComponents(string: "https://www.thecloser.tech/request-model")!
         components.queryItems = [
             URLQueryItem(name: "source", value: "app"),
-            URLQueryItem(name: "plan", value: ProAccount.shared.plan?.rawValue ?? "own_keys"),
+            URLQueryItem(name: "plan", value: "own_keys"),
         ]
         return components.url!
     }
@@ -639,7 +564,6 @@ struct PreferencesView: View {
 
         let query = modelSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let matches: (OpenRouterModel) -> Bool = { m in
-            guard visibility.isAllowed(m.id) else { return false }
             if freeOnly && !m.isFree { return false }
             if imageOnly && !m.supportsImages { return false }
             guard !query.isEmpty else { return true }
@@ -649,7 +573,7 @@ struct PreferencesView: View {
         }
 
         let filtered = OverlayViewModel.availableModels.filter(matches)
-        let allIDs = OverlayViewModel.availableModels.map(\.id).filter(visibility.isAllowed)
+        let allIDs = OverlayViewModel.availableModels.map(\.id)
         // One pass to group, instead of re-filtering the whole catalogue for
         // every provider — that was 465 x ~60 comparisons on every render.
         let groups = Self.groupByProvider(filtered)

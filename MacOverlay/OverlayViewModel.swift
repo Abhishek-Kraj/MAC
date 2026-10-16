@@ -495,35 +495,6 @@ final class OverlayViewModel {
             }
         }
     }
-    /// Pro's engine: Grok or ElevenLabs on our account (both included), or
-    /// Apple on this Mac.
-    enum ProTranscription: String, CaseIterable, Identifiable {
-        case grok, elevenLabs, apple
-        var id: String { rawValue }
-        var displayName: String {
-            switch self {
-            case .grok:       return "Grok Transcribe 2 (included)"
-            case .elevenLabs: return "ElevenLabs (included)"
-            case .apple:      return "Apple (on-device, free)"
-            }
-        }
-        /// The server's name for it (/api/stt-token); nil runs on this Mac.
-        var provider: String? {
-            switch self {
-            case .grok:       return "grok"
-            case .elevenLabs: return "elevenlabs"
-            case .apple:      return nil
-            }
-        }
-    }
-    var proTranscription: ProTranscription {
-        didSet {
-            UserDefaults.standard.set(proTranscription.rawValue, forKey: "proTranscription")
-            if oldValue != proTranscription, isRecording, ProAccount.shared.isActive {
-                restartCaptureForNewSource()
-            }
-        }
-    }
     /// Apple locale identifier of the transcription language. The engines
     /// read `TranscriptionLanguage.current` (same defaults key) when they
     /// start, so a change applies from the next recording.
@@ -985,17 +956,6 @@ final class OverlayViewModel {
     /// whether the user has configured an ElevenLabs key.
     enum TranscriptionBackend: String { case elevenLabs = "ElevenLabs", grok = "Grok", apple = "Apple" }
     var transcriptionBackend: TranscriptionBackend {
-        // Pro transcribes with Grok or ElevenLabs on our account (a
-        // short-lived token from the server), or on this Mac: by choice, or
-        // when the server couldn't give a token.
-        if ProAccount.shared.isActive {
-            if proCloudUnavailable { return .apple }
-            switch proTranscription {
-            case .grok:       return .grok
-            case .elevenLabs: return .elevenLabs
-            case .apple:      return .apple
-            }
-        }
         switch transcriptionPreference {
         case .apple:      return .apple
         case .elevenLabs: return elevenLabsAPIKey.isEmpty ? .apple : .elevenLabs
@@ -1006,21 +966,8 @@ final class OverlayViewModel {
         }
     }
 
-    /// Whether a Pro plan was active last time it changed, to tell the user
-    /// when it ends.
-    @ObservationIgnored private var wasOnPro = false
-
-    /// Pro couldn't get a token last time (the server doesn't have that
-    /// provider set up, or it refused), so it's transcribing on this Mac.
-    /// Tried again at the next start.
-    @ObservationIgnored private var proCloudUnavailable = false
-
     /// Start transcription using whichever backend is active.
     private func startTranscriber(source: AudioSource) async throws {
-        if ProAccount.shared.isActive {
-            try await startProTranscriber(source: source)
-            return
-        }
         transcriptionManager.tokenProvider = nil
         transcriptionManager.grokAPIKey = grokAPIKey
         switch transcriptionBackend {
@@ -1035,29 +982,6 @@ final class OverlayViewModel {
         }
     }
 
-    /// Pro: Grok Transcribe 2 or ElevenLabs on a token from our server (or
-    /// Apple, if picked), listening to the interviewer only (the system
-    /// audio) unless you picked the mic alone. Without a token it
-    /// transcribes on this Mac, so Pro never goes deaf.
-    private func startProTranscriber(source: AudioSource) async throws {
-        let listen: AudioSource = source == .both ? .systemAudio : source
-        let choice = proTranscription
-        guard let provider = choice.provider else {
-            proCloudUnavailable = false
-            try await appleTranscriber.start(source: listen)
-            return
-        }
-        guard let token = await ProAccount.shared.sttToken(provider: provider) else {
-            proCloudUnavailable = true
-            try await appleTranscriber.start(source: listen)
-            return
-        }
-        proCloudUnavailable = false
-        transcriptionManager.provider = choice == .elevenLabs ? .elevenLabs : .grok
-        transcriptionManager.tokenProvider = { await ProAccount.shared.sttToken(provider: provider) }
-        transcriptionManager.proToken = token
-        try await transcriptionManager.start(source: listen)
-    }
 
     /// Cloud transcription in another language than the one picked (Grok
     /// detects the language itself) isn't transcribed: Telugu text while
@@ -1118,9 +1042,6 @@ final class OverlayViewModel {
         transcriptionPreference = TranscriptionPreference(
             rawValue: UserDefaults.standard.string(forKey: "transcriptionPreference") ?? ""
         ) ?? .auto
-        proTranscription = ProTranscription(
-            rawValue: UserDefaults.standard.string(forKey: "proTranscription") ?? ""
-        ) ?? .grok
         transcriptionLanguageID = TranscriptionLanguage.current.id
         suggestSessionOnCall = UserDefaults.standard.object(forKey: "suggestSessionOnCall") as? Bool ?? true
         // Default résumé generation to DeepSeek V4 Pro (direct api.deepseek.com)
@@ -1200,12 +1121,6 @@ final class OverlayViewModel {
 
         transcriptionManager.elevenLabsAPIKey = elevenLabsAPIKey
         transcriptionManager.grokAPIKey       = grokAPIKey
-
-        // TheCloser Pro: keep the model choice inside the plan, and pick up
-        // the subscription (renewing its pass) in the background.
-        ProAccount.shared.onChange = { [weak self] in self?.proPlanChanged() }
-        proPlanChanged()
-        ProAccount.shared.start()
 
         // Apple delivers one growing string per recognition task, so the
         // raw update can replace the live transcript wholesale. New text =
@@ -2404,10 +2319,6 @@ final class OverlayViewModel {
     /// API key + provider label for an arbitrary model id.
     func key(for model: String) -> (key: String, provider: String) {
         if AIManager.shared.isOpenRouterModel(model) {
-            // Pro needs no key: AIManager sends these models through the
-            // subscription. Callers only check a key is there, so the plan
-            // name stands in for it.
-            if let plan = ProAccount.shared.plan { return ("TheCloser \(plan.name)", "TheCloser Pro") }
             return (openRouterAPIKey, "OpenRouter")
         }
         if AIManager.shared.isNVIDIAModel(model)   { return (nvidiaAPIKey, "NVIDIA") }
@@ -2430,15 +2341,13 @@ final class OverlayViewModel {
         keyForSelectedModel.key.isEmpty
     }
 
-    /// OpenRouter models can run: on Pro, or with the user's own key.
-    var hasOpenRouterAccess: Bool { ProAccount.shared.isActive || !openRouterAPIKey.isEmpty }
+    /// OpenRouter models run on the user's own key.
+    var hasOpenRouterAccess: Bool { !openRouterAPIKey.isEmpty }
 
-    /// Keys a bring-your-own-key user still has to add before starting an
-    /// interview: OpenRouter runs the models, and ElevenLabs or xAI
-    /// transcribes (the picked one, when ElevenLabs or Grok is picked).
-    /// Pro needs none.
+    /// Keys still to add before starting an interview: OpenRouter runs the
+    /// models, and ElevenLabs or xAI transcribes (the picked one, when
+    /// ElevenLabs or Grok is picked).
     var missingRequiredKeys: [String] {
-        guard !ProAccount.shared.isActive else { return [] }
         func empty(_ key: String) -> Bool { key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         var missing: [String] = []
         if empty(openRouterAPIKey) { missing.append("OpenRouter") }
@@ -2450,19 +2359,4 @@ final class OverlayViewModel {
         return missing
     }
 
-    /// A Pro plan started, changed or ended. Pro keeps the model choice
-    /// inside the plan and uses the default memory settings, which it
-    /// doesn't let the user change.
-    private func proPlanChanged() {
-        let visibility = ModelVisibility.shared
-        if !visibility.isAllowed(selectedModel) {
-            selectedModel = visibility.isAllowed(Self.defaultModel)
-                ? Self.defaultModel
-                : Self.availableModels.first { visibility.isAllowed($0.id) }?.id ?? Self.defaultModel
-        }
-        let onPro = ProAccount.shared.isActive
-        if onPro { sessionStore.useDefaultMemorySettings() }
-        if wasOnPro && !onPro { statusMessage = "Error: \(AIError.proEnded.localizedDescription)" }
-        wasOnPro = onPro
-    }
 }

@@ -8,17 +8,12 @@ import AppKit
 private let openRouterKeysURL = URL(string: "https://openrouter.ai/keys")!
 private let elevenLabsKeysURL = URL(string: "https://elevenlabs.io/app/settings/api-keys")!
 private let xaiKeysURL = URL(string: "https://console.x.ai")!
-/// Tagged as a campaign so interest in Pro shows up in the website's Google
-/// Analytics (Acquisition → Traffic acquisition, campaign "pro_interest").
-private let proInterestURL = URL(string: "https://www.thecloser.tech/?utm_source=app&utm_medium=onboarding&utm_campaign=pro_interest")!
 
 /// In-panel onboarding. Lives INSIDE the overlay's NSPanel so it inherits
 /// `sharingType = .none` — invisible to screen shares.
 ///
-/// welcome → choose → keys (bring your own OpenRouter + ElevenLabs keys)
-///                  → plans (we handle everything: subscribe to Pro in Dev
-///                           and Beta; coming soon in production, which
-///                           falls back to keys)
+/// welcome → choose → keys (bring your own OpenRouter + ElevenLabs keys).
+/// There is no paid path: the app runs entirely on the user's own keys.
 struct OnboardingView: View {
     @Environment(OverlayViewModel.self) private var vm
     @Binding var isPresented: Bool

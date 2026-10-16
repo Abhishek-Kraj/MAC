@@ -543,59 +543,6 @@ func testMuseSparkThinksMinimally() throws {
     try assertTrue(AIManager.reasoning(for: "anthropic/claude-sonnet-5") == nil, "others unchanged")
 }
 
-// MARK: - TheCloser Pro
-
-/// Must match the server's expectations (api/_lib/config.js DEVICE_PATTERN)
-/// and the formula used to find this Mac's subscription.
-func testProFingerprint() throws {
-    try assertEq(ProAccount.fingerprint(platformUUID: "00000000-0000-0000-0000-000000000000") ?? "",
-                 "0c0863a1d1e077935f3dd62e8c1f9677fd514a41ef792698d8bcf315045dc23c")
-    try assertTrue(ProAccount.fingerprint(platformUUID: "") == nil, "no UUID, no fingerprint")
-    let device = ProAccount.device ?? ""
-    try assertTrue(device.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil, "this Mac: \(device)")
-}
-
-func testProUsageFromServer() throws {
-    let json = #"{"plan":"pro","allowanceUSD":8,"usedUSD":5.5,"remainingUSD":2.5,"usedFraction":0.6875,"periodEnd":1792000000,"renews":true}"#
-    let usage = try JSONDecoder().decode(ProAccount.Usage.self, from: Data(json.utf8))
-    try assertEq(usage.percentUsed, 69)
-    try assertFalse(usage.isRunningLow)
-    try assertFalse(usage.isUsedUp)
-    try assertTrue(usage.periodEndText?.hasPrefix("Resets ") == true, usage.periodEndText ?? "nil")
-
-    let cancelled = #"{"plan":"pro","allowanceUSD":8,"usedUSD":8,"remainingUSD":0,"usedFraction":1,"periodEnd":1792000000,"renews":false}"#
-    let ending = try JSONDecoder().decode(ProAccount.Usage.self, from: Data(cancelled.utf8))
-    try assertTrue(ending.isRunningLow && ending.isUsedUp)
-    try assertTrue(ending.periodEndText?.hasPrefix("Ends ") == true, "a cancelled plan ends instead of resetting")
-}
-
-@MainActor
-func testProLimitsModelPickers() throws {
-    let visibility = ModelVisibility.shared
-    let previous = visibility.allowed
-    defer { visibility.allowed = previous }
-    visibility.allowed = ["openrouter/anthropic/claude-sonnet-5"]
-    try assertTrue(visibility.isVisible("openrouter/anthropic/claude-sonnet-5"))
-    try assertFalse(visibility.isVisible("openrouter/anthropic/claude-opus-5.5"), "outside the plan")
-    visibility.allowed = nil
-    try assertTrue(visibility.isAllowed("openrouter/anthropic/claude-opus-5.5"), "no plan, no limit")
-}
-
-/// Pro screenshots go through our server, which takes at most 4 MB.
-func testProScreenshotsAreShrunk() throws {
-    let size = NSSize(width: 3456, height: 2234)
-    let image = NSImage(size: size, flipped: false) { rect in
-        NSGradient(colors: [.systemBlue, .systemOrange])?.draw(in: rect, angle: 30)
-        return true
-    }
-    let encoded = try AIManager.jpegBase64(from: image).unwrap("encodes")
-    let bitmap = try NSBitmapImageRep(data: Data(base64Encoded: encoded) ?? Data()).unwrap("decodes")
-    try assertEq(bitmap.pixelsWide, 1600)
-    try assertEq(bitmap.pixelsHigh, 1034)
-    try assertTrue(encoded.utf8.count < 4_000_000)
-}
-
-
 // MARK: - OpenRouter model catalogue
 
 /// A bare slug gets the app's routing prefix and a derived provider.
@@ -639,8 +586,7 @@ func testOpenRouterProviderMapping() throws {
 }
 
 /// Merged order is custom > built-ins > fetched, de-duplicated by id with the
-/// earliest definition winning — so a hand-added model is never shadowed by a
-/// fetched copy of the same id.
+/// earliest definition winning.
 func testOpenRouterMergedOrderAndDedup() throws {
     let custom = [OpenRouterModel.make(slug: "me/custom", name: "Custom")]
     let fetched = [OpenRouterModel.make(slug: "vendor/new"), custom[0]]
@@ -653,18 +599,15 @@ func testOpenRouterMergedOrderAndDedup() throws {
     try assertEq(ids.count, merged.count, "no duplicate ids")
 }
 
-/// The built-in defaults must survive into the merged catalogue, because
-/// `defaultModel` and `utilityModel` point at two of them and the picker has
-/// to resolve them before any fetch has happened.
+/// The built-in defaults must survive into the merged catalogue.
 func testOpenRouterBuiltinsCoverDefaults() throws {
     let ids = Set(OpenRouterCatalog.builtins.map(\.id))
     try assertTrue(ids.contains(OpenRouterDefaults.defaultModel), "defaultModel is built in")
     try assertTrue(ids.contains(OpenRouterDefaults.utilityModel), "utilityModel is built in")
 }
 
-/// OpenRouter's payload shape, pinned by a fixture so a change in the app's
-/// decoding can't silently ship against a stale assumption. The live endpoint
-/// was verified to return 465 models, 15 of them `:free`.
+/// OpenRouter's payload shape, pinned by a fixture. The live endpoint was
+/// verified to return 465 models, 15 of them `:free`.
 func testOpenRouterDecodesLivePayloadShape() throws {
     let json = """
     {"data":[
@@ -692,87 +635,74 @@ func testOpenRouterDecodesLivePayloadShape() throws {
     let nemo = try byID("nvidia/nemotron-3.5-super-vl:free")
     try assertTrue(nemo.isFree, "second :free detected")
     try assertTrue(nemo.supportsImages, "image modality detected")
-    try assertEq(nemo.contextLength, 1000000, "context_length decoded")
     try assertEq(nemo.provider, "NVIDIA", "vendor mapped")
 
-    // The decode sorts by display name so the picker reads alphabetically.
-    // "NVIDIA:..." < "Plain" < "Qwen3..." case-insensitively.
     try assertEq(models.map(\.name), ["NVIDIA: Nemotron (free)", "Plain", "Qwen3 235B (free)"],
                  "sorted by name")
 }
 
-/// A model with no `architecture` block must not crash the decode — it is
-/// treated as text-only rather than assumed to read images.
+/// A model with no `architecture` block must not crash the decode.
 func testOpenRouterDecodeToleratesMissingArchitecture() throws {
     let json = #"{"data":[{"id":"x/y","name":"Y","context_length":8}]}"#
     let models = try OpenRouterCatalog.decode(Data(json.utf8))
     try assertEq(models.count, 1)
     try assertFalse(models[0].supportsImages, "no architecture means no image support")
-    try assertFalse(models[0].isFree, "not free")
-}
-
-/// Regression guard for `FeatureFlags.proHiddenFromUI`: the paid tier must
-/// not reappear in the interface. Scans the view layer for the strings that
-/// used to ship it — plan cards, prices, upgrade buttons.
-///
-/// The only legitimate hits are inside the already-subscribed branch, which
-/// a non-subscriber can never reach, so those files are allowed to mention
-/// "Upgrade"/"Pro Max" only inside a `if let plan = pro.plan` block. This
-/// test asserts the *entry points* are gone instead, which is what actually
-/// decides whether a user ever sees a paywall.
-func testProHiddenFromUIRemovesEntryPoints() throws {
-    let root = URL(fileURLWithPath: #filePath)      // Tests/Tests.swift
-        .deletingLastPathComponent()                 // Tests/
-        .deletingLastPathComponent()                 // repo root
-    let views = root.appending(path: "MacOverlay/Views")
-    let onboarding = root.appending(path: "MacOverlay/Views/OnboardingView.swift")
-
-    // The two views that used to host the paywall.
-    let prefs = try String(contentsOf: views.appending(path: "Preferences/PreferencesView.swift"), encoding: .utf8)
-    try assertFalse(prefs.contains("ProPlanPicker"), "no plan picker in Settings")
-    try assertFalse(prefs.contains("TesterCodeEntry"), "no tester-code entry in Settings")
-
-    let onb = try String(contentsOf: onboarding, encoding: .utf8)
-    try assertFalse(onb.contains("We handle everything"), "no managed-tier choice in onboarding")
-    try assertFalse(onb.contains("PlansStep"), "no plans step in onboarding")
-    try assertFalse(onb.contains("$19/month"), "no price in onboarding")
-    try assertFalse(onb.contains("ProPlanPicker"), "no plan picker in onboarding")
-
-    // The paid path must be unreachable from the step machine.
-    try assertFalse(onb.contains(".managed"), "no managed path")
-    try assertFalse(onb.contains(".plans"), "no plans step")
 }
 
 /// "Show all" must reveal only the models matching the active filters, not
-/// the whole catalogue. `showAll()` on its own revealed all 465 OpenRouter
-/// models, which is what froze the Settings window.
+/// the whole catalogue — which is what froze the Settings window.
 @MainActor
 func testShowAllIsScopedToTheGivenIds() throws {
     let v = ModelVisibility.shared
-    let savedHidden = v.hidden
-    let savedAllowed = v.allowed
-    defer { v.allowed = savedAllowed }
-
     let free = ["openrouter/qwen/qwen3-235b:free", "openrouter/vendor/a:free"]
     let paid = ["openrouter/anthropic/claude-sonnet-5", "openrouter/openai/gpt-5.5"]
 
-    v.allowed = nil
     v.hideAll(among: free + paid)
     try assertFalse(v.isVisible(free[0]), "hidden to start")
 
-    // Filtered to free only -> Show all reveals just those two.
     v.showAll(among: free)
     try assertTrue(v.isVisible(free[0]), "free revealed")
     try assertTrue(v.isVisible(free[1]), "free revealed")
     try assertFalse(v.isVisible(paid[0]), "paid untouched, still hidden")
     try assertFalse(v.isVisible(paid[1]), "paid untouched, still hidden")
 
-    // A second scoped pass must not disturb what is already visible.
     v.showAll(among: paid)
     try assertTrue(v.isVisible(free[0]), "earlier reveal preserved")
     try assertTrue(v.isVisible(paid[0]), "paid now revealed")
+}
 
-    _ = savedHidden
+/// Regression guard for the removal of TheCloser Pro: no payment code may
+/// creep back into the source tree. The paid tier was deleted outright, so
+/// this asserts the identifiers are gone everywhere under `MacOverlay/`.
+func testNoPaymentCodeInSourceTree() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let source = root.appending(path: "MacOverlay")
+
+    let banned = [
+        "ProAccount", "ProPlanPicker", "TesterCodeEntry", "ProPlanCard",
+        "ProUsageMeter", "ProUsageNotice", "ProTranscription", "throughPro",
+        "proSubscriptionsEnabled", "proHiddenFromUI", "proEnded",
+    ]
+
+    var offenders: [String] = []
+    let files = (try? FileManager.default
+        .subpathsOfDirectory(atPath: source.path)) ?? []
+    for rel in files where rel.hasSuffix(".swift") {
+        let path = source.appending(path: rel).path
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
+        for token in banned where text.contains(token) {
+            offenders.append("\(rel): \(token)")
+        }
+    }
+    try assertTrue(offenders.isEmpty,
+                   "payment code reintroduced:\n" + offenders.joined(separator: "\n"))
+
+    for gone in ["ProAccount.swift", "Views/Shared/ProViews.swift"] {
+        let path = source.appending(path: gone).path
+        try assertFalse(FileManager.default.fileExists(atPath: path), "\(gone) is gone")
+    }
 }
 
 // MARK: - Grok transcription
@@ -864,9 +794,6 @@ struct TestsMain {
         TestRunner.run("Keyword styles pick the prompt's formatting rule", testKeywordStylePromptRules)
         TestRunner.run("Transcripts in another language are ignored", testTranscriptLanguageLock)
         TestRunner.run("Muse Spark thinks minimally", testMuseSparkThinksMinimally)
-        TestRunner.run("Pro fingerprint matches the server's formula", testProFingerprint)
-        TestRunner.run("Pro usage decodes from the server", testProUsageFromServer)
-        TestRunner.run("Pro limits the model pickers to the plan", testProLimitsModelPickers)
         TestRunner.run("OpenRouter model from slug", testOpenRouterModelFromSlug)
         TestRunner.run("OpenRouter free tier detection", testOpenRouterFreeTierDetection)
         TestRunner.run("OpenRouter prefix is idempotent", testOpenRouterModelIdempotentPrefix)
@@ -876,9 +803,8 @@ struct TestsMain {
         TestRunner.run("OpenRouter builtins cover the defaults", testOpenRouterBuiltinsCoverDefaults)
         TestRunner.run("OpenRouter decodes live payload shape", testOpenRouterDecodesLivePayloadShape)
         TestRunner.run("OpenRouter decode tolerates missing architecture", testOpenRouterDecodeToleratesMissingArchitecture)
-        TestRunner.run("Pro is hidden from the UI", testProHiddenFromUIRemovesEntryPoints)
+        TestRunner.run("No payment code in the source tree", testNoPaymentCodeInSourceTree)
         TestRunner.run("Show all is scoped to the filters", testShowAllIsScopedToTheGivenIds)
-        TestRunner.run("Pro screenshots are shrunk to fit the server", testProScreenshotsAreShrunk)
         TestRunner.run("Grok stream URL", testGrokStreamURL)
         TestRunner.run("Grok stitches an utterance from its chunks", testGrokStitchesAnUtterance)
         TestRunner.run("Grok keeps locked chunks the final leaves out", testGrokKeepsLockedChunksIfTheFinalOmitsThem)

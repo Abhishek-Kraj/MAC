@@ -386,32 +386,16 @@ struct TopStripView: View {
             }
 
             // Which speech engine is doing the transcribing — switchable
-            // here so the strip doesn't need a badge for it. Pro picks
-            // between the engines its plan includes.
+            // here so the strip doesn't need a badge for it.
             Menu {
-                if ProAccount.shared.isActive {
-                    ForEach(OverlayViewModel.ProTranscription.allCases) { pref in
-                        Button {
-                            vm.proTranscription = pref
-                        } label: {
-                            HStack {
-                                Text(pref.displayName)
-                                if vm.proTranscription == pref {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    ForEach(OverlayViewModel.TranscriptionPreference.allCases) { pref in
-                        Button {
-                            vm.transcriptionPreference = pref
-                        } label: {
-                            HStack {
-                                Text(pref.displayName)
-                                if vm.transcriptionPreference == pref {
-                                    Image(systemName: "checkmark")
-                                }
+                ForEach(OverlayViewModel.TranscriptionPreference.allCases) { pref in
+                    Button {
+                        vm.transcriptionPreference = pref
+                    } label: {
+                        HStack {
+                            Text(pref.displayName)
+                            if vm.transcriptionPreference == pref {
+                                Image(systemName: "checkmark")
                             }
                         }
                     }
