@@ -830,6 +830,46 @@ func testModelTierFromCatalogueEntry() throws {
     try assertEq(try tier("vendor/x:free"), .free)
 }
 
+/// The catalogue refreshes itself, so a stale snapshot cannot silently sit
+/// there listing free models OpenRouter has already retired.
+@MainActor
+func testCatalogueStartsStale() throws {
+    let c = OpenRouterCatalog.shared
+    try assertTrue(c.fetched.isEmpty, "test starts from an empty cache")
+    try assertTrue(c.isStale, "never fetched counts as stale")
+    try assertEq(c.ageDescription, "never fetched")
+    try assertTrue(c.retired.isEmpty, "nothing retired before any fetch")
+}
+
+/// Age wording drives the "list may be out of date" warning, so the
+/// thresholds are pinned here rather than left to a live fetch.
+@MainActor
+func testCatalogueAgeWording() throws {
+    let hour: TimeInterval = 3600
+    let day = hour * 24
+    let now = Date()
+    func at(_ ago: TimeInterval) -> String {
+        OpenRouterCatalog.ageDescription(since: now.addingTimeInterval(-ago))
+    }
+    try assertEq(at(0),    "just now")
+    try assertEq(at(300),  "5 min ago")
+    try assertEq(at(hour * 6), "6h ago")
+    try assertEq(at(day * 3),  "3d ago")
+    try assertEq(at(day * 30), "over a week ago")
+    try assertEq(OpenRouterCatalog.ageDescription(since: nil), "never fetched")
+}
+
+/// A malformed body must fail loudly rather than quietly emptying the
+/// catalogue — which would read as "OpenRouter retired all 465 models".
+@MainActor
+func testMalformedCatalogueFailsRatherThanEmptying() throws {
+    var threw = false
+    do { _ = try OpenRouterCatalog.decode(Data("not json".utf8)) }
+    catch { threw = true }
+    try assertTrue(threw, "garbage body throws instead of decoding to empty")
+    try assertTrue(OpenRouterCatalog.shared.retired.isEmpty, "a failed fetch retires nothing")
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -938,6 +978,9 @@ struct TestsMain {
         TestRunner.run("Model tier rejects router pricing", testModelTierRejectsRouterPricing)
         TestRunner.run("Blended price conversion", testBlendedPriceConversion)
         TestRunner.run("Model tier from a catalogue entry", testModelTierFromCatalogueEntry)
+        TestRunner.run("Catalogue starts stale", testCatalogueStartsStale)
+        TestRunner.run("Catalogue age wording", testCatalogueAgeWording)
+        TestRunner.run("Malformed catalogue fails rather than emptying", testMalformedCatalogueFailsRatherThanEmptying)
         TestRunner.run("Grok stream URL", testGrokStreamURL)
         TestRunner.run("Grok stitches an utterance from its chunks", testGrokStitchesAnUtterance)
         TestRunner.run("Grok keeps locked chunks the final leaves out", testGrokKeepsLockedChunksIfTheFinalOmitsThem)

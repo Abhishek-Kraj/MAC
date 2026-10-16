@@ -966,6 +966,29 @@ final class OverlayViewModel {
         }
     }
 
+    /// A model the user had selected was retired from the catalogue — most
+    /// likely a free one that OpenRouter rotated out. Point them at something
+    /// that still exists rather than letting every answer fail.
+    private func rescueRetiredModel() {
+        let catalog = OpenRouterCatalog.shared
+        guard catalog.retired.contains(selectedModel) else { return }
+        catalog.acknowledgeRetired(selectedModel)
+
+        // Capture the name before moving off it, or the message reads as if
+        // the replacement had been retired.
+        let goneName = OpenRouterCatalog.shared.model(id: selectedModel)?.name ?? selectedModel
+        catalog.acknowledgeRetired(selectedModel)
+
+        let visibility = ModelVisibility.shared
+        let retiredID = selectedModel
+        let replacement = Self.availableModels.first {
+            visibility.isVisible($0.id) && $0.id != retiredID
+        }
+        guard let replacement else { return }
+        selectedModel = replacement.id
+        statusMessage = "\(goneName) is no longer offered by OpenRouter — switched to \(replacement.name)."
+    }
+
     /// Start transcription using whichever backend is active.
     private func startTranscriber(source: AudioSource) async throws {
         transcriptionManager.tokenProvider = nil
@@ -1121,6 +1144,15 @@ final class OverlayViewModel {
 
         transcriptionManager.elevenLabsAPIKey = elevenLabsAPIKey
         transcriptionManager.grokAPIKey       = grokAPIKey
+
+        // OpenRouter's free tier turns over constantly, so the catalogue is
+        // refreshed in the background when it goes stale. Deliberately not
+        // awaited: a slow or failed fetch must not hold up launch, and the
+        // cached list is perfectly usable meanwhile.
+        Task { [weak self] in
+            await OpenRouterCatalog.shared.refreshIfStale()
+            self?.rescueRetiredModel()
+        }
 
         // Apple delivers one growing string per recognition task, so the
         // raw update can replace the live transcript wholesale. New text =

@@ -214,11 +214,55 @@ final class OpenRouterCatalog {
     nonisolated(unsafe) static var reasoningEffortIDs: Set<String> = []
     /// Models downloaded from OpenRouter, newest catalogue first.
     private(set) var fetched: [OpenRouterModel] = []
+    /// How old the cache may get before the app refreshes it on its own.
+    /// OpenRouter's free tier turns over constantly — models are added and
+    /// retired — so a week-old snapshot lists models that no longer exist.
+    private static let staleAfter: TimeInterval = 24 * 60 * 60
+
+    /// True when the catalogue is old enough to be worth refetching, or has
+    /// never been fetched at all.
+    var isStale: Bool {
+        guard let lastFetchedAt else { return true }
+        return Date().timeIntervalSince(lastFetchedAt) > Self.staleAfter
+    }
+
+    /// Short human age, e.g. "just now", "6h ago", "3d ago".
+    var ageDescription: String {
+        Self.ageDescription(since: lastFetchedAt)
+    }
+
+    /// Pure so the wording can be tested without waiting a day for a fetch.
+    static func ageDescription(since date: Date?) -> String {
+        guard let date else { return "never fetched" }
+        let seconds = Date().timeIntervalSince(date)
+        switch seconds {
+        case ..<60:      return "just now"
+        case ..<3600:    return "\(Int(seconds / 60)) min ago"
+        case ..<86_400:  return "\(Int(seconds / 3600))h ago"
+        case ..<604_800: return "\(Int(seconds / 86_400))d ago"
+        default:         return "over a week ago"
+        }
+    }
+
+    /// Refetches only if the cache has gone stale. Safe to call on every
+    /// launch: it is a no-op while the data is fresh, and it never blocks.
+    func refreshIfStale() async {
+        guard isStale, !isFetching else { return }
+        await fetchCatalogue()
+    }
+
     /// Models the user added by hand. Always visible; never hidden.
     private(set) var custom: [OpenRouterModel] = []
     private(set) var isFetching = false
     private(set) var lastError: String?
     private(set) var lastFetchedAt: Date?
+    /// Ids that were in the previous catalogue but are gone from the new one.
+    /// Only set when the fetch actually succeeded, so a failed request never
+    /// makes it look like the vendor deleted everything.
+    private(set) var retired: Set<String> = []
+
+    /// Lets a caller acknowledge a retired id so it is not reported twice.
+    func acknowledgeRetired(_ id: String) { retired.remove(id) }
 
     private init() {
         if let data = UserDefaults.standard.data(forKey: Self.cacheKey),
@@ -292,6 +336,8 @@ final class OpenRouterCatalog {
                 return
             }
             let parsed = try Self.decode(data)
+            let previous = Set(fetched.map(\.id))
+            retired = previous.subtracting(Set(parsed.map(\.id)))
             fetched = parsed
             rebuildReasoningIndex()
             lastFetchedAt = Date()

@@ -554,6 +554,20 @@ struct PreferencesView: View {
         return components.url!
     }
 
+    /// Kept out of the toolbar body because the string concatenation made
+    /// the type-checker give up on the whole view.
+    private func retiredNotice(_ catalog: OpenRouterCatalog) -> some View {
+        let ids: [String] = catalog.retired
+            .prefix(3)
+            .map { $0.replacingOccurrences(of: "openrouter/", with: "") }
+        let head = ids.joined(separator: ", ")
+        let tail = catalog.retired.count > 3 ? "…" : ""
+        let noun = catalog.retired.count == 1 ? "model" : "models"
+        return Text("\(catalog.retired.count) \(noun) no longer offered: \(head)\(tail). The list has been updated.")
+            .font(.system(size: 10))
+            .foregroundColor(.orange)
+    }
+
     /// Groups models by provider in a single pass, preserving the order the
     /// providers first appear in. `@ViewBuilder` rejects a bare `for` loop,
     /// so this lives outside the view.
@@ -670,12 +684,26 @@ struct PreferencesView: View {
                         Text("Fetching…").font(.system(size: 12))
                     } else if catalog.fetched.isEmpty {
                         Text("Fetch OpenRouter models").font(.system(size: 12))
+                    } else if catalog.isStale {
+                        Text("Refresh — list may be out of date")
+                            .font(.system(size: 12, weight: .semibold))
                     } else {
                         Text("Refresh (\(catalog.fetched.count))").font(.system(size: 12))
                     }
                 }
                 .buttonStyle(.secondaryCompact)
                 .disabled(catalog.isFetching)
+                .help(catalog.fetched.isEmpty
+                      ? "Downloads the full OpenRouter catalogue"
+                      : "Last updated \(catalog.ageDescription). OpenRouter's free tier changes often, so this refreshes itself every day.")
+
+                if !catalog.fetched.isEmpty {
+                    Text(catalog.isStale
+                         ? "Updated \(catalog.ageDescription) — refreshing soon"
+                         : "Updated \(catalog.ageDescription)")
+                        .font(.system(size: 10))
+                        .foregroundColor(catalog.isStale ? .orange : .secondary)
+                }
 
                 if catalog.freeCount > 0 {
                     Text("\(catalog.freeCount) free")
@@ -685,6 +713,9 @@ struct PreferencesView: View {
 
                 Spacer()
             }
+
+            // A model the user had selected was rotated out by OpenRouter.
+            if !catalog.retired.isEmpty { retiredNotice(catalog) }
 
             // Hand-added model. Accepts a bare OpenRouter slug; the
             // "openrouter/" prefix is added for you.
