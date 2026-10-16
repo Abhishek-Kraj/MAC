@@ -5,7 +5,18 @@ import Foundation
 /// suffix for those builds, so they never touch production data). Writes
 /// are atomic.
 enum JSONStore {
-    static let appDirectory: URL = {
+    /// Redirects every store to a scratch directory.
+    ///
+    /// The test binary carries no `TCChannel` in its Info.plist, so
+    /// `AppChannel.current` resolves to Production and the suite would read
+    /// and write the real `~/Library/Application Support/MacOverlay` folder —
+    /// clobbering real app data. Tests set this before touching any store.
+    private static var directoryOverride: URL?
+
+    static func setDirectoryOverride(_ url: URL?) { directoryOverride = url }
+
+    static var appDirectory: URL = {
+        if let directoryOverride { return directoryOverride }
         let fm = FileManager.default
         let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
                 ?? fm.temporaryDirectory

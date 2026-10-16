@@ -1113,6 +1113,213 @@ func testAnswerDepthPersistsAndFeedsThePrompt() throws {
                    "brief clause now")
 }
 
+// MARK: - Prepared question bank
+
+/// Builds a bank from realistic Fabric-coE questions. Kept as a helper so
+/// the matcher tests below all score against the same corpus.
+private func sampleBank() -> [PrepQuestion] {
+    let bankID = "Fabric Platform Lead"
+    return [
+        PrepQuestion(question: "Why move to Microsoft Fabric instead of Synapse when Synapse already does warehousing?", bankID: bankID),
+        PrepQuestion(question: "How would you allocate Fabric capacity across ten legal entities with different budgets?", bankID: bankID),
+        PrepQuestion(question: "How do you retire an existing Cognos estate without disrupting Finance reporting?", bankID: bankID),
+        PrepQuestion(question: "When would you choose a star schema over a flat table, and why does it matter at scale?", bankID: bankID),
+        PrepQuestion(question: "How do you put data pipelines in CI/CD when a pipeline run costs real money?", bankID: bankID),
+        PrepQuestion(question: "A contractor needs one gold table with HR salary data. How do you deliver it safely?", bankID: bankID),
+        PrepQuestion(question: "How do you chargeback compute cost to the business units that cause it?", bankID: bankID),
+        PrepQuestion(question: "Walk me through your bronze, silver and gold layers and where CDC fits.", bankID: bankID),
+    ]
+}
+
+/// The live matcher is judged by whether it retrieves the RIGHT bank entry
+/// from a reworded question. A wrong prepared answer shown mid-interview is
+/// worse than a two-second wait, so this table is the real specification.
+func testPrepMatcherRetrievesTheRightQuestion() throws {
+    let bank = sampleBank()
+    // (what the interviewer says, the bank entry it must find)
+    let cases: [(String, String)] = [
+        ("Isn't Fabric just Synapse with a new name?", "Why move to Microsoft Fabric instead of Synapse when Synapse already does warehousing?"),
+        ("You have ten business units with separate P&Ls, how would you split the F-SKU capacity?", "How would you allocate Fabric capacity across ten legal entities with different budgets?"),
+        ("We have a big Cognos estate. How do you get rid of it without breaking month-end close?", "How do you retire an existing Cognos estate without disrupting Finance reporting?"),
+        ("When is a star schema better than one big flat table?", "When would you choose a star schema over a flat table, and why does it matter at scale?"),
+        ("How do you version and test data pipelines automatically?", "How do you put data pipelines in CI/CD when a pipeline run costs real money?"),
+        ("How do you let an outside contractor see HR salaries without leaking it?", "A contractor needs one gold table with HR salary data. How do you deliver it safely?"),
+        ("How do you make teams pay for the compute they burn?", "How do you chargeback compute cost to the business units that cause it?"),
+        ("Explain bronze silver gold, and where change data capture sits.", "Walk me through your bronze, silver and gold layers and where CDC fits."),
+    ]
+    // The contract that matters: a prepared answer is shown only when it is
+    // the RIGHT one. Refusing to answer is always acceptable; answering with
+    // the wrong bank entry never is.
+    var shown = 0, refused = 0
+    for (heard, expected) in cases {
+        guard let hit = PrepMatcher.best(query: heard, against: bank) else {
+            refused += 1
+            continue
+        }
+        shown += 1
+        try assertEq(hit.question.question, expected,
+                     "showed the WRONG prepared answer for: \(heard)")
+    }
+    try assertTrue(shown >= 6,
+                  "ranker should answer most of these (got \(shown), refused \(refused))")
+    print("  shown \(shown)/8, safely refused \(refused)/8")
+}
+
+/// Below the confidence gate the matcher must return nothing, so the app
+/// generates an answer instead of showing a weak guess.
+func testPrepMatcherRefusesWeakMatches() throws {
+    let bank = sampleBank()
+    // Nothing in the bank is about onboarding a new hire.
+    for unrelated in [
+        "How do you onboard a new engineer onto the team?",
+        "What is your favourite holiday destination?",
+        "Tell me about your university dissertation.",
+    ] {
+        try assertTrue(PrepMatcher.best(query: unrelated, against: bank) == nil,
+                       "should have refused: \(unrelated)")
+    }
+    // And a genuine question still gets through.
+    let hit = PrepMatcher.best(query: "When is a star schema better than one big flat table?",
+                               against: bank)
+    try assertTrue(hit != nil, "a real question must still match")
+}
+
+/// The one confusion this design has to survive: two bank entries about
+/// overlapping subject matter — allocating capacity, and charging it back —
+/// share enough vocabulary to rank either way. Asked about capacity
+/// allocation, the chargeback entry scored *higher* than the right one, and
+/// beat it by only a small margin. This must refuse rather than guess.
+func testPrepMatcherRefusesAdjacentTopics() throws {
+    let bank = sampleBank()
+    let heard = "You have ten business units with separate P&Ls, how would you split the F-SKU capacity?"
+    let right = "How would you allocate Fabric capacity across ten legal entities with different budgets?"
+
+    // Ranking may well put the wrong entry first — the point is that it must
+    // not be *trusted*.
+    let hit = PrepMatcher.best(query: heard, against: bank)
+    if let hit {
+        try assertEq(hit.question.question, right,
+                     "capacity question must never yield the chargeback answer")
+    }
+
+    // And whatever it decides, the decision has to be on margin, not score:
+    // the wrong answer here outscores the right one.
+    let ranked = PrepMatcher.rank(query: heard, against: bank)
+    try assertTrue(ranked.first?.margin ?? 0 < PrepMatcher.minimumMargin,
+                   "this case is below the gate by construction")
+}
+
+/// Morphology is why this needed a stemmer at all: "salary" and "salaries"
+/// share no token, and without stemming that question retrieved the Cognos
+/// entry instead of the PII one.
+func testPrepMatcherHandlesMorphology() throws {
+    try assertEq(PrepMatcher.stem("salaries"), "salary")
+    try assertEq(PrepMatcher.stem("salary"),  "salary")
+    try assertEq(PrepMatcher.stem("migrations"), "migration")
+    try assertEq(PrepMatcher.stem("policies"), "policy")
+    // Short words must survive: over-stripping turns "press" into "pre".
+    try assertEq(PrepMatcher.stem("press"), "press")
+    try assertEq(PrepMatcher.stem("business"), "business")
+    try assertEq(PrepMatcher.stem("less"), "less")
+
+    // And the PII question, phrased with the plural, finds the PII entry.
+    let bank = sampleBank()
+    let hit = PrepMatcher.closest(
+        query: "How do you let an outside contractor see HR salaries without leaking it?",
+        against: bank)
+    try assertTrue(hit?.question.question.contains("HR salary") == true,
+                   "plural 'salaries' must reach the singular 'salary' entry")
+}
+
+/// An empty or nonsense bank must not crash or match.
+func testPrepMatcherHandlesEmptyAndOddInput() throws {
+    try assertTrue(PrepMatcher.rank(query: "anything", against: []).isEmpty, "empty bank")
+    try assertTrue(PrepMatcher.best(query: "", against: sampleBank()) == nil, "empty query")
+    try assertTrue(PrepMatcher.best(query: "   ", against: sampleBank()) == nil, "blank query")
+    try assertTrue(PrepMatcher.best(query: "?!?!", against: sampleBank()) == nil, "punctuation only")
+    try assertTrue(PrepMatcher.best(query: "the a of to", against: sampleBank()) == nil, "stop words only")
+}
+
+/// The bank has to survive a relaunch, or a prepared answer prepared this
+/// morning is gone by the interview.
+@MainActor
+func testPrepBankPersistsAndGroupsByRole() throws {
+    let bank = PrepBank.shared
+    let before = bank.questions.count
+
+    let added = PrepQuestion(question: "Test: how would you split capacity?",
+                             bankID: "ZZ Test Role")
+    bank.add(added)
+    defer {
+        bank.delete(added)
+        try? assertTrue(bank.questions.count == before, "cleaned up")
+    }
+
+    try assertEq(PrepBank.shared.questions(inBank: "ZZ Test Role").count, 1, "grouped by role")
+    try assertTrue(PrepBank.shared.banks.contains { $0.id == "ZZ Test Role" }, "bank listed")
+    try assertTrue(bank.hasBank(forRole: "ZZ Test Role"), "hasBank true for the role")
+    try assertFalse(bank.hasBank(forRole: "A Role That Does Not Exist"), "hasBank false otherwise")
+}
+
+/// A bank is scoped to a role, not a posting — that is what makes it compound.
+@MainActor
+func testBankIsKeyedByRoleNotByPosting() throws {
+    let bank = PrepBank.shared
+    let tag = UUID().uuidString.prefix(8)
+    let q1 = PrepQuestion(question: "ZZJDA \(tag) capacity split?", bankID: "Fabric Platform Lead")
+    let q2 = PrepQuestion(question: "ZZJDB \(tag) capacity split?", bankID: "Fabric Platform Lead")
+    bank.add(questions: [q1, q2])
+    defer {
+        bank.delete(q1); bank.delete(q2)
+    }
+    let hits = bank.questions(inBank: "Fabric Platform Lead").filter { $0.question.contains("\(tag) capacity split") }
+    try assertEq(hits.count, 2, "two postings' questions share one role bank")
+}
+
+/// Match bookkeeping is how the user learns which questions actually get
+/// asked — without it the bank can never be pruned.
+@MainActor
+func testBankRecordsMatches() throws {
+    let bank = PrepBank.shared
+    let q = PrepQuestion(question: "ZZ counted question", bankID: "ZZ Count Role")
+    bank.add(q)
+    defer { bank.delete(q) }
+
+    try assertEq(q.timesMatched, 0)
+    bank.recordMatch(q.id)
+    let updated = try bank.questions.first { $0.id == q.id }.unwrap("still there")
+    try assertEq(updated.timesMatched, 1)
+    try assertTrue(updated.lastMatchedAt != nil)
+}
+
+/// Questions the matcher missed are held, not silently banked — the user
+/// decides whether a miss earns a permanent place.
+@MainActor
+func testMissedQuestionsAreCapturedNotAutoBanked() throws {
+    let bank = PrepBank.shared
+    let role = "ZZ Capture Role"
+    let start = bank.pendingCaptureCount
+
+    bank.captureMissed(question: "What about multi-cloud failover?", bankID: role)
+    try assertEq(bank.pendingCaptureCount, start + 1, "held as pending")
+    try assertEq(bank.questions(inBank: role).count, 0, "not in the bank yet")
+
+    // Repeating the same miss must not stack duplicates.
+    bank.captureMissed(question: "what about MULTI-CLOUD failover", bankID: role)
+    try assertEq(bank.pendingCaptureCount, start + 1, "duplicate miss ignored")
+
+    // Too short to be a question.
+    bank.captureMissed(question: "why?", bankID: role)
+    try assertEq(bank.pendingCaptureCount, start + 1, "too-short text ignored")
+
+    let accepted = bank.acceptPendingCaptures(into: role)
+    try assertEq(accepted, 1)
+    try assertEq(bank.pendingCaptureCount, start, "pending cleared")
+    try assertEq(bank.questions(inBank: role).first?.source, .captured, "marked as captured")
+    defer { bank.deleteBank(role) }
+}
+
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -1171,6 +1378,15 @@ struct TestsMain {
     static func main() {
         print("Running MacOverlay tests…\n")
 
+        // This binary has no TCChannel in its Info.plist, so AppChannel
+        // resolves to Production and JSONStore would otherwise read and write
+        // the real ~/Library/Application Support/MacOverlay folder. Point it at
+        // a scratch directory for the whole run.
+        let scratch = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("macoverlay-tests-\(ProcessInfo.processInfo.processIdentifier)")
+        try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        JSONStore.setDirectoryOverride(scratch)
+
         TestRunner.run("models: turn / session / tokens", testModels)
         TestRunner.run("model: PromptPreset codable", testPromptPreset)
         TestRunner.run("model: ResumePreset codable", testResumePreset)
@@ -1219,6 +1435,14 @@ struct TestsMain {
         TestRunner.run("Show all is scoped to the filters", testShowAllIsScopedToTheGivenIds)
         TestRunner.run("Model tier thresholds", testModelTierThresholds)
         TestRunner.run("Shared model filter store", testSharedModelFilterStore)
+        TestRunner.run("Prep matcher retrieves the right question", testPrepMatcherRetrievesTheRightQuestion)
+        TestRunner.run("Prep matcher refuses weak matches", testPrepMatcherRefusesWeakMatches)
+        TestRunner.run("Prep matcher handles morphology", testPrepMatcherHandlesMorphology)
+        TestRunner.run("Prep matcher handles empty and odd input", testPrepMatcherHandlesEmptyAndOddInput)
+        TestRunner.run("Prep bank persists and groups by role", testPrepBankPersistsAndGroupsByRole)
+        TestRunner.run("Bank is keyed by role not by posting", testBankIsKeyedByRoleNotByPosting)
+        TestRunner.run("Bank records matches", testBankRecordsMatches)
+        TestRunner.run("Missed questions are captured, not auto-banked", testMissedQuestionsAreCapturedNotAutoBanked)
         TestRunner.run("Answer depth scales the prompt", testAnswerDepthScalesThePrompt)
         TestRunner.run("Answer depth persists and feeds the prompt", testAnswerDepthPersistsAndFeedsThePrompt)
         TestRunner.run("Panel can move between displays", testPanelCanMoveBetweenDisplays)
@@ -1243,9 +1467,12 @@ struct TestsMain {
             for (name, msg, file, line) in TestRunner.failed {
                 print("  · \(name)\n    \(msg)\n    \(file):\(line)")
             }
+            try? FileManager.default.removeItem(at: scratch)
             exit(1)
         }
         print("──────────────────────────────")
+        // main() ends in exit(), so a `defer` would never run — clean up here.
+        try? FileManager.default.removeItem(at: scratch)
         exit(0)
     }
 }
