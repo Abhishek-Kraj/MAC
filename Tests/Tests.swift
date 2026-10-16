@@ -1530,6 +1530,150 @@ func testPreparedAnswerSlotArbitratesCorrectly() throws {
     try assertEq(slot.displayed, "Real answer", "toggle is inert until there is an alternative")
 }
 
+/// Role detection must not use a reasoning model.
+///
+/// `gemini-3.8-flash:online` reasons before answering, and reasoning counts
+/// against `max_tokens`. Asked for a job title it spent the entire budget
+/// thinking and returned `content: null` — or the truncated string
+/// "Microsoft". The role then resolved to empty with no error, the bank stayed
+/// filed under its placeholder, and every question in it sat inert. Measured
+/// twice each against the real posting: 3.8-flash:online got 1 of 2,
+/// gemini-2.5-flash got 2 of 2 in 0.8s.
+func testRoleDetectionDoesNotUseAReasoningModel() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let src = try String(contentsOf: root.appending(path:
+        "MacOverlay/Stores/PrepGenerator.swift"), encoding: .utf8)
+
+    guard let fn = src.range(of: "func askRole(") else {
+        try assertTrue(false, "askRole not found"); return
+    }
+    let tail = src[fn.lowerBound...]
+    let end = tail.range(of: "\n    }")?.lowerBound ?? tail.endIndex
+    let body = String(tail[fn.lowerBound ..< end])
+
+    try assertTrue(body.contains("roleModel"),
+                   "askRole uses the dedicated role model, not the writing model")
+    // Read the value, not the prose: the comment explains why the reasoning
+    // model was rejected and names it.
+    let sendsRoleModel = body.contains("\"model\": roleModel")
+    try assertTrue(sendsRoleModel, "askRole sends the role model")
+
+    // And the two models must actually differ, or the indirection is a lie.
+    try assertFalse(PrepGenerator.roleModel
+                    .contains(PrepGenerator.researchModelSuffix),
+                    "role extraction does not reuse the question-writing model")
+}
+
+/// Role detection used a token budget smaller than the model's reasoning.
+///
+/// `google/gemini-3.8-flash:online` spends completion tokens thinking before
+/// it answers, and reasoning counts against `max_tokens`. At 24 the entire
+/// budget went to reasoning — 19 reasoning tokens, `content: null` — and the
+/// role resolved to empty, silently, with no error anywhere. The failure was
+/// invisible because the code handled nil correctly and simply had nothing to
+/// report.
+func testRoleDetectionBudgetLeavesRoomForReasoning() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let src = try String(contentsOf: root.appending(path:
+        "MacOverlay/Stores/PrepGenerator.swift"), encoding: .utf8)
+
+    // The role call must not be budgeted like a two-word completion.
+    guard let fnStart = src.range(of: "func askRole(") else {
+        try assertTrue(false, "askRole not found")
+        return
+    }
+    let tail = src[fnStart.lowerBound...]
+    let fnEnd = tail.range(of: "\n    }")?.lowerBound ?? tail.endIndex
+    let body = String(tail[fnStart.lowerBound ..< fnEnd])
+
+    // Match the assignment, not a number quoted in the comment explaining why
+    // the old budget was wrong.
+    let pattern = "\"max_tokens\":"
+    guard let tok = body.range(of: pattern) else {
+        try assertTrue(false, "askRole sets no max_tokens")
+        return
+    }
+    let after = body[tok.upperBound...]
+    var digits = ""
+    for ch in after {
+        if ch.isNumber { digits.append(ch) }
+        else if digits.isEmpty { continue } else { break }
+    }
+    let n = Int(digits) ?? 0
+    try assertTrue(n >= 32,
+                   "role detection has a usable token budget, got \(n)")
+
+    // And a nil content must be "could not tell", not a silent empty answer.
+    try assertTrue(body.contains(#"?? """#),
+                   "a nil content falls through to the empty-string guard")
+}
+
+/// The card must name where its questions came from. "22 questions" with no
+/// source reads as a finished state, which is exactly how a bank of imported
+/// questions gets mistaken for a researched one.
+func testPreparedBannerBreaksDownSources() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let panel = try String(contentsOf: root.appending(path:
+        "MacOverlay/Views/Panels/PrepPanelView.swift"), encoding: .utf8)
+    for fragment in ["importedCount", "researchedCount", "capturedCount",
+                     "isPlaceholderBank", "breakdown"] {
+        try assertTrue(panel.contains(fragment), "the banner uses \(fragment)")
+    }
+    try assertTrue(panel.contains("Filed as"),
+                   "and says so plainly when the bank is still a placeholder")
+}
+
+/// A match must not be thrown away because the answer is too long to use.
+///
+/// The premise of a question bank is that the answer is already there, so the
+/// live path returns it without calling a model. That only holds if what is
+/// stored is sayable. Measured on a real import: median answer 230 characters,
+/// and two answers of 12,908 and 8,626 characters — 1,965 and 1,102 words.
+/// Returned live, those are unreadable in the gap between questions, which is
+/// the one moment there is.
+func testLongAnswersGetASpeakableFormAndTheOriginalIsKept() throws {
+    try assertTrue(AnswerCondenser.longAnswerThreshold > 400,
+                   "ordinary spoken answers are not treated as long")
+    try assertTrue(AnswerCondenser.longAnswerThreshold < 5_000,
+                   "but a written document is")
+    try assertTrue(AnswerCondenser.targetWordCount <= 150,
+                   "and the spoken form is short enough to read at a glance")
+
+    // The lookup must prefer the spoken form when there is one.
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let lookup = try String(contentsOf: root.appending(path:
+        "MacOverlay/Stores/PreparedAnswerLookup.swift"), encoding: .utf8)
+    try assertTrue(lookup.contains("spokenAnswer ?? hit.question.answer"),
+                   "the live path prefers the speakable form")
+    try assertTrue(lookup.contains("hit.question.spokenAnswer"),
+                   "and falls back to the full answer when there is none")
+
+    // The original is never overwritten — it is the reference.
+    let bankSrc = try String(contentsOf: root.appending(path:
+        "MacOverlay/Stores/PrepBank.swift"), encoding: .utf8)
+    try assertTrue(bankSrc.contains("var answer: String"),
+                   "the full answer is still stored")
+    try assertTrue(bankSrc.contains("var spokenAnswer: String?"),
+                   "alongside the speakable form")
+
+    // Round-trip: a question with both keeps both.
+    let q = PrepQuestion(question: "Backup and DR?", answer: String(repeating: "x", count: 9_000),
+                         spokenAnswer: "Git is our source of truth.",
+                         bankID: "b")
+    try assertEq(q.answer.count, 9_000, "full text survives")
+    try assertEq(q.spokenAnswer, "Git is our source of truth.", "so does the short form")
+
+    // And it encodes, so it survives a restart.
+    let data = try JSONEncoder().encode(q)
+    let back = try JSONDecoder().decode(PrepQuestion.self, from: data)
+    try assertEq(back.spokenAnswer, "Git is our source of truth.", "persisted")
+    try assertEq(back.answer.count, 9_000, "with the original intact")
+}
+
 /// A bank filed under a placeholder is a bank that has stopped working.
 ///
 /// Questions imported before the role could be detected were filed under
@@ -2215,6 +2359,10 @@ struct TestsMain {
         TestRunner.run("Bank records matches", testBankRecordsMatches)
         TestRunner.run("Missed questions are captured, not auto-banked", testMissedQuestionsAreCapturedNotAutoBanked)
         TestRunner.run("Prepared answer arbitration", testPreparedAnswerSlotArbitratesCorrectly)
+        TestRunner.run("Role detection avoids reasoning models", testRoleDetectionDoesNotUseAReasoningModel)
+        TestRunner.run("Role detection budgets for reasoning", testRoleDetectionBudgetLeavesRoomForReasoning)
+        TestRunner.run("Prepared banner breaks down sources", testPreparedBannerBreaksDownSources)
+        TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)
         TestRunner.run("Prepared questions are reachable", testPreparedQuestionsAreReachableFromTheSetupScreen)
         TestRunner.run("Embedding response gives one vector per row", testEmbeddingResponseYieldsOneVectorPerRow)

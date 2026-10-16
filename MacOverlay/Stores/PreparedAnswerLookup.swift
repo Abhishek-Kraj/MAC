@@ -89,7 +89,11 @@ final class PreparedAnswerLookup {
             lastMatchQuestion = nil
             return nil
         }
-        let answer = hit.question.answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The speakable form when there is one. An answer you cannot read in
+        // the gap between questions is the same as no answer, and the full
+        // text is still one click away in the bank.
+        let answer = (hit.question.spokenAnswer ?? hit.question.answer)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !answer.isEmpty else { return nil }
 
         lastError = nil

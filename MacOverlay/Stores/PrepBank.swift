@@ -20,6 +20,12 @@ struct PrepQuestion: Identifiable, Hashable, Codable {
     let id: UUID
     var question: String
     var answer: String
+    /// A speakable form of `answer`, used live. Set only when the original is
+    /// too long to read between questions — measured on a real import, the
+    /// worst answer was 2,581 words. The original is never discarded; this is
+    /// what you say, trimmed from your own words rather than rewritten about
+    /// you.
+    var spokenAnswer: String?
     var source: Source
     /// "capacity", "governance", "migration" — free text, used for grouping.
     var topic: String?
@@ -38,6 +44,7 @@ struct PrepQuestion: Identifiable, Hashable, Codable {
     init(id: UUID = UUID(),
          question: String,
          answer: String = "",
+         spokenAnswer: String? = nil,
          source: Source = .user,
          topic: String? = nil,
          bankID: String,
@@ -48,6 +55,7 @@ struct PrepQuestion: Identifiable, Hashable, Codable {
         self.id = id
         self.question = question
         self.answer = answer
+        self.spokenAnswer = spokenAnswer
         self.source = source
         self.topic = topic
         self.bankID = bankID

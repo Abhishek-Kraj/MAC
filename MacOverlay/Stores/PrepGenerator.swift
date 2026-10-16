@@ -20,6 +20,15 @@ final class PrepGenerator {
     /// with the sheet and the work would be lost mid-flight.
     static let shared = PrepGenerator()
 
+    /// Used only for extracting the role name. Must be a model that answers
+    /// without first reasoning — see `askRole`.
+    nonisolated static let roleModel = "google/gemini-2.5-flash"
+
+    /// The model that writes the questions. Reasons before answering, which is
+    /// fine when the answer is a page long and not fine when it is a job title.
+    nonisolated static let researchModel = "google/gemini-3.8-flash:online"
+    nonisolated static var researchModelSuffix: String { ":online" }
+
     enum Stage: Equatable {
         case idle
         case researching
@@ -147,6 +156,10 @@ final class PrepGenerator {
     /// Cheap local guess, used when the model call fails. Deliberately dull:
     /// a plain but harmless name beats no name and a disabled button.
     static func fallbackRole(from jd: String, resume: String) -> String? {
+        // A heading that is not the boilerplate "Role purpose" wins. This runs
+        // only when the model could not answer, so it must never return nil —
+        // an unnamed bank is inert, and an inert bank looks saved.
+
         // A line that is short and title-cased is usually the heading.
         for line in jd.split(separator: "\n").map({
             $0.trimmingCharacters(in: .whitespaces) }) where line.count > 3 && line.count < 60 {
@@ -176,11 +189,20 @@ final class PrepGenerator {
         candidate's current title. Reply with the title only, in at most six
         words, no quotes, no explanation. If you cannot tell, reply NONE.
         """
+        // A different model from the one that writes the questions, on purpose.
+        // `gemini-3.8-flash:online` reasons before it answers, and reasoning
+        // counts against `max_tokens`: asked for a job title it spent the whole
+        // budget thinking and returned nil, or returned the truncated string
+        // "Microsoft". Measured twice each on the real posting —
+        //   gemini-3.8-flash:online   1/2 correct, 2.5s, once "Microsoft"
+        //   gemini-2.5-flash           2/2 correct, 0.8s
+        // A trivial extraction does not need a reasoning model, and a
+        // reasoning model makes it unreliable for no gain.
         let body: [String: Any] = [
-            "model": "google/gemini-3.8-flash:online",
+            "model": roleModel,
             "temperature": 0,
             "messages": [["role": "user", "content": user]],
-            "max_tokens": 24,
+            "max_tokens": 64,
         ]
         var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!)
         request.httpMethod = "POST"
@@ -196,6 +218,9 @@ final class PrepGenerator {
         else { return nil }
         let content = (json["choices"] as? [[String: Any]])?
             .first?["message"] as? [String: Any]
+        // A nil `content` means the reply was truncated or fully consumed by
+        // reasoning. Treated as "could not tell", so the caller falls back
+        // rather than filing the bank under an empty name.
         let raw = (content?["content"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let cleaned = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`*."))
@@ -351,7 +376,7 @@ final class PrepGenerator {
 
     private static func ask(key: String, system: String, user: String) async throws -> String {
         let body: [String: Any] = [
-            "model": "google/gemini-3.8-flash:online",
+            "model": researchModel,
             "temperature": 0.4,
             "messages": [["role": "system", "content": system],
                          ["role": "user", "content": user]],

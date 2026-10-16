@@ -85,6 +85,22 @@ struct PrepPanelView: View {
                 }
             }
         }
+        .task {
+            // Detect the role from the card, not only from the sheet. Detection
+            // is one capped call and it is what re-files a bank left under the
+            // placeholder — which is inert until it happens, so making it wait
+            // for a sheet the user may never open leaves it dead.
+            guard isPlaceholderBank || generator.roleName.isEmpty else { return }
+            let key = UserDefaults.standard.string(forKey: "openRouterAPIKey")?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            await generator.detectRole(context: vm.interviewContext,
+                                        resume: vm.interviewResumeText,
+                                        key: key)
+            let role = generator.roleName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !role.isEmpty, PrepBank.shared.hasBank(forRole: PrepBank.placeholderBankID) {
+                _ = PrepBank.shared.renameBank(from: PrepBank.placeholderBankID, to: role)
+            }
+        }
         .sheet(isPresented: $showSetup) {
             PrepSetupView(onDone: { showSetup = false },
                           onViewBank: { showSetup = false; showBank = true })
@@ -100,26 +116,79 @@ struct PrepPanelView: View {
     /// in. Deliberately the loudest thing in the card: a two-minute job that
     /// ends looking unchanged is indistinguishable from one that failed.
     private var preparedBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 14))
-                .foregroundColor(.green)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Prepared — \(questionCount) questions")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("Matched live during the interview. For \(activeBankID).")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.green)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Prepared — \(questionCount) questions")
+                        .font(.system(size: 12, weight: .semibold))
+                    // Where they came from. "22 questions" alone reads as a
+                    // finished state with no route onward, which is how a bank
+                    // of imported questions looks identical to a bank that was
+                    // researched properly.
+                    Text(breakdown).font(.system(size: 10)).foregroundColor(.secondary)
+                }
+                Spacer()
+                Button("View") { showBank = true }
+                    .buttonStyle(.secondaryCompact)
             }
-            Spacer()
-            Button("View") { showBank = true }
-                .buttonStyle(.secondaryCompact)
+
+            // The next step, said out loud. These two paths are independent:
+            // a bank can be entirely imported, entirely researched, or both.
+            if isPlaceholderBank || researchedCount == 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10))
+                        .foregroundColor(.accentColor)
+                    Text(isPlaceholderBank
+                         ? "Open prep to name this role, then research \(generator.questionCount) more from your job description."
+                         : "Research \(generator.questionCount) more from your job description — these are kept and added to.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button("Add more") { showSetup = true }
+                        .buttonStyle(.primaryCompact)
+                }
+            }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
         .padding(.horizontal, 8)
         .background(RoundedRectangle(cornerRadius: 7)
             .fill(Color.green.opacity(0.10)))
-        .accessibilityLabel("\(questionCount) questions prepared")
+        .accessibilityLabel("\(questionCount) questions prepared. \(breakdown)")
+    }
+
+    /// Where the questions in the active bank came from. Imported questions
+    /// are worth keeping and saying so separately stops them looking like a
+    /// shortfall.
+    private var breakdown: String {
+        var parts: [String] = []
+        if importedCount > 0 { parts.append("\(importedCount) yours") }
+        if researchedCount > 0 { parts.append("\(researchedCount) researched") }
+        if capturedCount > 0 { parts.append("\(capturedCount) captured live") }
+        let sources = parts.isEmpty ? "no sources recorded" : parts.joined(separator: " · ")
+        let filed = isPlaceholderBank
+            ? "Filed as \"Imported\" until you name the role."
+            : "For \(activeBankID)."
+        return sources + " · " + filed
+    }
+
+    private func count(_ source: PrepQuestion.Source) -> Int {
+        PrepBank.shared.questions(inBank: activeBankID)
+            .filter { $0.source == source }.count
+    }
+
+    private var importedCount: Int { count(.user) }
+    private var researchedCount: Int { count(.researched) }
+    private var capturedCount: Int { count(.captured) }
+
+    /// A bank still named by the placeholder was never given a role, so it is
+    /// never selected for live matching — it looks saved and is inert.
+    private var isPlaceholderBank: Bool {
+        activeBankID == PrepBank.placeholderBankID
     }
 
     private var isRunning: Bool { generator.isRunning }
@@ -650,13 +719,34 @@ struct PrepSetupView: View {
         // bank doing nothing.
         isImporting = true
         Task {
+            // Anything too long to read between questions is shortened first,
+            // so what appears live is speakable. The original is kept.
+            let key = UserDefaults.standard.string(forKey: "openRouterAPIKey")?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            var shortened = 0
+            for pair in result.pairs
+            where pair.answer.count > AnswerCondenser.longAnswerThreshold {
+                if let spoken = await AnswerCondenser.condense(
+                    pair.answer, question: pair.question, key: key) {
+                    if var stored = PrepBank.shared.questions(inBank: bank)
+                        .first(where: { $0.question == pair.question }) {
+                        stored.spokenAnswer = spoken
+                        PrepBank.shared.update(stored)
+                        shortened += 1
+                    }
+                }
+            }
+
             await PreparedAnswerLookup.shared.embedBank(bank)
             isImporting = false
             let failed = PreparedAnswerLookup.shared.lastError != nil
             importMessage = failed
                 ? "Added \(result.pairs.count), but matching is not ready: "
                   + (PreparedAnswerLookup.shared.lastError ?? "unknown error")
-                : "Added \(result.pairs.count) questions to \(bank) (\(formatName(result.format)))."
+                : "Added \(result.pairs.count) questions to \(bank) (\(formatName(result.format)))"
+                  + (shortened > 0
+                     ? ". \(shortened) long \(shortened == 1 ? "answer" : "answers") shortened to say out loud; full text kept."
+                     : "")
             if !failed { pastedQuestions = "" }
         }
     }

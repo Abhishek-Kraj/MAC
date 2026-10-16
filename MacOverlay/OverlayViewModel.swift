@@ -1694,7 +1694,24 @@ final class OverlayViewModel {
         sendToAI()
     }
 
+    /// Launches the send. The lookup below has to finish before we know
+    /// whether the model is needed at all, so the work moves into a Task and
+    /// this only starts it.
     func sendToAI() {
+        sendTask?.cancel()
+        sendTask = Task { await prepareThenSend() }
+    }
+
+    private var sendTask: Task<Void, Never>?
+
+    /// A prepared answer replaces generation rather than competing with it.
+    ///
+    /// It used to run the model anyway and offer a toggle between the two.
+    /// That is the wrong shape for this: if the question was prepared, the
+    /// point is to say the prepared words, not to pay for a fresh answer and
+    /// then choose between them. It also cost a full generation per matched
+    /// question, which is the money preparation was meant to save.
+    private func prepareThenSend() async {
         // Any explicit send supersedes a pending debounced auto-send —
         // without this a manual Send followed by the grace-window firing
         // would double-send the same transcript.
@@ -1778,30 +1795,25 @@ final class OverlayViewModel {
         pendingScreenshot = nil
         pendingAttachments = []
 
-        // Cleared before the stream starts: the stream's own opening write
-        // would otherwise be captured as the "generated alternative" for a
-        // previous question.
+        // Cleared before anything is written, so the stream's opening clear
+        // is never mistaken for a generated answer.
         clearPreparedAnswer()
 
-        // Look for a prepared answer while the model is already working. Both
-        // run at once — the lookup costs one embedding round-trip and the
-        // generated answer is still wanted as a cross-check, so there is no
-        // reason to wait for one before starting the other.
+        // Pull from the bank first. If it knows this question, the model is
+        // not called at all.
         let lookupText = userText
-        // Only in an interview. In ordinary chat a prepared answer would be
-        // wrong by default — there is no question bank behind "rewrite this".
         let lookupBank = sessionMode == .interview ? activePrepBankID : ""
-        if !lookupText.isEmpty, !lookupBank.isEmpty {
-            Task { [weak self] in
-                guard let self else { return }
-                if let hit = await PreparedAnswerLookup.shared
-                    .preparedAnswer(for: lookupText, inBank: lookupBank),
-                   let source = PreparedAnswerLookup.shared.lastMatchQuestion,
-                   !self.hasPreparedAnswer,
-                   self.aiResponse.isEmpty {
-                    self.showPreparedAnswer(hit, matchedQuestion: source)
-                }
-            }
+        if !lookupText.isEmpty, !lookupBank.isEmpty,
+           let hit = await PreparedAnswerLookup.shared
+               .preparedAnswer(for: lookupText, inBank: lookupBank),
+           let source = PreparedAnswerLookup.shared.lastMatchQuestion {
+            // The turn already exists and is empty; the answer goes into it so
+            // the transcript reads correctly afterwards.
+            sessionStore.setStreamingContent(hit, turnID: assistantID)
+            sessionStore.finalizeAssistant(turnID: assistantID,
+                                           inputTokens: 0, outputTokens: 0)
+            showPreparedAnswer(hit, matchedQuestion: source)
+            return
         }
 
         ai.runStream(userText: prompt,
