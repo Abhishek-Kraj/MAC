@@ -104,6 +104,7 @@ private struct InterviewSetupForm: View {
                 contextEditor
                 promptPicker
                 autoGenerateRow
+                modelPickerRow
                 startRow
             }
             .padding(.horizontal, 22)
@@ -461,6 +462,27 @@ private struct InterviewSetupForm: View {
 
     private var activePromptName: String {
         vm.promptStore.activePreset?.name ?? "Default (Interview)"
+    }
+
+    /// Which model answers the interview. The setup screen had no model
+    /// control at all, so the only way to change it was after starting, from
+    /// the bar. Now it sits directly above Start and uses the same shared
+    /// picker as Settings and the bar, so all four surfaces agree.
+    private var modelPickerRow: some View {
+        sectionCard(title: "Answer model", systemImage: "cpu") {
+            HStack(spacing: 10) {
+                Text("Used for every answer in this interview. Switchable mid-session.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Design.Ink.secondary)
+                Spacer(minLength: 8)
+                ModelPickerButton(
+                    currentModelName: OverlayViewModel.availableModels
+                        .first { $0.id == vm.selectedModel }?.name ?? "Model"
+                )
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
     }
 
     private var startRow: some View {

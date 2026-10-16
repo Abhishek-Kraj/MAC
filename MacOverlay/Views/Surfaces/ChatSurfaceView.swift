@@ -422,47 +422,12 @@ struct ChatSurfaceView: View {
                 }
                 // Same question + full context, different model: picking
                 // one switches the default AND regenerates immediately.
-                Menu {
-                    let visibility = ModelVisibility.shared
-                    ForEach(OverlayViewModel.modelProviders, id: \.self) { provider in
-                        let models = OverlayViewModel.availableModels
-                            .filter { $0.provider == provider && visibility.isVisible($0.id) }
-                        if !models.isEmpty {
-                            Section(provider) {
-                                ForEach(models, id: \.id) { m in
-                                    Button {
-                                        vm.selectedModel = m.id
-                                        vm.retryLastResponse()
-                                    } label: {
-                                        HStack {
-                                            Text(m.name)
-                                            if vm.selectedModel == m.id {
-                                                Image(systemName: "checkmark")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "cpu")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text(currentModelName)
-                            .font(.system(size: 10, weight: .semibold))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 7, weight: .bold))
-                    }
-                    .foregroundColor(Design.Ink.secondary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Design.Surface.controlFill))
-                    .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
+                // Uses the shared picker so this, Settings and the interview
+                // setup screen list the same models.
+                ModelPickerButton(
+                    currentModelName: currentModelName,
+                    onSelect: { _ in vm.retryLastResponse() }
+                )
                 .help("Re-ask the same question with a different model")
             }
             Spacer()

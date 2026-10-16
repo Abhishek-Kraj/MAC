@@ -539,25 +539,27 @@ struct InputBarView: View {
               : "Choose model")
     }
 
+    /// The bar's quick list. This popup widget cannot host a search field, so
+    /// it stays a short list — but it is driven by the same
+    /// `ModelFilterStore` as every other surface, so whatever filter is active
+    /// elsewhere applies here too. "More models…" opens the full shared picker.
     private func modelMenuItems() -> [PopUpItem] {
         var items: [PopUpItem] = []
-        let visibility = ModelVisibility.shared
-        let providers = OverlayViewModel.modelProviders
-        for provider in providers {
-            let models = OverlayViewModel.availableModels
-                .filter { $0.provider == provider && visibility.isVisible($0.id) }
-            guard !models.isEmpty else { continue }
-            items.append(.section(provider))
-            for m in models {
+        let store = ModelFilterStore.shared
+        for group in store.groupedModels {
+            guard !group.models.isEmpty else { continue }
+            items.append(.section(group.provider))
+            for m in group.models {
                 let id = m.id
-                items.append(.option(m.name, isSelected: vm.selectedModel == id) {
+                let suffix = m.isFree ? " · free" : ""
+                items.append(.option(m.name + suffix, isSelected: vm.selectedModel == id) {
                     vm.selectedModel = id
                 })
             }
         }
-        // Footer: jump to Settings → AI to manage which models appear.
-        items.append(.option("Manage models…") {
-            vm.primarySurface = .settings
+        // Footer: open the shared picker, which has search and tier filters.
+        items.append(.option("More models…") {
+            vm.primarySurface = .interview
         })
         return items
     }

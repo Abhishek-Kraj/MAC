@@ -180,6 +180,9 @@ struct ModelPickerButton: View {
     @State private var customDraft = ""
 
     let currentModelName: String
+    /// Fired after the selection is applied. The chat surface uses it to
+    /// re-ask the same question with the newly chosen model.
+    var onSelect: ((OpenRouterModel) -> Void)?
 
     var body: some View {
         Button {
@@ -216,6 +219,7 @@ struct ModelPickerButton: View {
                               selectedID: vm.selectedModel,
                               showsID: true) { m in
                     vm.selectedModel = m.id
+                    onSelect?(m)
                     isOpen = false
                 }
                 .padding(.vertical, 2)
