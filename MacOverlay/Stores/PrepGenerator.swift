@@ -26,6 +26,9 @@ final class PrepGenerator {
         case embedding
         case done(count: Int)
         case failed(String)
+
+        var isFailure: Bool { if case .failed = self { return true }; return false }
+        var failureReason: String? { if case .failed(let why) = self { return why }; return nil }
     }
 
     private(set) var stage: Stage = .idle
@@ -63,6 +66,11 @@ final class PrepGenerator {
     }
 
     var isRunning: Bool { stage == .researching || stage == .embedding }
+
+    /// True when the last run failed. Exposed so the card can tell "never
+    /// started" apart from "started and broke" — they look identical
+    /// otherwise, and only one of them is worth retrying.
+    var stageFailed: Bool { stage.isFailure }
 
     var canGenerate: Bool {
         !isRunning
@@ -155,6 +163,15 @@ final class PrepGenerator {
         let q: String, a: String, topic: String?
     }
 
+    /// Key spellings seen in the wild. Gemini's `:online` variant does not
+    /// return the schema it was given — asked for `{"q":…,"topic":…,"a":…}` it
+    /// replies with `{"category":…,"question":…,"interviewer_intent":…,
+    /// "answer":…}` and wraps the array in an object. Strict decoding turned a
+    /// perfectly good answer into zero questions.
+    private static let questionKeys = ["q", "question", "prompt", "ask"]
+    private static let answerKeys   = ["a", "answer", "response", "model_answer"]
+    private static let topicKeys    = ["topic", "category", "theme", "area"]
+
     private static func ask(key: String, system: String, user: String) async throws -> String {
         let body: [String: Any] = [
             "model": "google/gemini-3.8-flash:online",
@@ -203,13 +220,16 @@ final class PrepGenerator {
         if cv.count > 80 {
             let body = cv.count > 6000 ? String(cv.prefix(6000)) + "\n[truncated]" : cv
             grounding = """
-            The candidate's résumé. Every answer must be grounded in something             that appears here — their employers, projects, stack and numbers.             Quote nothing that is not in this résumé or the context above.
+            The candidate's résumé. Every answer must be grounded in something \
+            that appears here — their employers, projects, stack and numbers. \
+            Quote nothing that is not in this résumé or the context above.
 
             \(body)
             """
         } else {
             grounding = """
-            No résumé is attached. Keep answers to method and judgement rather             than to invented projects, employers or metrics.
+            No résumé is attached. Keep answers to method and judgement rather \
+            than to invented projects, employers or metrics.
             """
         }
         return """
@@ -236,13 +256,74 @@ final class PrepGenerator {
         """
     }
 
-    /// Models often wrap JSON in prose or a fenced block, so the array is
-    /// located rather than assumed.
+    /// Models wrap JSON in prose, in a fenced block, or in an object with the
+    /// array under a key of its own. So the array is located rather than
+    /// assumed, and each element is read tolerantly.
     static func parse(_ raw: String) -> [Generated] {
-        guard let start = raw.firstIndex(of: "["),
-              let end = raw.lastIndex(of: "]"), start < end else { return [] }
-        let slice = String(raw[start...end])
-        guard let data = slice.data(using: .utf8) else { return [] }
-        return (try? JSONDecoder().decode([Generated].self, from: data)) ?? []
+        guard let data = locateArray(in: raw) else { return [] }
+        let objects: [[String: Any]]
+        if let wrapped = try? JSONSerialization.jsonObject(with: data) {
+            if let arr = wrapped as? [[String: Any]] {
+                objects = arr
+            } else if let dict = wrapped as? [String: Any] {
+                // Find the first array-of-objects value, whatever it is called.
+                let arrays = dict.values.compactMap { $0 as? [[String: Any]] }
+                guard let first = arrays.first else { return [] }
+                objects = first
+            } else {
+                return []
+            }
+        } else {
+            return []
+        }
+
+        var out: [Generated] = []
+        for o in objects {
+            // Lowercased key map: case varies between models and revisions.
+            var fields: [String: Any] = [:]
+            for (k, v) in o { fields[k.lowercased()] = v }
+
+            let q = (questionKeys.lazy.compactMap { fields[$0] as? String })
+                .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            let a = (answerKeys.lazy.compactMap { fields[$0] as? String })
+                .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            // An element missing either half is unusable; skipping it is better
+            // than admitting a blank question with a real answer attached.
+            guard let q, let a else { continue }
+            out.append(Generated(
+                q: q.trimmingCharacters(in: .whitespacesAndNewlines),
+                a: a.trimmingCharacters(in: .whitespacesAndNewlines),
+                topic: topicKeys.lazy.compactMap { fields[$0] as? String }.first))
+        }
+        return out
+    }
+
+    /// Returns the bytes of the outermost `[ … ]`, or of the whole string when
+    /// the model returned a bare object instead.
+    private static func locateArray(in raw: String) -> Data? {
+        guard let start = raw.firstIndex(of: "[") else {
+            return raw.data(using: .utf8)   // object-wrapped, no array text
+        }
+        // Scan for the matching close bracket, respecting strings and escapes,
+        // so a `]` inside an answer cannot truncate the array.
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var idx = start
+        while idx < raw.endIndex {
+            let ch = raw[idx]
+            if escaped { escaped = false }
+            else if ch == "\\" { escaped = true }
+            else if ch == "\"" { inString.toggle() }
+            else if !inString {
+                if ch == "[" { depth += 1 }
+                if ch == "]" {
+                    depth -= 1
+                    if depth == 0 { return String(raw[start...idx]).data(using: .utf8) }
+                }
+            }
+            idx = raw.index(after: idx)
+        }
+        return nil
     }
 }

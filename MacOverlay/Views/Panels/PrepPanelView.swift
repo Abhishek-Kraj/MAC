@@ -89,7 +89,9 @@ struct PrepPanelView: View {
     /// screen should be able to find "prepare" without reading the body text.
     private var prepareButtonTitle: String {
         if isRunning { return "Preparing…" }
-        return questionCount > 0 ? "Prepare more" : "Prepare interview"
+        if questionCount > 0 { return "Prepare more" }
+        if generator.stage.isFailure { return "Try again" }
+        return "Prepare interview"
     }
 
     /// Spins while preparing. A static glyph reads as decoration; the motion
@@ -109,10 +111,12 @@ struct PrepPanelView: View {
                 }
         } else {
             Image(systemName: isReady ? "checkmark.circle.fill"
-                      : (questionCount > 0 ? "exclamationmark.circle.fill" : "circle.dashed"))
+                      : (questionCount > 0 || generator.stage.isFailure
+                         ? "exclamationmark.triangle.fill" : "circle.dashed"))
                 .font(.system(size: 13))
                 .foregroundColor(isReady ? .green
-                             : (questionCount > 0 ? .orange : .secondary.opacity(0.6)))
+                             : (questionCount > 0 || generator.stage.isFailure
+                                ? .orange : .secondary.opacity(0.6)))
         }
     }
 
@@ -120,6 +124,12 @@ struct PrepPanelView: View {
         if isRunning { return "Preparing…" }
         if isReady { return "\(questionCount) prepared questions for \(activeBankID)" }
         if questionCount > 0 { return "\(questionCount) questions, but not yet matched" }
+        // A failed run is NOT the same as nothing prepared, and saying
+        // "nothing prepared yet" after a failure sends you off to re-upload a
+        // CV that was never the problem. The reason belongs here, on the card
+        // you are looking at — not in a sheet that closed itself.
+        if case .failed(let why) = generator.stage { return "Preparation failed" }
+        if let blocker = generator.guidance { return blocker }
         return "No questions prepared yet"
     }
 
@@ -127,6 +137,10 @@ struct PrepPanelView: View {
         if isRunning { return "You can start the interview now — it will use what is ready." }
         if isReady { return "Answers appear instantly when a question matches." }
         if questionCount > 0 { return "Open review to finish matching them." }
+        if case .failed(let why) = generator.stage { return why }
+        if let blocker = generator.guidance {
+            return "Your CV and context are already saved — only this is missing."
+        }
         return "Do this before you start. Takes a minute or two."
     }
 
@@ -335,7 +349,16 @@ struct PrepSetupView: View {
             VStack(alignment: .leading, spacing: 14) {
                 header
 
-                TextField("Role — e.g. Fabric Platform Lead", text: $generator.roleName)
+                // Required, and marked as such. It gates generation, and as a
+                // bare placeholder it read as optional — leaving it blank
+                // disabled the button with no visible reason.
+                HStack(spacing: 5) {
+                    Text("Role")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("required").font(.system(size: 9)).foregroundColor(.secondary)
+                    Spacer()
+                }
+                TextField("e.g. Fabric Platform Lead", text: $generator.roleName)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 12))
                     .help("The bank is filed under this, so name the role, not the posting.")
@@ -346,7 +369,10 @@ struct PrepSetupView: View {
                     Button {
                         generator.start(context: vm.interviewContext,
                                         resume: vm.interviewResumeText)
-                        onDone()
+                        // Deliberately does NOT close. The progress and any
+                        // failure are reported in this sheet; closing it here
+                        // hid both, which is how a failed run came to look
+                        // like nothing had ever been attempted.
                     } label: {
                         if generator.isRunning {
                             HStack(spacing: 5) {

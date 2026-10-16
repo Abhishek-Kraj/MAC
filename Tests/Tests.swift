@@ -1467,6 +1467,124 @@ func testPrepGeneratorParsesWrappedJSON() throws {
     try assertTrue(PrepGenerator.parse("[broken").isEmpty, "unterminated")
 }
 
+/// The parser must survive whatever shape the model actually replies in.
+///
+/// This is a regression on real output, not a hypothetical: asked for
+/// `{"q":…,"topic":…,"a":…}`, Gemini's `:online` variant replied with an
+/// object wrapping the array under `interview_questions_and_answers`, and with
+/// `category` / `question` / `interviewer_intent` / `answer` in each element.
+/// Strict decoding turned 7 good questions into zero, and the run reported
+/// "the model returned no usable questions".
+@MainActor
+func testPrepParserAcceptsRealModelShapes() throws {
+    // The exact shape observed, trimmed.
+    let real = """
+    Here you go:
+    ```json
+    {"interview_questions_and_answers": [
+      {"category": "Capacity Planning",
+       "question": "How do you approach capacity sizing across legal entities?",
+       "interviewer_intent": "Tests hands-on understanding of F-SKUs.",
+       "answer": "I establish a federated model with automated chargeback."},
+      {"category": "Governance",
+       "question": "How do you enforce data isolation across entities?",
+       "answer": "I built RLS and OLS governance at Prudential."}
+    ]}
+    ```
+    """
+    let got = PrepGenerator.parse(real)
+    try assertEq(got.count, 2, "both questions recovered from the wrapped object")
+    try assertEq(got[0].q, "How do you approach capacity sizing across legal entities?",
+                 "question picked up from `question`")
+    try assertTrue(got[0].a.contains("federated"), "answer picked up from `answer`")
+    try assertEq(got[0].topic, "Capacity Planning", "topic picked up from `category`")
+    try assertEq(got[1].q, "How do you enforce data isolation across entities?",
+                 "and the second one too")
+
+    // The schema as asked for must still work — this is the regression guard
+    // for loosening the parser.
+    let literal = #"[{"q":"Why Fabric?","topic":"leadership","a":"Because of governance."}]"#
+    let lit = PrepGenerator.parse(literal)
+    try assertEq(lit.count, 1, "the documented shape still parses")
+    try assertEq(lit[0].q, "Why Fabric?", "and q is still q")
+
+    // A bracket inside a string must not truncate the array.
+    let bracketed = #"[{"q":"A?","a":"use [0] and ] here","topic":"x"}]"#
+    let br = PrepGenerator.parse(bracketed)
+    try assertEq(br.count, 1, "brackets inside strings do not end the array early")
+    try assertTrue(br[0].a.contains("[0]"), "and the answer survives intact")
+
+    // An element missing its answer is dropped, not admitted as a blank.
+    let partial = #"[{"q":"Has a question","a":"And an answer","topic":"x"},{"q":"No answer here"}]"#
+    try assertEq(PrepGenerator.parse(partial).count, 1,
+                 "an element with no answer is skipped")
+
+    // Case differences are tolerated.
+    try assertEq(PrepGenerator.parse(#"[{"Question":"Cap Q","Answer":"Cap A"}]"#).count, 1,
+                 "capitalised keys still parse")
+
+    // Genuinely unusable input yields nothing rather than crashing.
+    try assertEq(PrepGenerator.parse("I'm sorry, I cannot help with that.").count, 0,
+                 "prose yields no questions")
+    try assertEq(PrepGenerator.parse("").count, 0, "empty yields no questions")
+    try assertEq(PrepGenerator.parse(#"[{"q":"only a question"}]"#).count, 0,
+                 "a question with no answer is not usable")
+}
+
+/// A run that failed must never read as "nothing prepared yet".
+///
+/// The card is where the user is standing after the sheet closes — and the
+/// sheet closed itself on submit, so every error message was rendered into a
+/// window that had already gone. The card then said "No questions prepared
+/// yet", which points at the résumé (never the problem) instead of at the
+/// failure that actually happened.
+@MainActor
+func testPreparationFailureIsDistinguishableFromNeverStarting() throws {
+    let g = PrepGenerator()
+
+    // Never attempted: the blocker is what is missing, not a failure.
+    g.jobDescription = "Fabric CoE role posting with plenty of detail here."
+    try assertTrue(g.stage == .idle, "starts idle")
+    try assertFalse(g.stage.isFailure, "idle is not a failure")
+    try assertFalse(g.canGenerate, "cannot generate without a role")
+
+    g.roleName = "Fabric Platform Lead"
+    try assertTrue(g.canGenerate, "role plus posting is enough")
+    try assertEq(g.guidance, nil, "and there is then nothing to tell the user")
+
+    // Failed: distinguishable, with the reason recoverable.
+    try assertEq(PrepGenerator.Stage.failed("HTTP 429 rate limited").failureReason,
+                 "HTTP 429 rate limited", "the reason survives")
+    try assertTrue(PrepGenerator.Stage.failed("x").isFailure, "and it is flagged")
+    try assertFalse(PrepGenerator.Stage.done(count: 40).isFailure, "success is not")
+
+    // The two never-asked questions must not read the same.
+    try assertTrue(g.guidance != nil || !g.stage.isFailure,
+                   "a run that never started never claims to have failed")
+}
+
+/// The prompt must reach the model as written. A scripted edit collapsed the
+/// line continuations in the résumé block, leaving runs of spaces mid-sentence
+/// inside the text sent to the model.
+@MainActor
+func testPrepPromptHasNoCollapsedWhitespace() throws {
+    for (name, resume) in [("with CV", String(repeating: "Led a lakehouse. ", count: 40)),
+                           ("without CV", "")] {
+        let p = PrepGenerator.debugPrompt(role: "Fabric Lead", jd: String(repeating: "x", count: 80),
+                                          resume: resume, count: 10)
+        for line in p.split(separator: "\n", omittingEmptySubsequences: false) {
+            try assertFalse(line.contains("     "),
+                           "\(name): collapsed line continuation in \(line.prefix(60))")
+        }
+    }
+    // And the sentences still read as sentences.
+    let withCV = PrepGenerator.debugPrompt(role: "R", jd: String(repeating: "x", count: 80),
+                                           resume: String(repeating: "Led a lakehouse. ", count: 40),
+                                           count: 10)
+    try assertTrue(withCV.contains("grounded in something that appears here"),
+                   "the résumé instruction is one clean sentence")
+}
+
 /// The setup form's contents must outlive the process. Everything on it is
 /// typed by hand — a posting pasted in, a CV attached — and none of it was
 /// stored, so a rebuild or a crash returned you to a blank form that looked as
@@ -1816,6 +1934,9 @@ struct TestsMain {
         TestRunner.run("Bank is keyed by role not by posting", testBankIsKeyedByRoleNotByPosting)
         TestRunner.run("Bank records matches", testBankRecordsMatches)
         TestRunner.run("Missed questions are captured, not auto-banked", testMissedQuestionsAreCapturedNotAutoBanked)
+        TestRunner.run("Prep parser accepts real model shapes", testPrepParserAcceptsRealModelShapes)
+        TestRunner.run("Preparation failure is distinguishable", testPreparationFailureIsDistinguishableFromNeverStarting)
+        TestRunner.run("Prep prompt has no collapsed whitespace", testPrepPromptHasNoCollapsedWhitespace)
         TestRunner.run("Interview setup survives a relaunch", testInterviewSetupSurvivesRelaunch)
         TestRunner.run("A scanned resume fails loudly", testScannedResumeFailsLoudlyInsteadOfSilently)
         TestRunner.run("Prep generator takes posting from interview context", testPrepGeneratorTakesPostingFromInterviewContext)
