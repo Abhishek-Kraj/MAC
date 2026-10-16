@@ -31,6 +31,9 @@ struct PrepQuestion: Identifiable, Hashable, Codable {
     var timesMatched: Int
     var lastMatchedAt: Date?
     var createdAt: Date
+    /// Cached vector for this question's text. Computed once when the bank is
+    /// built so the live path never embeds the whole bank.
+    var embedding: [Double]?
 
     init(id: UUID = UUID(),
          question: String,
@@ -40,7 +43,8 @@ struct PrepQuestion: Identifiable, Hashable, Codable {
          bankID: String,
          timesMatched: Int = 0,
          lastMatchedAt: Date? = nil,
-         createdAt: Date = Date()) {
+         createdAt: Date = Date(),
+         embedding: [Double]? = nil) {
         self.id = id
         self.question = question
         self.answer = answer
@@ -50,6 +54,7 @@ struct PrepQuestion: Identifiable, Hashable, Codable {
         self.timesMatched = timesMatched
         self.lastMatchedAt = lastMatchedAt
         self.createdAt = createdAt
+        self.embedding = embedding
     }
 }
 
@@ -114,16 +119,30 @@ final class PrepBank {
     func add(questions new: [PrepQuestion]) {
         questions.append(contentsOf: new)
         persist()
+        PrepBankBackup.snapshot()
     }
 
     func update(_ q: PrepQuestion) {
         guard let i = questions.firstIndex(where: { $0.id == q.id }) else { return }
         questions[i] = q
         persist()
+        // A snapshot per keystroke would bury the useful ones, so text edits
+        // are not backed up individually — `snapshot()` is called when the
+        // bank is built, accepted, or explicitly saved.
     }
 
     func delete(_ q: PrepQuestion) {
         questions.removeAll { $0.id == q.id }
+        persist()
+    }
+
+    /// Wholesale replacement, used by restore-from-backup. Snapshots the
+    /// current contents first so a bad restore is itself recoverable.
+    func replaceAll(with new: [PrepQuestion]) {
+        questions = new
+        if activeBankID.isEmpty || !new.contains(where: { $0.bankID == activeBankID }) {
+            activeBankID = new.first?.bankID ?? ""
+        }
         persist()
     }
 
@@ -176,6 +195,7 @@ final class PrepBank {
         })
         pendingCaptures.removeAll()
         persist()
+        PrepBankBackup.snapshot()
         return n
     }
 

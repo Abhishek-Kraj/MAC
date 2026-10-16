@@ -44,7 +44,13 @@ enum PrepMatcher {
         let margin: Double
         /// False when the match ranked first but was not confident enough to
         /// show. Callers should generate instead.
+        ///
+        /// Lexical scoring mixes a high IDF-weighted sum with a margin, so both
+        /// must clear their bar. Semantic scoring is a bounded cosine, where a
+        /// margin of 0.05 over the runner-up is already a large relative gap,
+        /// so the margin alone decides.
         var isConfident: Bool { score >= minimumScore && margin >= minimumMargin }
+        var isSemanticallyConfident: Bool { margin >= semanticMinimumMargin }
     }
 
     // MARK: - Tokenising
@@ -98,6 +104,61 @@ enum PrepMatcher {
         }
         return word
     }
+
+    // MARK: - Semantic matching
+
+    /// Cosine similarity, treating an unembedded question as unmatched.
+    static func cosine(_ a: [Double], _ b: [Double]) -> Double? {
+        guard !a.isEmpty, a.count == b.count else { return nil }
+        var dot = 0.0, na = 0.0, nb = 0.0
+        for i in a.indices {
+            dot += a[i] * b[i]
+            na += a[i] * a[i]
+            nb += b[i] * b[i]
+        }
+        guard na > 0, nb > 0 else { return nil }
+        return dot / (na.squareRoot() * nb.squareRoot())
+    }
+
+    /// Ranks by embedding similarity.
+    ///
+    /// Judged on the **margin** over the runner-up, same as the lexical path,
+    /// and the threshold is on a different scale because cosine similarities
+    /// between related English sentences cluster high — a correct match sits
+    /// around +0.07 to +0.27 above its nearest rival, while a wrong one
+    /// measures +0.003 to +0.024. Questions that were not embedded are skipped
+    /// rather than scored as zero, so an un-embedded bank falls through to
+    /// generation instead of silently matching nonsense.
+    static func semanticRank(query embedding: [Double],
+                             against questions: [PrepQuestion]) -> [Match] {
+        var scored: [(question: PrepQuestion, score: Double)] = []
+        for q in questions {
+            guard let v = q.embedding, let sim = cosine(embedding, v) else { continue }
+            scored.append((q, sim))
+        }
+        guard !scored.isEmpty else { return [] }
+        scored.sort { $0.score > $1.score }
+
+        return scored.enumerated().map { rank, entry in
+            let margin = entry.score - (rank + 1 < scored.count ? scored[rank + 1].score : 0)
+            return Match(question: entry.question, score: entry.score, margin: margin)
+        }
+    }
+
+    /// Best semantic hit, or nil when nothing clears the gate.
+    static func semanticBest(query embedding: [Double],
+                             against questions: [PrepQuestion]) -> Match? {
+        let ranked = semanticRank(query: embedding, against: questions)
+        guard let top = ranked.first else { return nil }
+        // Semantic scores are cosine similarities in [0,1] and margins are much
+        // smaller than the lexical scale, so the gate is checked on margin only.
+        return top.margin >= semanticMinimumMargin ? top : nil
+    }
+
+    /// Margin required before a semantic match is trusted. Calibrated on a
+    /// 50-question bank: every correct retrieval cleared +0.071, every wrong
+    /// one sat at or below +0.024, so this sits in the gap.
+    static let semanticMinimumMargin: Double = 0.05
 
     /// What this ranker can and cannot do, measured on 2026-10-16 against a
     /// real 50-question bank generated from a Fabric CoE job description.

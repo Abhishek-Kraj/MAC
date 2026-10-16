@@ -37,6 +37,15 @@ func assertEq<T: Equatable>(_ a: T, _ b: T, _ note: String = "", file: String = 
     }
 }
 
+/// Float comparison with an absolute tolerance. Plain `assertEq` on doubles
+/// is almost always the wrong tool — cosine similarities are never exact.
+func assertClose(_ a: Double, _ b: Double, _ tolerance: Double = 1e-9,
+                 _ note: String = "", file: String = #file, line: Int = #line) throws {
+    if !(abs(a - b) <= tolerance) {
+        throw TestFailure(message: "\(a) != \(b) within \(tolerance)  \(note)", file: file, line: line)
+    }
+}
+
 func assertTrue(_ cond: Bool, _ note: String = "", file: String = #file, line: Int = #line) throws {
     if !cond { throw TestFailure(message: "expected true: \(note)", file: file, line: line) }
 }
@@ -1320,6 +1329,117 @@ func testMissedQuestionsAreCapturedNotAutoBanked() throws {
 }
 
 
+/// Cosine similarity: identical vectors match exactly, orthogonal ones do
+/// not, and a mismatched dimension is refused rather than silently truncated.
+func testCosineSimilarity() throws {
+    let a: [Double] = [1, 0, 0]
+    try assertClose(PrepMatcher.cosine(a, a) ?? 0, 1.0, 1e-9, "identical")
+    try assertClose(PrepMatcher.cosine(a, [0, 1, 0]) ?? 0, 0.0, 1e-9, "orthogonal")
+    try assertTrue(PrepMatcher.cosine(a, [1, 0]) == nil, "dimension mismatch is nil")
+    try assertTrue(PrepMatcher.cosine([], []) == nil, "empty vectors are nil")
+    try assertTrue(PrepMatcher.cosine([0, 0, 0], a) == nil, "zero vector is nil")
+}
+
+/// The semantic gate must be margin-based and must ignore questions that were
+/// never embedded — an un-embedded bank has to fall through to generation, not
+/// match on a zero score.
+@MainActor
+func testSemanticRankingSkipsUnembeddedAndGatesOnMargin() throws {
+    func q(_ text: String, _ v: [Double]) -> PrepQuestion {
+        PrepQuestion(question: text, bankID: "B", embedding: v)
+    }
+    // Two candidates; the query points far more strongly at the first.
+    // Mirrored about the diagonal, so a [1, 1] query sits exactly between them.
+    let strong = q("strong", [1.0, 0.2])
+    let weak   = q("weak",   [0.2, 1.0])
+    let none   = PrepQuestion(question: "never embedded", bankID: "B")
+    let bank = [strong, weak, none]
+
+    let ranked = PrepMatcher.semanticRank(query: [1.0, 0.0], against: bank)
+    try assertEq(ranked.count, 2, "the un-embedded question is skipped entirely")
+    try assertEq(ranked.first?.question.question, "strong", "best first")
+
+    // A clear winner clears the gate.
+    try assertTrue(PrepMatcher.semanticBest(query: [1.0, 0.0], against: bank) != nil,
+                   "a decisive match is trusted")
+
+    // A query sitting exactly between them must be refused, however high the
+    // absolute score is — both score about 0.83.
+    let between = PrepMatcher.semanticBest(query: [1.0, 1.0], against: bank)
+    try assertTrue(between == nil, "an ambiguous query must not pick one")
+}
+
+/// A snapshot has to restore byte-for-byte: an interview 20 minutes away
+/// cannot be rebuilt from the network.
+@MainActor
+func testBankBackupSnapshotsAndRestores() throws {
+    let bank = PrepBank.shared
+    let role = "ZZ Backup Role"
+    bank.deleteBank(role)
+
+    let originals = [
+        PrepQuestion(question: "How do we size Fabric capacity?", answer: "By entity.",
+                     bankID: role, embedding: [0.1, 0.2, 0.3]),
+        PrepQuestion(question: "How is HR salary data protected?", answer: "Purview labels.",
+                     topic: "governance", bankID: role),
+    ]
+    bank.add(questions: originals)
+
+    // Adding triggers a snapshot.
+    try assertTrue(PrepBankBackup.snapshots().contains { snap in
+        snap.questionCount >= originals.count
+    }, "a snapshot was written")
+
+    // Wreck it, then restore.
+    bank.deleteBank(role)
+    try assertEq(bank.questions(inBank: role).count, 0, "bank emptied")
+
+    let latest = try PrepBankBackup.snapshots().first
+        .unwrap("a snapshot to restore")
+    let restored = try PrepBankBackup.restore(from: latest.url)
+
+    try assertTrue(restored >= originals.count, "restored a snapshot")
+    let after: [PrepQuestion] = bank.questions(inBank: role)
+    try assertEq(after.count, originals.count, "all questions back")
+    try assertEq(after.map(\.question).sorted(), originals.map(\.question).sorted(), "questions match")
+    try assertEq(after.first(where: { $0.topic == "governance" })?.answer, "Purview labels.",
+                 "answers survive the round trip")
+    // Vectors must survive too, or a restore still needs the network.
+    try assertTrue(after.contains { $0.embedding != nil }, "embeddings survive")
+    defer { bank.deleteBank(role) }
+}
+
+/// Export writes a readable, hand-editable copy; import reads it back.
+@MainActor
+func testBankExportRoundTrip() throws {
+    let bank = PrepBank.shared
+    let role = "ZZ Export Role"
+    bank.deleteBank(role)
+    bank.add(questions: [PrepQuestion(question: "Exported question?", answer: "Yes.",
+                                      bankID: role)])
+    defer { bank.deleteBank(role) }
+
+    let dir = JSONStore.appDirectory.appendingPathComponent("zz-export.json")
+    try assertTrue(PrepBankBackup.export(to: dir), "export succeeded")
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let loaded = try PrepBankBackup.load(from: dir)
+    try assertEq(loaded.count, 1, "one question exported")
+    try assertEq(loaded.first?.question, "Exported question?")
+    // Pretty-printed so a person can open and edit it.
+    let text = try String(contentsOf: dir, encoding: .utf8)
+    try assertTrue(text.contains("\n"), "exported file is pretty-printed")
+}
+
+/// Pruning must bound the snapshot count, or a long editing session fills the
+/// disk.
+@MainActor
+func testBankBackupPrunesOldSnapshots() throws {
+    for _ in 0..<(PrepBankBackup.keep + 3) { PrepBankBackup.snapshot() }
+    try assertTrue(PrepBankBackup.snapshots().count <= PrepBankBackup.keep,
+                   "snapshots are capped at \(PrepBankBackup.keep)")
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -1443,6 +1563,11 @@ struct TestsMain {
         TestRunner.run("Bank is keyed by role not by posting", testBankIsKeyedByRoleNotByPosting)
         TestRunner.run("Bank records matches", testBankRecordsMatches)
         TestRunner.run("Missed questions are captured, not auto-banked", testMissedQuestionsAreCapturedNotAutoBanked)
+        TestRunner.run("Cosine similarity", testCosineSimilarity)
+        TestRunner.run("Semantic ranking skips unembedded and gates on margin", testSemanticRankingSkipsUnembeddedAndGatesOnMargin)
+        TestRunner.run("Bank backup snapshots and restores", testBankBackupSnapshotsAndRestores)
+        TestRunner.run("Bank export round trip", testBankExportRoundTrip)
+        TestRunner.run("Bank backup prunes old snapshots", testBankBackupPrunesOldSnapshots)
         TestRunner.run("Answer depth scales the prompt", testAnswerDepthScalesThePrompt)
         TestRunner.run("Answer depth persists and feeds the prompt", testAnswerDepthPersistsAndFeedsThePrompt)
         TestRunner.run("Panel can move between displays", testPanelCanMoveBetweenDisplays)

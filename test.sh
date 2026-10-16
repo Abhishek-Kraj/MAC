@@ -40,6 +40,7 @@ SOURCES=(
     "$SRC_DIR/Models/AnswerDepth.swift"
     "$SRC_DIR/Stores/PrepMatcher.swift"
     "$SRC_DIR/Stores/PrepBank.swift"
+    "$SRC_DIR/Stores/PrepBankBackup.swift"
     "$SRC_DIR/Views/Shared/Design.swift"
     "$SRC_DIR/Views/Shared/MarkdownResponseView.swift"
 )
