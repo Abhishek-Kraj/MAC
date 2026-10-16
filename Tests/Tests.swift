@@ -1471,16 +1471,20 @@ func testPrepGeneratorParsesWrappedJSON() throws {
 func testPrepGeneratorWarnsWithoutBackground() throws {
     // The prompt text is what enforces this; assert it says so explicitly.
     let prompt = PrepGenerator.debugPrompt(role: "R", jd: String(repeating: "x", count: 60),
-                                           background: "", count: 10)
-    try assertTrue(prompt.lowercased().contains("do not invent"),
-                   "no-background prompt forbids invention")
-    try assertTrue(prompt.lowercased().contains("keep answers general"),
-                   "and says what to do instead")
-    let withBG = PrepGenerator.debugPrompt(role: "R", jd: String(repeating: "x", count: 60),
-                                           background: "I built X at Y", count: 10)
-    try assertTrue(withBG.contains("I built X at Y"), "background is passed through")
-    try assertFalse(withBG.lowercased().contains("no extra background"),
-                    "background replaces the warning")
+                                           count: 10)
+    // The prompt is a Swift multiline literal, so phrases wrap across lines.
+    // Compare against a whitespace-collapsed copy.
+    let flat = prompt.lowercased()
+        .split(whereSeparator: \.isWhitespace)
+        .joined(separator: " ")
+    try assertTrue(flat.contains("do not invent"),
+                   "prompt forbids inventing experience")
+    try assertTrue(flat.contains("keep the answer general"),
+                   "and says what to do instead when context is thin")
+
+    // One field has to do both jobs: pick the questions and ground the answers.
+    try assertTrue(flat.contains("twice"), "context is explicitly used for both")
+    try assertFalse(flat.contains("background:"), "no second background field to fill in")
 }
 
 /// The posting must be typed once. Prep used to have its own JD box, which

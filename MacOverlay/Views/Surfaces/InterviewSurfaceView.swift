@@ -102,11 +102,14 @@ private struct InterviewSetupForm: View {
                 languagePicker
                 resumePicker
                 contextEditor
+                // Directly under the inputs it consumes. The order now reads
+                // as a sequence: add a resume, add context, then prepare — and
+                // Start is the last thing on screen rather than the fifth.
+                PrepPanelView()
                 promptPicker
                 autoGenerateRow
                 modelPickerRow
                 depthRow
-                PrepPanelView()
                 startRow
             }
             .padding(.horizontal, 22)
@@ -672,10 +675,10 @@ private struct RegularCallSetupForm: View {
                 InterviewModeBar()
                 header
                 contextEditor
+                PrepPanelView()
                 promptPicker
                 modeToggleRow
                 if vm.regularCallAsCall { languagePicker }
-                PrepPanelView()
                 startRow
             }
             .padding(.horizontal, 22)

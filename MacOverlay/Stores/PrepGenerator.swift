@@ -34,8 +34,6 @@ final class PrepGenerator {
     /// panel reads the interview's existing Context field instead, so the JD
     /// is typed once rather than pasted into two boxes.
     var jobDescription = ""
-    /// What the answers should be grounded in. Keeps them in your voice.
-    var background = ""
     var questionCount = 40
 
     /// Takes the posting from the interview setup's Context field.
@@ -88,8 +86,7 @@ final class PrepGenerator {
             let raw = try await Self.ask(
                 key: key,
                 system: "You write interview questions and model answers. You reply with JSON only.",
-                user: Self.prompt(role: role, jd: jd,
-                                  background: background, count: questionCount))
+                user: Self.prompt(role: role, jd: jd, count: questionCount))
             let parsed = Self.parse(raw)
             guard !parsed.isEmpty else {
                 stage = .failed("The model returned no usable questions. Try again.")
@@ -162,25 +159,25 @@ final class PrepGenerator {
     }
 
     /// Exposed so the prompt can be asserted in tests without a network call.
-    static func debugPrompt(role: String, jd: String,
-                            background: String, count: Int) -> String {
-        prompt(role: role, jd: jd, background: background, count: count)
+    static func debugPrompt(role: String, jd: String, count: Int) -> String {
+        prompt(role: role, jd: jd, count: count)
     }
 
-    private static func prompt(role: String, jd: String,
-                               background: String, count: Int) -> String {
-        let grounding = background.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "No extra background supplied — keep answers general and do not invent employers, projects or metrics."
-            : "Ground every answer in this background, in the first person, and never invent anything outside it:\n\(background)"
-        return """
+    private static func prompt(role: String, jd: String, count: Int) -> String {
+        """
         Research this role and write the questions an interviewer would actually ask.
 
         Role: \(role)
 
-        Job description:
+        The candidate's own context — the posting, the company, and whatever
+        they have written about their experience and talking points:
         \(jd)
 
-        \(grounding)
+        Use that twice: to work out what the role will probe, and to ground each
+        answer in what the candidate has actually done, written in the first
+        person. Do not invent employers, projects, metrics or employers' names
+        that are not in the context above — if the context is thin, keep the
+        answer general rather than specific and fictional.
 
         Return ONLY a JSON array. Each element:
         {"q":"<the interviewer's question, one line>",

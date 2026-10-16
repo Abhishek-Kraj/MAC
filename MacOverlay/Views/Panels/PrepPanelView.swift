@@ -231,8 +231,6 @@ struct PrepSetupView: View {
 
                 posting
 
-                background
-
                 HStack(spacing: 8) {
                     Button {
                         generator.useContext(vm.interviewContext)
@@ -311,22 +309,6 @@ struct PrepSetupView: View {
                     .overlay(RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5))
             }
-        }
-    }
-
-    private var background: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Your background").font(.system(size: 12, weight: .semibold))
-                Text("optional, but it keeps answers in your voice")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
-            TextEditor(text: $generator.background)
-                .font(.system(size: 11))
-                .frame(minHeight: 90)
-                .overlay(RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5))
         }
     }
 
