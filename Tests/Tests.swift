@@ -870,6 +870,59 @@ func testMalformedCatalogueFailsRatherThanEmptying() throws {
     try assertTrue(OpenRouterCatalog.shared.retired.isEmpty, "a failed fetch retires nothing")
 }
 
+/// A cache written by an older build is missing fields the current code
+/// reads, so it must be refetched even when it is only hours old. Without
+/// this the tier badges and reasoning index stay empty against a cache that
+/// looks current — which is exactly what happened in the field.
+@MainActor
+func testCatalogueSchemaInvalidatesOldCaches() throws {
+    let now = Date()
+    let hour: TimeInterval = 3600
+    let current = 2, older = 1
+
+    // Never fetched.
+    try assertTrue(OpenRouterCatalog.isStale(fetchedAt: nil, schema: current, now: now))
+    // Fresh, but written by a build whose shape differs.
+    try assertTrue(OpenRouterCatalog.isStale(fetchedAt: now, schema: older, now: now),
+                   "older schema is stale regardless of age")
+    // Current schema and recent.
+    try assertFalse(OpenRouterCatalog.isStale(fetchedAt: now.addingTimeInterval(-hour),
+                                              schema: current, now: now))
+    // Current schema but older than the threshold.
+    try assertTrue(OpenRouterCatalog.isStale(fetchedAt: now.addingTimeInterval(-hour * 30),
+                                             schema: current, now: now))
+    // No schema recorded at all reads as older, not current.
+    try assertTrue(OpenRouterCatalog.isStale(fetchedAt: now, schema: 0, now: now),
+                   "absent schema must not be treated as current")
+}
+
+/// Fetched models are hidden from the picker by default so 465 rows do not
+/// become the menu — but the built-ins, hand-added models and the current
+/// selection must survive that.
+@MainActor
+func testFetchedModelsAreHiddenButSelectionSurvives() throws {
+    let v = ModelVisibility.shared
+    defer { v.showAll() }
+
+    v.showAll()
+    UserDefaults.standard.set("openrouter/anthropic/claude-sonnet-5", forKey: "selectedModel")
+
+    let catalog = OpenRouterCatalog.shared
+    let fetched = [
+        OpenRouterModel(id: "openrouter/vendor/new", name: "New", provider: "Vendor",
+                        supportsImages: false, isFree: true,
+                        contextLength: 8, supportedParameters: [], blendedPrice: 0),
+        OpenRouterModel(id: "openrouter/anthropic/claude-sonnet-5", name: "Sonnet",
+                        provider: "Anthropic", supportsImages: true, isFree: false,
+                        contextLength: 8, supportedParameters: [], blendedPrice: 9),
+    ]
+    catalog.hideForTesting(fetched)
+
+    try assertFalse(v.isVisible("openrouter/vendor/new"), "new fetched model hidden")
+    try assertTrue(v.isVisible("openrouter/anthropic/claude-sonnet-5"), "the selected model stays visible")
+    try assertTrue(v.isVisible("openrouter/openai/gpt-5.5"), "built-in defaults stay visible")
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -979,6 +1032,8 @@ struct TestsMain {
         TestRunner.run("Blended price conversion", testBlendedPriceConversion)
         TestRunner.run("Model tier from a catalogue entry", testModelTierFromCatalogueEntry)
         TestRunner.run("Catalogue starts stale", testCatalogueStartsStale)
+        TestRunner.run("Catalogue schema invalidates old caches", testCatalogueSchemaInvalidatesOldCaches)
+        TestRunner.run("Fetched models hidden, selection survives", testFetchedModelsAreHiddenButSelectionSurvives)
         TestRunner.run("Catalogue age wording", testCatalogueAgeWording)
         TestRunner.run("Malformed catalogue fails rather than emptying", testMalformedCatalogueFailsRatherThanEmptying)
         TestRunner.run("Grok stream URL", testGrokStreamURL)

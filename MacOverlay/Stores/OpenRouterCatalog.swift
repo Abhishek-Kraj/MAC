@@ -205,6 +205,14 @@ final class OpenRouterCatalog {
     private static let cacheKey = "openRouterCatalog.cached"
     private static let customKey = "openRouterCatalog.custom"
     private static let fetchedOnKey = "openRouterCatalog.fetchedAt"
+    private static let schemaKey = "openRouterCatalog.schemaVersion"
+
+    /// Bump whenever the cached shape changes. A cache written by an older
+    /// build is missing fields the current code reads (per-model pricing,
+    /// supported_parameters), so it must be refetched even when it is only
+    /// hours old — age alone would let a stale schema masquerade as fresh.
+    /// v2: added supportedParameters + blendedPrice.
+    private static let schemaVersion = 2
     private static let modelsURL = URL(string: "https://openrouter.ai/api/v1/models")!
 
     /// Ids OpenRouter advertises as honouring `reasoning_effort`, as a
@@ -222,8 +230,19 @@ final class OpenRouterCatalog {
     /// True when the catalogue is old enough to be worth refetching, or has
     /// never been fetched at all.
     var isStale: Bool {
-        guard let lastFetchedAt else { return true }
-        return Date().timeIntervalSince(lastFetchedAt) > Self.staleAfter
+        Self.isStale(fetchedAt: lastFetchedAt,
+                     schema: UserDefaults.standard.integer(forKey: Self.schemaKey))
+    }
+
+    /// Pure so the staleness rule can be tested directly. A cache is stale if
+    /// it was never fetched, was written by an older build, or has aged past
+    /// `staleAfter`.
+    static func isStale(fetchedAt: Date?, schema: Int,
+                        now: Date = Date(),
+                        staleAfter: TimeInterval = staleAfter) -> Bool {
+        guard let fetchedAt else { return true }
+        guard schema == schemaVersion else { return true }
+        return now.timeIntervalSince(fetchedAt) > staleAfter
     }
 
     /// Short human age, e.g. "just now", "6h ago", "3d ago".
@@ -343,6 +362,7 @@ final class OpenRouterCatalog {
             lastFetchedAt = Date()
             UserDefaults.standard.set(try? JSONEncoder().encode(parsed), forKey: Self.cacheKey)
             UserDefaults.standard.set(lastFetchedAt, forKey: Self.fetchedOnKey)
+            UserDefaults.standard.set(Self.schemaVersion, forKey: Self.schemaKey)
             hideNewlyFetched(parsed)
         } catch {
             lastError = error.localizedDescription
@@ -413,12 +433,24 @@ final class OpenRouterCatalog {
     /// Adds freshly fetched ids to `ModelVisibility`'s hidden set so the
     /// picker menu does not explode to several hundred rows. Built-ins and
     /// anything the user already chose stay visible.
-    private func hideNewlyFetched(_ models: [OpenRouterModel]) {
+    /// Test seam for `hideNewlyFetched`.
+    func hideForTesting(_ models: [OpenRouterModel]) { hideNewlyFetched(models) }
+
+    func hideNewlyFetched(_ models: [OpenRouterModel]) {
         let visibility = ModelVisibility.shared
-        let known = Set(Self.merged(custom: custom, fetched: models).map(\.id))
-        let additions = Set(models.map(\.id)).subtracting(known)
-        guard !additions.isEmpty else { return }
-        for id in additions { visibility.hide(id) }
+        // Keep hand-added models, the built-in defaults, and whatever the
+        // user has currently selected — hiding that one would leave them
+        // pointed at a model the picker no longer offers.
+        //
+        // Note the previous version derived `known` from
+        // `merged(custom:fetched:)`, which already contained every fetched id,
+        // so the difference was always empty and nothing was ever hidden.
+        var keep = Set(custom.map(\.id))
+        keep.formUnion(Self.builtins.map(\.id))
+        if let selected = UserDefaults.standard.string(forKey: "selectedModel") {
+            keep.insert(selected)
+        }
+        for id in models.map(\.id) where !keep.contains(id) { visibility.hide(id) }
     }
 
     // MARK: - Custom models
