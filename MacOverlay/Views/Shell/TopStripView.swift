@@ -212,50 +212,12 @@ struct TopStripView: View {
                       systemImage: "wand.and.sparkles")
             }
 
-            // Model picker — moved out of the bar; switching applies
-            // from the next answer.
-            Menu {
-                let visibility = ModelVisibility.shared
-                ForEach(OverlayViewModel.modelProviders, id: \.self) { provider in
-                    let models = OverlayViewModel.availableModels
-                        .filter { $0.provider == provider && visibility.isVisible($0.id) }
-                    if !models.isEmpty {
-                        Section(provider) {
-                            ForEach(models, id: \.id) { m in
-                                Button {
-                                    vm.selectedModel = m.id
-                                } label: {
-                                    HStack(spacing: 5) {
-                                        Text(m.name)
-                                        // Cheap-tier marker. Screenshot sends
-                                        // (⌘⇧⏎) only work on models whose
-                                        // input modalities include images.
-                                        if m.isFree {
-                                            Text("FREE")
-                                                .font(.system(size: 8, weight: .bold))
-                                                .padding(.horizontal, 3)
-                                                .padding(.vertical, 1)
-                                                .background(Color.green.opacity(0.22))
-                                                .clipShape(RoundedRectangle(cornerRadius: 3))
-                                        }
-                                        if m.supportsImages {
-                                            Image(systemName: "camera")
-                                                .font(.system(size: 8))
-                                                .foregroundColor(.secondary)
-                                        }
-                                        Spacer(minLength: 0)
-                                        if vm.selectedModel == m.id {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } label: {
-                Label("Model: \(currentModelName)", systemImage: "cpu")
-            }
+            // Model picker. A popover rather than a Menu because it shares
+            // the filter bar, tier badges and search with Settings -> AI; a
+            // Menu cannot host a search field, which is why the two screens
+            // used to disagree about which models existed.
+            ModelPickerButton(currentModelName: currentModelName)
+
 
             Divider()
 

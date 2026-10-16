@@ -11,10 +11,6 @@ struct PreferencesView: View {
     // Model catalogue filters (AI tab). The OpenRouter catalogue runs to
     // several hundred entries, so this list needs narrowing controls or it
     // is unusable.
-    @State private var modelSearch = ""
-    /// nil = no tier filter, i.e. everything.
-    @State private var tierFilter: ModelTier? = nil
-    @State private var imageOnly = false
     @State private var customModelDraft = ""
     @AppStorage(KeywordStyle.defaultsKey) private var keywordStyle = KeywordStyle.standard
 
@@ -591,56 +587,25 @@ struct PreferencesView: View {
             .foregroundColor(.orange)
     }
 
-    /// Groups models by provider in a single pass, preserving the order the
-    /// providers first appear in. `@ViewBuilder` rejects a bare `for` loop,
-    /// so this lives outside the view.
-    private static func groupByProvider(
-        _ models: [OpenRouterModel]
-    ) -> [(provider: String, models: [OpenRouterModel])] {
-        var order: [String] = []
-        var map: [String: [OpenRouterModel]] = [:]
-        for m in models {
-            if map[m.provider] == nil { order.append(m.provider) }
-            map[m.provider, default: []].append(m)
-        }
-        return order.map { (provider: $0, models: map[$0] ?? []) }
-    }
-
     /// Catalogue of every model the app can reach, grouped by provider.
     ///
     /// Before this existed the list was a hardcoded eleven entries and there
-    /// was no way to add another — the OpenRouter `:free` tier was
-    /// unreachable. Now it is the union of the built-in defaults, whatever
-    /// has been fetched from OpenRouter, and any model typed in by hand, with
-    /// search and filters so several hundred rows stay navigable.
+    /// Settings → AI. Filters come from `ModelFilterStore.shared` — the same
+    /// store the overlay's picker reads — so both screens answer "which
+    /// models am I looking at" identically.
+    ///
+    /// The rows here toggle whether a model is *reachable* from the picker,
+    /// whereas in the picker a row *selects* the model. Different action, one
+    /// list.
     @ViewBuilder
     private var modelCatalog: some View {
         let catalog = OpenRouterCatalog.shared
         let visibility = ModelVisibility.shared
-
-        let query = modelSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let matches: (OpenRouterModel) -> Bool = { m in
-            if let tierFilter, m.tier != tierFilter { return false }
-            if imageOnly && !m.supportsImages { return false }
-            guard !query.isEmpty else { return true }
-            return m.name.lowercased().contains(query)
-                || m.id.lowercased().contains(query)
-                || m.provider.lowercased().contains(query)
-        }
-
-        let filtered = OverlayViewModel.availableModels.filter(matches)
+        let store = ModelFilterStore.shared
+        let filteredIDs = store.matchingIDs
         let allIDs = OverlayViewModel.availableModels.map(\.id)
-        // One pass to group, instead of re-filtering the whole catalogue for
-        // every provider — that was 465 x ~60 comparisons on every render.
-        let groups = Self.groupByProvider(filtered)
-        let visibleCount = filtered.filter { visibility.isVisible($0.id) }.count
-        let filteredIDs = filtered.map(\.id)
+        let visibleCount = filteredIDs.filter { visibility.isVisible($0) }.count
 
-        // Lazy: the list costs what is on screen, not what is in the
-        // catalogue. The plain VStack this replaced eagerly built all 465
-        // rows on every keystroke in the search box, which is why "Show all"
-        // looked like it had stopped working — it did work, the window just
-        // stopped responding while it drew them.
         LazyVStack(alignment: .leading, spacing: 12) {
             catalogueToolbar(catalog: catalog)
 
@@ -650,30 +615,31 @@ struct PreferencesView: View {
                     .foregroundColor(.red)
             }
 
-            if filtered.isEmpty {
-                Text(query.isEmpty && tierFilter == nil && !imageOnly
-                     ? "No models available."
-                     : "No models match these filters.")
+            ModelFilterBar(store: store)
+
+            if store.groupedModels.isEmpty {
+                Text(store.isFiltering ? "No models match these filters."
+                                      : "No models available.")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .padding(.vertical, 8)
             } else {
-                Text("\(visibleCount) of \(filtered.count) shown in the model menu")
+                Text("\(visibleCount) of \(filteredIDs.count) shown in the model picker")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary.opacity(0.8))
             }
 
-            ForEach(groups, id: \.0) { provider, models in
+            ForEach(store.groupedModels, id: \.provider) { group in
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(provider)
+                    Text(group.provider)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary.opacity(0.85))
                         .textCase(.uppercase)
                         .kerning(0.4)
                     LazyVStack(spacing: 1) {
-                        ForEach(models, id: \.id) { m in
-                            modelToggleRow(model: m, visibility: visibility,
-                                           allIDs: allIDs)
+                        ForEach(group.models, id: \.id) { m in
+                            visibilityToggleRow(model: m, visibility: visibility,
+                                                allIDs: allIDs)
                         }
                     }
                 }
@@ -681,7 +647,7 @@ struct PreferencesView: View {
 
             HStack(spacing: 6) {
                 // Scoped to the active filters — see `showAll(among:)`.
-                Button("Show all \(filtered.count)") {
+                Button("Show all \(filteredIDs.count)") {
                     visibility.showAll(among: filteredIDs)
                 }
                 .buttonStyle(.secondaryCompact)
@@ -753,50 +719,6 @@ struct PreferencesView: View {
                     .disabled(customModelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
-            HStack(spacing: 8) {
-                TextField("Search models", text: $modelSearch)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11))
-
-                Picker("", selection: $tierFilter) {
-                    Text("All tiers").tag(ModelTier?.none)
-                    ForEach(ModelTier.allCases) { t in
-                        Text(t.label).tag(ModelTier?.some(t))
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .frame(width: 130)
-                .help("Narrow by price tier. Light models answer fastest.")
-
-                Toggle("Images", isOn: $imageOnly)
-                    .toggleStyle(.checkbox)
-                    .font(.system(size: 11))
-                    .help("Only models that accept image input, so ⌘⇧⌏ screenshots work")
-            }
-
-            // Tier counts, so the numbers are visible before choosing.
-            HStack(spacing: 10) {
-                ForEach(ModelTier.allCases) { t in
-                    let n = OverlayViewModel.availableModels.filter { $0.tier == t }.count
-                    if n > 0 {
-                        Button {
-                            tierFilter = (tierFilter == t) ? nil : t
-                        } label: {
-                            Text("\(t.label) \(n)")
-                                .font(.system(size: 10, weight: tierFilter == t ? .semibold : .regular))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(tierFilter == t ? Color.accentColor.opacity(0.25)
-                                              : Color.white.opacity(0.05))
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                        }
-                        .buttonStyle(.plain)
-                        .help(t.help)
-                    }
-                }
-                Spacer()
-            }
         }
     }
 
@@ -807,30 +729,12 @@ struct PreferencesView: View {
         }
     }
 
-    /// Small coloured tier marker. Free is loudest because that is the one
-    /// people scan for; the paid tiers stay quiet.
-    private func tierBadge(_ tier: ModelTier) -> some View {
-        Text(tier == .unpriced ? "AUTO" : tier.label.uppercased())
-            .font(.system(size: 8, weight: .bold))
-            .padding(.horizontal, 3)
-            .padding(.vertical, 1)
-            .background(tierColor(tier).opacity(0.22))
-            .clipShape(RoundedRectangle(cornerRadius: 3))
-            .help(tier.help)
-    }
 
-    private func tierColor(_ tier: ModelTier) -> Color {
-        switch tier {
-        case .free:     return .green
-        case .light:    return .teal
-        case .moderate: return .blue
-        case .frontier: return .orange
-        case .unpriced: return .secondary
-        }
-    }
-
-    private func modelToggleRow(model: OpenRouterModel, visibility: ModelVisibility,
-                                allIDs: [String]) -> some View {
+    /// Settings rows toggle whether a model is reachable from the picker.
+    /// In the picker itself a row *selects* the model instead — same list,
+    /// different action.
+    private func visibilityToggleRow(model: OpenRouterModel, visibility: ModelVisibility,
+                                     allIDs: [String]) -> some View {
         let id = model.id
         let on = visibility.isVisible(id)
         // The picker has to render at least one option, so we can't let the
@@ -847,7 +751,7 @@ struct PreferencesView: View {
                 Text(model.name)
                     .font(.system(size: 12))
                     .foregroundColor(.primary)
-                tierBadge(model.tier)
+                ModelTierBadge(tier: model.tier)
                 if model.supportsImages {
                     Image(systemName: "camera")
                         .font(.system(size: 9))

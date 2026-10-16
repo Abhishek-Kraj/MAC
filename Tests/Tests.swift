@@ -923,6 +923,63 @@ func testFetchedModelsAreHiddenButSelectionSurvives() throws {
     try assertTrue(v.isVisible("openrouter/openai/gpt-5.5"), "built-in defaults stay visible")
 }
 
+/// Settings -> AI and the overlay's picker read the same `ModelFilterStore`,
+/// which is what stopped them disagreeing about which models exist. Filtering
+/// itself must also match on provider, or typing a vendor name in the picker
+/// would find nothing.
+@MainActor
+func testSharedModelFilterStore() throws {
+    let store = ModelFilterStore.shared
+    defer { store.reset() }
+
+    store.reset()
+    try assertFalse(store.isFiltering, "a fresh store filters nothing")
+
+    // Not free: a `:free` model is tiered `.free` regardless of price, so a
+    // fixture marked free would never appear under a Light filter.
+    let cheap = OpenRouterModel(id: "openrouter/v/cheap", name: "Cheap Thing",
+                                provider: "Vendor", supportsImages: false, isFree: false,
+                                contextLength: 8, supportedParameters: nil, blendedPrice: 0.2)
+    let pricey = OpenRouterModel(id: "openrouter/v/dear", name: "Dear Thing",
+                                 provider: "Vendor", supportsImages: true, isFree: false,
+                                 contextLength: 8, supportedParameters: nil, blendedPrice: 40)
+    let all = [cheap, pricey]
+
+    func countMatching() -> Int { all.filter { store.matches($0) }.count }
+
+    try assertEq(countMatching(), 2, "no filter passes both")
+
+    store.tier = .light
+    try assertEq(countMatching(), 1, "tier narrows it")
+    try assertTrue(store.isFiltering)
+
+    store.tier = nil
+    store.imagesOnly = true
+    try assertEq(countMatching(), 1, "images-only keeps the one that reads images")
+
+    store.imagesOnly = false
+    store.reset()
+    store.tier = .free
+    let freeModel = OpenRouterModel(id: "openrouter/v/free", name: "Freebie",
+                                    provider: "Vendor", supportsImages: false, isFree: true,
+                                    contextLength: 8, supportedParameters: nil, blendedPrice: 0)
+    try assertTrue(store.matches(freeModel), "a :free model is tiered free")
+    try assertFalse(store.matches(cheap), "a cheap paid model is not free")
+
+    store.reset()
+    store.search = "cheap"
+    try assertEq(countMatching(), 1, "search by name")
+
+    store.search = "vendor"
+    try assertEq(countMatching(), 2, "search by provider is case- and accent-insensitive")
+
+    store.search = "dear"
+    try assertEq(countMatching(), 1, "search by the other name")
+
+    store.reset()
+    try assertEq(countMatching(), 2, "reset clears everything")
+}
+
 // MARK: - Grok transcription
 
 func testGrokStreamURL() throws {
@@ -1028,6 +1085,7 @@ struct TestsMain {
         TestRunner.run("No payment code in the source tree", testNoPaymentCodeInSourceTree)
         TestRunner.run("Show all is scoped to the filters", testShowAllIsScopedToTheGivenIds)
         TestRunner.run("Model tier thresholds", testModelTierThresholds)
+        TestRunner.run("Shared model filter store", testSharedModelFilterStore)
         TestRunner.run("Model tier rejects router pricing", testModelTierRejectsRouterPricing)
         TestRunner.run("Blended price conversion", testBlendedPriceConversion)
         TestRunner.run("Model tier from a catalogue entry", testModelTierFromCatalogueEntry)
