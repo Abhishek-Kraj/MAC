@@ -675,6 +675,7 @@ private struct RegularCallSetupForm: View {
                 promptPicker
                 modeToggleRow
                 if vm.regularCallAsCall { languagePicker }
+                PrepPanelView()
                 startRow
             }
             .padding(.horizontal, 22)
