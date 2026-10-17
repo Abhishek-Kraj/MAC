@@ -96,6 +96,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // panel (and the swizzle) pick up the persisted preference.
         NSWindow.screenShareInvisible = vm.screenShareInvisible
         setupOverlayPanel()
+
+        // `open -a "TheCloser Dev.app" --args -troubleshoot` opens the
+        // inspector at launch. The app has no windows of its own and the
+        // overlay hides itself from screen sharing, so there was previously no
+        // way to get to an inspectable window from outside the process — and
+        // that is exactly what you need when you cannot drive the UI.
+        if CommandLine.arguments.contains("-troubleshoot") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.toggleInspector()
+            }
+        }
         // No menu-bar status item: the icon next to the clock/battery is
         // visible to other people during screen shares (the menu bar IS
         // captured, unlike our capture-excluded panel) and defeats the
@@ -1106,7 +1117,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeInspector() -> InspectorWindow {
-        let size = NSSize(width: 460, height: 720)
+        let size = NSSize(width: 480, height: 760)
         let w = InspectorWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .resizable],
@@ -1128,7 +1139,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             onClose: { [weak w] in w?.orderOut(nil) })
         let host = NSHostingController(rootView: root)
         w.contentViewController = host
-        w.contentMinSize = NSSize(width: 380, height: 520)
+        // Set explicitly after installing the controller. Without this the
+        // window opens at `contentMinSize` rather than at the size asked for,
+        // because the hosting controller's fitting size wins.
+        w.contentMinSize = NSSize(width: 400, height: 560)
+        w.setContentSize(size)
         return w
     }
 
