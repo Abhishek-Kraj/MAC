@@ -541,42 +541,60 @@ struct BrowserShellSurface: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            VStack(spacing: 8) {
+        VStack(spacing: 14) {
+            VStack(spacing: 7) {
                 Image(systemName: "globe")
-                    .font(.system(size: 32, weight: .light))
+                    .font(.system(size: 30, weight: .light))
                     .foregroundStyle(Design.Ink.tertiary)
                 Text("No tabs open")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(Design.Ink.primary)
-                Text("Pick a quick start, or type a custom URL to open it in a new tab.")
-                    .font(.system(size: 11))
-                    .foregroundColor(Design.Ink.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 340)
             }
 
-            HStack(spacing: 8) {
-                quickStartChip(title: "Google",  icon: "magnifyingglass",
-                               url: "https://www.google.com")
-                quickStartChip(title: "ChatGPT", icon: "bubble.left.and.text.bubble.right",
-                               url: "https://chat.openai.com")
-                quickStartChip(title: "Claude",  icon: "sparkles",
-                               url: "https://claude.ai")
-            }
-
+            // The URL field leads. Typing an address is the action; the quick
+            // starts below are shortcuts into it.
             customURLField
 
-            // The tab bar carries the same control, but it isn't on screen
-            // until a tab is — and in the detached window with no tabs open
-            // this is the only way back into the overlay besides the window's
-            // own close button.
-            chip(title: isDetached ? "Put back in overlay" : "Open in its own window",
-                 icon:  isDetached ? "arrow.down.right.and.arrow.up.left"
-                                   : "macwindow.on.rectangle") {
-                if isDetached { vm.reattachBrowser() } else { vm.detachBrowser() }
+            VStack(spacing: 8) {
+                Text("Quick start")
+                    .font(Design.Font.eyebrow)
+                    .foregroundColor(Design.Ink.muted)
+                HStack(spacing: 8) {
+                    quickStartChip(title: "Google",  icon: "magnifyingglass",
+                                   url: "https://www.google.com")
+                    quickStartChip(title: "ChatGPT", icon: "bubble.left.and.text.bubble.right",
+                                   url: "https://chat.openai.com")
+                    quickStartChip(title: "Claude",  icon: "sparkles",
+                                   url: "https://claude.ai")
+                }
             }
+
+            // A mode switch, not a destination. It used to be a chip in the
+            // same row as the quick starts, which made it read as a fourth
+            // site to open. The tab bar carries the same control once a tab
+            // exists — but in the detached window with no tabs open this is
+            // the only way back into the overlay besides the window's own
+            // close button.
+            Button {
+                if isDetached { vm.reattachBrowser() } else { vm.detachBrowser() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: isDetached
+                          ? "arrow.down.right.and.arrow.up.left"
+                          : "macwindow.on.rectangle")
+                        .font(.system(size: 10, weight: .medium))
+                    Text(isDetached
+                         ? "Put back in the overlay"
+                         : "Open the browser in its own window")
+                        .font(.system(size: 11))
+                }
+                .foregroundColor(Design.Ink.secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+            .help(isDetached
+                  ? "Move the browser back inside the overlay panel"
+                  : "Keep the browser in a separate window beside the overlay")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 24)
@@ -603,10 +621,10 @@ struct BrowserShellSurface: View {
             .help("Open URL")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.vertical, 8)
         .background(Capsule().fill(Design.Surface.inputFill))
         .overlay(Capsule().strokeBorder(Design.Surface.strongHairline, lineWidth: 0.5))
-        .frame(maxWidth: 340)
+        .frame(maxWidth: 380)
     }
 
     private func openCustomURL() {

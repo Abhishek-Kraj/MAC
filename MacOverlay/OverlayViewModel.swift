@@ -502,7 +502,6 @@ final class OverlayViewModel {
     }
 
     // MARK: - Calendar
-    var showCalendarPanel = false
     var calendarEvents:   [EKEvent] = []
     var calendarAuthorized = false
     @ObservationIgnored let calendarManager = CalendarManager()
@@ -748,10 +747,6 @@ final class OverlayViewModel {
     /// User-customisable visibility + sizing for the lower input bar.
     /// Toggles persist to UserDefaults via the store itself.
     let barCustomization = BarCustomization.shared
-
-    // UI panel toggles for the new surfaces
-    var showHistoryPanel       = false
-    var showPromptLibraryPanel = false
 
     /// True while the standalone Settings window is on screen. The overlay's
     /// gear reads this so it looks live — the window is the only place that

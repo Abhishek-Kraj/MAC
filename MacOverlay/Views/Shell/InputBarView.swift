@@ -361,37 +361,10 @@ struct InputBarView: View {
     /// Parked — not rendered anywhere. `composeButton` in the top strip is
     /// what actually binds ⌘N; this one deliberately has no shortcut so
     /// reviving it cannot create a second registration for the same key.
-    private var newSessionButton: some View {
-        Button {
-            vm.startNewSession()
-            withAnimation(Design.Motion.spring) {
-                vm.primarySurface = .chat
-                if vm.shellStage == .pill { vm.shellStage = .expanded }
-            }
-        } label: {
-            iconCircle(systemName: "plus", tint: Design.Ink.secondary, weight: .semibold)
-        }
-        .buttonStyle(.plain)
-        .help("New session (⌘N)")
-    }
 
     /// History button — sits immediately next to "+" so the two are read
     /// as a related pair. Brings up History; preserves the current panel
     /// state if a top panel is already open.
-    private var historyButton: some View {
-        Button {
-            withAnimation(Design.Motion.spring) {
-                vm.primarySurface = .sessions
-                if vm.shellStage == .pill { vm.shellStage = .expanded }
-            }
-        } label: {
-            iconCircle(systemName: "clock.arrow.circlepath",
-                       tint: vm.primarySurface == .sessions
-                             ? Design.Ink.primary : Design.Ink.secondary)
-        }
-        .buttonStyle(.plain)
-        .help("History")
-    }
 
     @ViewBuilder
     private var surfaceButtons: some View {
@@ -495,177 +468,24 @@ struct InputBarView: View {
         .help(label)
     }
 
-    private var workspaceButton: some View {
-        WorkspaceSwitcherView()
-            .frame(width: 30, height: 30)
-    }
-
-    private var permissionsMenu: some View {
-        // Mode color dot removed — kept the chip design but the per-mode
-        // accent dot was visual noise the user wanted gone.
-        PopUpChip(
-            items: { modeMenuItems() },
-            label: {
-                HStack(spacing: 4) {
-                    Text(activeModeLabel)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Design.Ink.secondary)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(Design.Ink.tertiary)
-                }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(Capsule().fill(Design.Surface.controlFill))
-                .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
-                .contentShape(Capsule())
-            }
-        )
-        .help("Mode and prompts")
-    }
-
-    private func modeMenuItems() -> [PopUpItem] {
-        var items: [PopUpItem] = []
-        items.append(.section("Built-in modes"))
-        for mode in SessionMode.allCases {
-            items.append(.option(
-                mode.displayName,
-                isSelected: vm.sessionMode == mode && vm.promptStore.activePreset == nil
-            ) {
-                vm.sessionMode = mode
-                if let linked = vm.promptStore.linkedPreset(for: mode) {
-                    vm.promptStore.activePresetID = linked.id
-                } else {
-                    vm.promptStore.activePresetID = nil
-                }
-            })
-        }
-        let customModes = vm.promptStore.conversationPresets.filter { $0.linkedMode == nil }
-        if !customModes.isEmpty {
-            items.append(.section("Custom modes"))
-            for preset in customModes {
-                let id = preset.id
-                items.append(.option(
-                    preset.name,
-                    isSelected: vm.promptStore.activePresetID == id
-                ) {
-                    vm.promptStore.activePresetID = id
-                })
-            }
-        }
-        items.append(.option("Manage custom prompts…") {
-            vm.primarySurface = .prompts
-        })
-        return items
-    }
 
 
-    private var activeModeLabel: String {
-        vm.promptStore.activePreset?.name ?? vm.sessionMode.displayName
-    }
+
+
 
     // MARK: - Right utilities
 
-    private var modelMenu: some View {
-        PopUpChip(
-            items: { modelMenuItems() },
-            label: {
-                HStack(spacing: 4) {
-                    Text(currentModelName)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Design.Ink.secondary)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(Design.Ink.tertiary)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .contentShape(Rectangle())
-            }
-        )
-        .help(vm.isInterviewSession
-              ? "Choose model — applies from the next answer"
-              : "Choose model")
-    }
 
     /// The bar's quick list. This popup widget cannot host a search field, so
     /// it stays a short list — but it is driven by the same
     /// `ModelFilterStore` as every other surface, so whatever filter is active
     /// elsewhere applies here too. "More models…" opens the full shared picker.
-    private func modelMenuItems() -> [PopUpItem] {
-        var items: [PopUpItem] = []
-        let store = ModelFilterStore.shared
-        for group in store.groupedModels {
-            guard !group.models.isEmpty else { continue }
-            items.append(.section(group.provider))
-            for m in group.models {
-                let id = m.id
-                let suffix = m.isFree ? " · free" : ""
-                items.append(.option(m.name + suffix, isSelected: vm.selectedModel == id) {
-                    vm.selectedModel = id
-                })
-            }
-        }
-        // Footer: open the shared picker, which has search and tier filters.
-        items.append(.option("More models…") {
-            vm.primarySurface = .interview
-        })
-        return items
-    }
 
-    private var currentModelName: String {
-        OverlayViewModel.availableModels.first { $0.id == vm.selectedModel }?.name ?? "Model"
-    }
 
     /// A paused live session (Pause in the ⋯ menu). Text-only chats also
     /// count as paused, but have no microphone to resume.
-    private var isResumable: Bool {
-        vm.isInterviewSession && vm.isInterviewPaused && !vm.isInterviewTextOnly
-    }
 
-    private var micButton: some View {
-        let streaming = vm.isSendingToAI
-        let recording = (vm.isInterviewSession && !isResumable) || vm.isRecording
-        let active = streaming || recording
-        let interview = vm.sessionMode == .interview
-        let idleIcon = interview || isResumable ? "play.fill" : "mic"
-        let idleSize: CGFloat = interview || isResumable ? 10 : 12
 
-        return Button { primaryAction() } label: {
-            ZStack {
-                Circle().fill(active ? Design.Accent.red.opacity(0.20) : Design.Surface.controlFill)
-                Circle().strokeBorder(
-                    active ? Design.Accent.red.opacity(0.45) : Design.Surface.hairline,
-                    lineWidth: 0.5
-                )
-                Image(systemName: active ? "stop.fill" : idleIcon)
-                    .font(.system(size: active ? 10 : idleSize, weight: .semibold))
-                    .foregroundColor(active ? Design.Accent.red : Design.Ink.secondary)
-            }
-            .frame(width: 30, height: 30)
-        }
-        .buttonStyle(.plain)
-        .help(streaming
-              ? "Stop generating"
-              : isResumable
-                ? "Resume"
-                : (recording
-                   ? "Stop \(interview ? "interview" : "recording")"
-                   : (interview ? "Start interview" : "Start recording")))
-    }
-
-    private func primaryAction() {
-        if vm.isSendingToAI { vm.cancelStreaming(); return }
-        if isResumable { vm.resumeInterviewSession(); return }
-        if vm.sessionMode == .interview {
-            if vm.isInterviewSession { vm.stopInterviewSession() }
-            else                     { vm.startInterviewSession() }
-        } else {
-            vm.toggleRecording()
-        }
-    }
 
     // Pause/resume, End session, and the model picker moved to the
     // session ⋯ menu (TopStripView) — the live bar stays minimal.
@@ -720,20 +540,6 @@ struct InputBarView: View {
 
     // MARK: - Helpers
 
-    private func iconCircle(systemName: String,
-                            tint: Color,
-                            weight: Font.Weight = .regular,
-                            size: CGFloat = 12,
-                            fill: Color = Design.Surface.controlFill) -> some View {
-        ZStack {
-            Circle().fill(fill)
-            Circle().strokeBorder(Design.Surface.hairline, lineWidth: 0.5)
-            Image(systemName: systemName)
-                .font(.system(size: size, weight: weight))
-                .foregroundColor(tint)
-        }
-        .frame(width: 30, height: 30)
-    }
 
     // MARK: - Attachment tray
 
@@ -843,8 +649,7 @@ private struct ChannelBadge: View {
     }
 }
 
-/// Slightly bigger / more readable bar icon. Two visual states beyond
-/// the existing `iconCircle`:
+/// Slightly bigger / more readable bar icon. Two visual states:
 ///   - hover lifts brightness so each icon visibly responds before click;
 ///   - active state paints the whole circle in the accent tint with a
 ///     stronger stroke so the current surface reads at a glance.

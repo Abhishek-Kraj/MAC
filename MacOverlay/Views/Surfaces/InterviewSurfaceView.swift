@@ -86,6 +86,28 @@ private struct InterviewModeBar: View {
 
 // MARK: - Setup form
 
+/// The primary action, pinned below the scrolling part of a setup form.
+///
+/// Every setup form used to end with it as the final row of the `ScrollView`,
+/// which meant that once the Context box held a whole job description the one
+/// action the screen exists for was below the fold. A hairline and the shell
+/// fill keep it legible while the form scrolls under it.
+private struct PinnedSetupAction<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Design.Surface.separator)
+                .frame(height: 0.5)
+            content
+                .padding(.horizontal, 22)
+                .padding(.vertical, 12)
+        }
+        .background(Design.Surface.shellFill)
+    }
+}
+
 private struct InterviewSetupForm: View {
     @Environment(OverlayViewModel.self) private var vm
     @State private var showCreatePrompt = false
@@ -94,28 +116,35 @@ private struct InterviewSetupForm: View {
 
     var body: some View {
         @Bindable var vm = vm
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                InterviewModeBar()
-                header
-                sessionPicker
-                languagePicker
-                resumePicker
-                contextEditor
-                // Directly under the inputs it consumes. The order now reads
-                // as a sequence: add a resume, add context, then prepare — and
-                // Start is the last thing on screen rather than the fifth.
-                PrepPanelView()
-                promptPicker
-                autoGenerateRow
-                modelPickerRow
-                depthRow
-                startRow
+        // Start is pinned below the scroll rather than being the form's last
+        // row. With a whole job description in the Context box it fell below
+        // the fold, so the one action this screen exists for needed a scroll
+        // to reach.
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    InterviewModeBar()
+                    header
+                    sessionPicker
+                    languagePicker
+                    resumePicker
+                    contextEditor
+                    // Directly under the inputs it consumes. The order now
+                    // reads as a sequence: add a resume, add context, then
+                    // prepare.
+                    PrepPanelView()
+                    promptPicker
+                    autoGenerateRow
+                    modelPickerRow
+                    depthRow
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 18)
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
+            .hiddenScrollGutter()
+
+            PinnedSetupAction { startRow }
         }
-        .hiddenScrollGutter()
         .sheet(isPresented: $showCreatePrompt) {
             createPromptSheet
         }
@@ -684,21 +713,24 @@ private struct RegularCallSetupForm: View {
 
     var body: some View {
         @Bindable var vm = vm
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                InterviewModeBar()
-                header
-                contextEditor
-                PrepPanelView()
-                promptPicker
-                modeToggleRow
-                if vm.regularCallAsCall { languagePicker }
-                startRow
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    InterviewModeBar()
+                    header
+                    contextEditor
+                    PrepPanelView()
+                    promptPicker
+                    modeToggleRow
+                    if vm.regularCallAsCall { languagePicker }
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 18)
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
+            .hiddenScrollGutter()
+
+            PinnedSetupAction { startRow }
         }
-        .hiddenScrollGutter()
         .sheet(isPresented: $showCreatePrompt) {
             createPromptSheet
         }

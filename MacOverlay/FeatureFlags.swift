@@ -83,11 +83,4 @@ enum FeatureFlags {
     /// WorkspaceStore + default workspace stays so sessions still group
     /// correctly under the hood.
     static let workspacesEnabled = false
-
-    /// Sessions / chat history. There is deliberately no dedicated History
-    /// button: the bar's `historyButton` is parked and not rendered. History
-    /// is reached from the top strip's "…" menu and from "Previous sessions"
-    /// on the interview setup screen. The flag stays so the entry can be
-    /// gated where it *is* shown.
-    static let sessionsHistoryEnabled = true
 }
