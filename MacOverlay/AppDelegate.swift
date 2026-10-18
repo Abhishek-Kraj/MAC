@@ -749,6 +749,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // grow-then-snap flicker on every keyboard resize.
             if vm.shellStage == .expanded { lastFullSize = overlayPanel.frame.size }
             if vm.focusHuggingActive { focusHeightUserOverride = true }
+            // Placed by hand, so a resize that was still animating is no longer
+            // the frame the panel is heading for.
+            forgetPendingPanelResize()
             refreshResizeCursors()
         }
     }
@@ -808,6 +811,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// polluted by the resize it just caused (the same feedback loop that made
     /// the old grip flicker).
     private var panelResizeAnchor: NSPoint?
+
+    /// The frame the panel's resize animation is heading for, or nil once it
+    /// has settled. `panel.frame` reports where the window is *now*, which
+    /// during an animation is still the old size — see the shortcut in
+    /// `animateShellFrame` for why that matters.
+    private var panelResizeTarget: NSRect?
 
     /// The hosting view whose cursor rects advertise the resize borders.
     private var overlayHostingView: OverlayHostingView?
@@ -961,6 +970,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSAnimationContext.current.allowsImplicitAnimation = false
         panel.setFrame(frame, display: true)
         NSAnimationContext.endGrouping()
+        // A drag is authoritative: nothing is on its way anywhere else.
+        forgetPendingPanelResize()
         lastFullSize = panel.frame.size
         // The user's hand outranks content tracking from here on.
         if vm.focusHuggingActive { focusHeightUserOverride = true }
@@ -1013,12 +1024,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                             y: cur.maxY - targetH,
                             width: cur.width,
                             height: targetH)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            ctx.allowsImplicitAnimation = true
-            panel.animator().setFrame(target, display: true)
+        if CommandLine.arguments.contains("-snapshot") {
+            panel.setFrame(target, display: true)
+        } else {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.15
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                ctx.allowsImplicitAnimation = true
+                panel.animator().setFrame(target, display: true)
+            }
         }
+        // Content tracking owns the frame now, so `animateShellFrame` must not
+        // compare its next request against a size that is no longer coming.
+        forgetPendingPanelResize()
     }
 
     // MARK: - Clipboard explain
@@ -1288,9 +1306,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let newY: CGFloat = responseHugging
             ? cur.maxY - target.height
             : cur.origin.y
-        if abs(cur.width - target.width) < 1,
-           abs(cur.height - target.height) < 1,
-           abs(cur.origin.y - newY) < 1 {
+        // `cur` is where the panel is *now*, which during the 0.18s window
+        // animation below is still the old size. A second request for the size
+        // already on its way would therefore look already satisfied and return
+        // without animating — and the move that was in flight would finish and
+        // leave the panel at the old size while `shellStage` says expanded. A
+        // collapsed dot with an expanded shell is the visible result, and it
+        // needs two requests in one animation to happen, which is why it read
+        // as flaky. Compare against the frame the panel is heading for.
+        let settled = panelResizeTarget ?? cur
+        if abs(settled.width - target.width) < 1,
+           abs(settled.height - target.height) < 1,
+           abs(settled.origin.y - newY) < 1 {
             return
         }
 
@@ -1301,12 +1328,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // and visibly desyncs from SwiftUI — content jitters because the
         // panel is still resizing while SwiftUI has already settled.
         let target_ = NSRect(x: newX, y: newY, width: target.width, height: target.height)
+
+        // A screenshot harness run is unattended: nothing activates the app, and
+        // a window-frame ANIMATION started in that state does not run at all —
+        // no intermediate frames, no completion handler, the frame simply stays
+        // where it was. The shell was left standing at 80x64 while the stage
+        // said expanded, and the shortcut above then read that stranded target
+        // as "already on its way" and declined to ask again. Apply the frame
+        // outright when there is nobody to animate for.
+        if CommandLine.arguments.contains("-snapshot") {
+            panel.setFrame(target_, display: true)
+            panelResizeTarget = nil
+            return
+        }
+
+        panelResizeTarget = target_
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.18
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             ctx.allowsImplicitAnimation = true
             panel.animator().setFrame(target_, display: true)
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                // Stand down only if this is still the move we started. A
+                // newer request has taken over the target, and clearing it
+                // here would make the next comparison fall back to
+                // `panel.frame` mid-flight — the bug above, restored.
+                guard let self, self.panelResizeTarget == target_ else { return }
+                self.panelResizeTarget = nil
+            }
         }
+    }
+
+    /// Stop trusting a resize that is still animating, because something else
+    /// has just moved the panel. The drag below and content-height tracking
+    /// both set the frame directly rather than through `animateShellFrame`,
+    /// and a stale target would make its next request look already satisfied.
+    @MainActor
+    private func forgetPendingPanelResize() {
+        panelResizeTarget = nil
     }
 
     // Screen share protection is handled by NSWindow.installScreenShareProtection()

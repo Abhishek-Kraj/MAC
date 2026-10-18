@@ -162,7 +162,12 @@ struct InputBarView: View {
         autoCollapseTask?.cancel()
         autoCollapseTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(350))
+            // The flag is re-checked here as well as on the way in: the
+            // snapshot harness sets it, but a hover-exit can already have been
+            // scheduled by the time it does, and that one collapse is enough to
+            // fight every programmatic expansion afterwards.
             guard !Task.isCancelled,
+                  !vm.debugSuppressAutoCollapse,
                   vm.shellStage != .pill,
                   !engaged else { return }
             withAnimation(Design.Motion.spring) {
