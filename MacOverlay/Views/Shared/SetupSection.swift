@@ -99,12 +99,15 @@ struct SetupSection<Content: View>: View {
 /// collapsed box is a preview, not a disabled field: clicking it opens the
 /// editor and puts the caret in it.
 struct ContextSection: View {
-    @Environment(OverlayViewModel.self) private var vm
-
     /// Shown when the field is empty. The two forms ask for different things —
     /// a role and a job description, or who is on the call.
     let placeholder: String
     let help: String
+    /// The field being edited, passed in rather than read off the view model:
+    /// the interview and the call each keep their own, because one shared field
+    /// meant the call tab opened holding the interview's job description.
+    @Binding var text: String
+    @Binding var files: [OverlayViewModel.InterviewContextFile]
 
     @State private var expanded = false
     @FocusState private var editing: Bool
@@ -114,9 +117,9 @@ struct ContextSection: View {
             VStack(alignment: .leading, spacing: 8) {
                 if expanded { editor } else { preview }
                 attachRow
-                if !vm.interviewContextFiles.isEmpty {
-                    FlowChipList(files: vm.interviewContextFiles) { id in
-                        vm.interviewContextFiles.removeAll { $0.id == id }
+                if !files.isEmpty {
+                    FlowChipList(files: files) { id in
+                        files.removeAll { $0.id == id }
                     }
                 }
             }
@@ -133,9 +136,9 @@ struct ContextSection: View {
             DispatchQueue.main.async { editing = true }
         } label: {
             HStack(alignment: .top, spacing: 8) {
-                Text(vm.interviewContext.isEmpty ? placeholder : vm.interviewContext)
+                Text(text.isEmpty ? placeholder : text)
                     .font(.system(size: 12))
-                    .foregroundColor(vm.interviewContext.isEmpty ? Design.Ink.muted : Design.Ink.primary)
+                    .foregroundColor(text.isEmpty ? Design.Ink.muted : Design.Ink.primary)
                     // The point of the collapsed state: exactly two lines, so
                     // the section has a fixed height whatever is pasted in.
                     .lineLimit(2)
@@ -155,14 +158,13 @@ struct ContextSection: View {
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .help(vm.interviewContext.isEmpty ? "Add context" : "Edit context")
+        .help(text.isEmpty ? "Add context" : "Edit context")
     }
 
     // MARK: Expanded
 
     private var editor: some View {
-        @Bindable var vm = vm
-        return TextEditor(text: $vm.interviewContext)
+        TextEditor(text: $text)
             .scrollContentBackground(.hidden)
             .font(.system(size: 12))
             .focused($editing)
@@ -200,7 +202,7 @@ struct ContextSection: View {
                 HStack(spacing: 5) {
                     Image(systemName: "paperclip")
                         .font(.system(size: 11, weight: .medium))
-                    Text(vm.interviewContextFiles.isEmpty ? "Attach files" : "Attach more")
+                    Text(files.isEmpty ? "Attach files" : "Attach more")
                 }
                 .setupChip()
             }
@@ -245,13 +247,134 @@ struct ContextSection: View {
         guard panel.runModal() == .OK else { return }
         for url in panel.urls {
             // Skip duplicates (same URL already attached).
-            if vm.interviewContextFiles.contains(where: { $0.url == url }) { continue }
+            if files.contains(where: { $0.url == url }) { continue }
             let text = (try? ResumeImporter.importFile(url: url)) ?? ""
             guard !text.isEmpty else { continue }
-            vm.interviewContextFiles.append(
+            files.append(
                 .init(url: url, name: url.lastPathComponent, extractedText: text)
             )
         }
+    }
+}
+
+/// The system-prompt picker, shared by both setup forms.
+///
+/// It resolves through `mode`, so the Interview tab and the Regular call tab
+/// each show — and run — their own prompt. They used to share one "active"
+/// preset, which is how the call tab came to display, and answer with, the
+/// interview copilot's prompt.
+///
+/// There is no "Default" entry: clearing the pick would land back on the
+/// preset linked to the mode, so the entry could only ever look inert. The
+/// built-in prompt is what `defaultLabel` names, and it runs when the mode has
+/// neither a pick nor a linked preset.
+struct PromptPickerRow: View {
+    @Environment(OverlayViewModel.self) private var vm
+
+    let mode: SessionMode
+    let defaultLabel: String
+    let onCreate: () -> Void
+
+    var body: some View {
+        SetupSection(title: "System prompt") {
+            HStack(spacing: 6) {
+                Menu {
+                    ForEach(vm.promptStore.conversationPresets) { p in
+                        Button {
+                            vm.promptStore.setActivePresetID(p.id, for: mode)
+                        } label: {
+                            HStack {
+                                Text(p.name)
+                                if vm.promptStore.activePresetID(for: mode) == p.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "text.bubble.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(Design.Ink.secondary)
+                        Text(vm.promptStore.activePreset(for: mode)?.name ?? defaultLabel)
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(Design.Ink.secondary)
+                    }
+                    .setupChip()
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+
+                Button(action: onCreate) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Create new")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .setupChip()
+                }
+                .buttonStyle(.plain)
+                .help("Save a new system prompt and use it here")
+
+                Spacer()
+            }
+        }
+    }
+}
+
+/// "Create new" from a setup form: name and write a prompt, save it, and use
+/// it for the mode whose form opened the sheet — not for every session.
+struct CreatePromptSheet: View {
+    @Environment(OverlayViewModel.self) private var vm
+
+    let mode: SessionMode
+    @Binding var isPresented: Bool
+
+    @State private var name = ""
+    @State private var content = ""
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("New system prompt")
+                .font(.system(size: 15, weight: .semibold))
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+            Text("Prompt").font(.caption).foregroundColor(Design.Ink.secondary)
+            TextEditor(text: $content)
+                .font(.system(size: 12))
+                .frame(minHeight: 160)
+                .overlay(RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+            HStack {
+                Spacer()
+                Button("Cancel") { isPresented = false }
+                Button("Save") {
+                    guard canSave else { return }
+                    let preset = vm.promptStore.add(
+                        name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                        content: content.trimmingCharacters(in: .whitespacesAndNewlines),
+                        kind: .conversation
+                    )
+                    vm.promptStore.setActivePresetID(preset.id, for: mode)
+                    isPresented = false
+                }
+                .keyboardShortcut(.return)
+                .disabled(!canSave)
+            }
+        }
+        .padding(18)
+        .frame(width: 460)
     }
 }
 

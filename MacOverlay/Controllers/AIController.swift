@@ -59,7 +59,8 @@ final class AIController {
     /// formatting rule. Substitutes {NAME}/{ROLE}/{COMPANY}.
     func resolveActivePrompt() -> String {
         guard let vm else { return "" }
-        var raw = vm.promptStore.activePreset?.content ?? vm.sessionMode.systemPrompt
+        var raw = vm.promptStore.activePreset(for: vm.sessionMode)?.content
+            ?? vm.sessionMode.systemPrompt
         if let rule = KeywordStyle.current.promptRule(for: raw) {
             raw += "\n\n" + rule
         }

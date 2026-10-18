@@ -13,6 +13,7 @@ enum InterviewSetupStore {
     private enum Key {
         static let resumePath   = "interviewResumeFilePath"
         static let context     = "interviewContext"
+        static let callContext = "callContext"
         static let autoGen     = "interviewAutoGenerate"
         static let focusMode   = "interviewFocusMode"
     }
@@ -29,6 +30,12 @@ enum InterviewSetupStore {
         defaults.set(text, forKey: Key.context)
     }
 
+    /// The Regular call's own context. Separate key from the interview's: one
+    /// field serving both meant a call opened holding a job description.
+    static func setCallContext(_ text: String) {
+        defaults.set(text, forKey: Key.callContext)
+    }
+
     static func setAutoGenerate(_ on: Bool) {
         defaults.set(on, forKey: Key.autoGen)
     }
@@ -42,6 +49,11 @@ enum InterviewSetupStore {
     /// The stored posting, or `""`.
     static var context: String {
         defaults.string(forKey: Key.context) ?? ""
+    }
+
+    /// The stored call context, or `""`.
+    static var callContext: String {
+        defaults.string(forKey: Key.callContext) ?? ""
     }
 
     /// Defaults to on. Absent is treated as "never set", not as off, so an
@@ -83,6 +95,7 @@ enum InterviewSetupStore {
     /// Everything restored in one go, for launch.
     struct Restored {
         var context: String = ""
+        var callContext: String = ""
         var resumeURL: URL?
         var autoGenerate: Bool = true
         var focusMode: Bool = true
@@ -90,6 +103,7 @@ enum InterviewSetupStore {
 
     static func restore() -> Restored {
         Restored(context: context,
+                 callContext: callContext,
                  resumeURL: resumeURLIfPresent,
                  autoGenerate: autoGenerate,
                  focusMode: focusMode)
@@ -97,7 +111,7 @@ enum InterviewSetupStore {
 
     /// Test and "clear this app's state" support.
     static func reset() {
-        for k in [Key.resumePath, Key.context, Key.autoGen, Key.focusMode] {
+        for k in [Key.resumePath, Key.context, Key.callContext, Key.autoGen, Key.focusMode] {
             defaults.removeObject(forKey: k)
         }
     }

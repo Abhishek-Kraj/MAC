@@ -61,16 +61,26 @@ struct PromptLibraryView: View {
 
     private var panelHeader: some View {
         HStack(spacing: 8) {
-            Text("Prompts")
-                .font(.system(size: 14, weight: .semibold))
-                .tracking(-0.2)
-                .foregroundColor(.primary)
-            Text("\(visiblePresets.count)")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(Color.white.opacity(0.06)))
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 8) {
+                    Text("Prompts")
+                        .font(.system(size: 14, weight: .semibold))
+                        .tracking(-0.2)
+                        .foregroundColor(.primary)
+                    Text("\(visiblePresets.count)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.white.opacity(0.06)))
+                }
+                // A prompt is chosen per mode now, so the library has to name
+                // the mode a selection applies to — otherwise the active mark
+                // has no visible subject.
+                Text("Selecting one sets it for \(vm.sessionMode.displayName).")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
             Spacer()
             if FeatureFlags.resumesEnabled {
                 Menu {
@@ -162,7 +172,9 @@ struct PromptLibraryView: View {
     }
 
     private func row(_ p: PromptPreset) -> some View {
-        let isActive = p.id == store.activePresetID
+        // Active means "what the mode you are in will run", not "the one
+        // preset in the app" — every mode keeps its own.
+        let isActive = p.id == store.activePresetID(for: vm.sessionMode)
         let isEditing = p.id == editingID
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 8) {
@@ -228,7 +240,7 @@ struct PromptLibraryView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            if editingID == nil { store.activePresetID = p.id }
+            if editingID == nil { store.setActivePresetID(p.id, for: vm.sessionMode) }
         }
     }
 
@@ -408,9 +420,10 @@ struct PromptLibraryView: View {
         p.icon       = draftIcon
         p.linkedMode = draftLinkedMode
         store.update(p)
-        // Auto-activate a freshly-created conversation preset only if nothing's active.
-        if p.kind == .conversation && store.activePresetID == nil {
-            store.activePresetID = p.id
+        // Auto-activate a freshly-created conversation preset only if the mode
+        // you are in has none.
+        if p.kind == .conversation && store.activePresetID(for: vm.sessionMode) == nil {
+            store.setActivePresetID(p.id, for: vm.sessionMode)
         }
         editingID = nil
         draftName = ""

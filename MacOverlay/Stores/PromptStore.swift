@@ -11,12 +11,15 @@ final class PromptStore {
         didSet { persist() }
     }
 
-    /// Currently-active conversation preset (overrides the built-in mode prompt).
-    var activePresetID: UUID? {
-        didSet {
-            UserDefaults.standard.set(activePresetID?.uuidString, forKey: "activePromptPresetID")
-        }
+    /// The conversation preset chosen for each session mode.
+    ///
+    /// Keyed by mode rather than held as one value. One shared "active" preset
+    /// was how the Regular call tab came to display — and run — the Interview
+    /// copilot prompt: the tab switched, the prompt did not.
+    private(set) var activeConversationIDs: [String: UUID] = [:] {
+        didSet { persistActiveConversationIDs() }
     }
+    private static let activeConversationKey = "activeConversationPresetIDs"
     /// Currently-active resume generation preset (overrides the default gen prompt).
     var activeResumeGenerationID: UUID? {
         didSet {
@@ -49,14 +52,29 @@ final class PromptStore {
 
         self.presets = loaded
 
-        if let uuid = restoredActive {
-            self.activePresetID = uuid
-        } else if let raw = UserDefaults.standard.string(forKey: "activePromptPresetID"),
-                  let uuid = UUID(uuidString: raw),
-                  loaded.contains(where: { $0.id == uuid }) {
-            self.activePresetID = uuid
+        // Which conversation preset each mode runs. The single value this
+        // replaced is folded into the mode it belongs to — a preset linked to
+        // Interview becomes the interview's, rather than one every tab shares.
+        // An unlinked preset was the user's "use this everywhere" pick, so it
+        // is kept for every mode.
+        let storedActive = UserDefaults.standard.dictionary(forKey: Self.activeConversationKey) ?? [:]
+        if storedActive.isEmpty {
+            let legacyID = restoredActive
+                ?? UserDefaults.standard.string(forKey: "activePromptPresetID")
+                    .flatMap(UUID.init(uuidString:))
+            if let legacyID,
+               let preset = loaded.first(where: { $0.id == legacyID && $0.kind == .conversation }) {
+                if let mode = preset.linkedMode {
+                    self.activeConversationIDs = [mode.rawValue: legacyID]
+                } else {
+                    self.activeConversationIDs = Dictionary(
+                        uniqueKeysWithValues: SessionMode.allCases.map { ($0.rawValue, legacyID) })
+                }
+            }
         } else {
-            self.activePresetID = nil
+            self.activeConversationIDs = storedActive.compactMapValues { value in
+                (value as? String).flatMap(UUID.init(uuidString:))
+            }
         }
 
         if let raw = UserDefaults.standard.string(forKey: "activeResumeGenerationPresetID"),
@@ -74,6 +92,10 @@ final class PromptStore {
         } else {
             self.activeResumeScoringID = nil
         }
+
+        // Write the per-mode choices back now, so the migration above happens
+        // once rather than on every launch.
+        persistActiveConversationIDs()
     }
 
     // MARK: - Filtered views
@@ -114,17 +136,44 @@ final class PromptStore {
 
     func delete(id: UUID) {
         presets.removeAll { $0.id == id }
-        if activePresetID == id           { activePresetID = nil }
+        activeConversationIDs = activeConversationIDs.filter { $0.value != id }
         if activeResumeGenerationID == id { activeResumeGenerationID = nil }
         if activeResumeScoringID == id    { activeResumeScoringID = nil }
     }
 
     // MARK: - Active-preset accessors
 
-    var activePreset: PromptPreset? {
-        guard let id = activePresetID else { return nil }
-        return presets.first { $0.id == id }
+    /// The preset a session running `mode` will use.
+    ///
+    /// The choice made for that mode wins — scoped per mode, so a pick always
+    /// takes effect and never leaks to another tab. Otherwise the preset the
+    /// library links to the mode, which until now the editor wrote and nothing
+    /// read. Nil means the built-in `SessionMode.systemPrompt` runs.
+    func activePreset(for mode: SessionMode) -> PromptPreset? {
+        activeConversationIDs[mode.rawValue].flatMap(conversationPreset)
+            ?? linkedPreset(for: mode)
     }
+
+    /// What `mode` will actually run, as an id — so a picker can tick the entry
+    /// in force rather than the one last stored.
+    func activePresetID(for mode: SessionMode) -> UUID? {
+        activePreset(for: mode)?.id
+    }
+
+    /// Choose a preset for one mode. `nil` clears the choice, leaving the mode
+    /// on its linked preset or the built-in prompt.
+    func setActivePresetID(_ id: UUID?, for mode: SessionMode) {
+        if let id {
+            activeConversationIDs[mode.rawValue] = id
+        } else {
+            activeConversationIDs.removeValue(forKey: mode.rawValue)
+        }
+    }
+
+    private func conversationPreset(_ id: UUID) -> PromptPreset? {
+        presets.first { $0.id == id && $0.kind == .conversation }
+    }
+
     var activeResumeGenerationPreset: PromptPreset? {
         guard let id = activeResumeGenerationID else { return nil }
         return presets.first { $0.id == id && $0.kind == .resumeGeneration }
@@ -134,13 +183,19 @@ final class PromptStore {
         return presets.first { $0.id == id && $0.kind == .resumeScoring }
     }
 
-    /// Find the user's "override" preset for a given built-in mode, if any.
-    /// Picking the built-in in the top-strip mode menu auto-activates this.
+    /// The preset the library links to `mode` — the seeded default for that
+    /// mode, editable like any other preset. `activePreset(for:)` falls back to
+    /// it when no preset was chosen for the mode.
     func linkedPreset(for mode: SessionMode) -> PromptPreset? {
         presets.first { $0.linkedMode == mode && $0.kind == .conversation }
     }
 
     // MARK: - Persistence
+
+    private func persistActiveConversationIDs() {
+        UserDefaults.standard.set(activeConversationIDs.mapValues { $0.uuidString },
+                                  forKey: Self.activeConversationKey)
+    }
 
     private func persist() {
         JSONStore.save(presets, to: Self.filename)

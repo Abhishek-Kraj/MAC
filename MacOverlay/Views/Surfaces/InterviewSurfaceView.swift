@@ -98,8 +98,6 @@ private struct PinnedSetupAction<Content: View>: View {
 private struct InterviewSetupForm: View {
     @Environment(OverlayViewModel.self) private var vm
     @State private var showCreatePrompt = false
-    @State private var newPromptName    = ""
-    @State private var newPromptContent = ""
 
     var body: some View {
         @Bindable var vm = vm
@@ -133,7 +131,7 @@ private struct InterviewSetupForm: View {
             PinnedSetupAction { startRow }
         }
         .sheet(isPresented: $showCreatePrompt) {
-            createPromptSheet
+            CreatePromptSheet(mode: .interview, isPresented: $showCreatePrompt)
         }
     }
 
@@ -333,86 +331,22 @@ private struct InterviewSetupForm: View {
     }
 
     private var contextEditor: some View {
-        ContextSection(
+        @Bindable var vm = vm
+        return ContextSection(
             placeholder: "Role, company, JD, talking points…",
-            help: "PDF · DOCX · RTF · TXT · MD — text is extracted and sent as context."
+            help: "PDF · DOCX · RTF · TXT · MD — text is extracted and sent as context.",
+            text: $vm.interviewContext,
+            files: $vm.interviewContextFiles
         )
     }
 
+    /// The prompt the interview runs. Resolved for `.interview`, so the call tab
+    /// showing the interview's prompt is no longer possible.
     private var promptPicker: some View {
-        SetupSection(title: "System prompt") {
-            HStack(spacing: 6) {
-                Menu {
-                    Button {
-                        vm.promptStore.activePresetID = nil
-                    } label: {
-                        HStack {
-                            Text("Default (Interview)")
-                            if vm.promptStore.activePresetID == nil {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                    let conversation = vm.promptStore.conversationPresets
-                    if !conversation.isEmpty {
-                        Divider()
-                        ForEach(conversation) { p in
-                            Button {
-                                vm.promptStore.activePresetID = p.id
-                            } label: {
-                                HStack {
-                                    Text(p.name)
-                                    if vm.promptStore.activePresetID == p.id {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "text.bubble.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(Design.Ink.secondary)
-                        Text(activePromptName)
-                            .font(.system(size: 12, weight: .medium))
-                            .lineLimit(1)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(Design.Ink.secondary)
-                    }
-                    .setupChip()
-                }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
-
-                Button {
-                    newPromptName = ""
-                    newPromptContent = ""
-                    showCreatePrompt = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Create new")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .setupChip()
-                }
-                .buttonStyle(.plain)
-                .help("Save a new system prompt and use it")
-
-                Spacer()
-            }
+        PromptPickerRow(mode: .interview, defaultLabel: "Default (Interview)") {
+            showCreatePrompt = true
         }
     }
-
-    private var activePromptName: String {
-        vm.promptStore.activePreset?.name ?? "Default (Interview)"
-    }
-
     /// Which model answers the interview. The setup screen had no model
     /// control at all, so the only way to change it was after starting, from
     /// the bar. Now it sits directly above Start and uses the same shared
@@ -491,46 +425,6 @@ private struct InterviewSetupForm: View {
         }
     }
 
-    // MARK: Create-prompt sheet
-
-    private var createPromptSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("New system prompt")
-                .font(.system(size: 15, weight: .semibold))
-            TextField("Name", text: $newPromptName)
-                .textFieldStyle(.roundedBorder)
-            Text("Prompt").font(.caption).foregroundColor(Design.Ink.secondary)
-            TextEditor(text: $newPromptContent)
-                .font(.system(size: 12))
-                .frame(minHeight: 160)
-                .overlay(RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
-            HStack {
-                Spacer()
-                Button("Cancel") { showCreatePrompt = false }
-                Button("Save") {
-                    let trimmedName = newPromptName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let trimmedContent = newPromptContent.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmedName.isEmpty, !trimmedContent.isEmpty else { return }
-                    let preset = vm.promptStore.add(
-                        name: trimmedName,
-                        content: trimmedContent,
-                        kind: .conversation
-                    )
-                    vm.promptStore.activePresetID = preset.id
-                    showCreatePrompt = false
-                }
-                .keyboardShortcut(.return)
-                .disabled(
-                    newPromptName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || newPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                )
-            }
-        }
-        .padding(18)
-        .frame(width: 460)
-    }
-
     // MARK: Helpers
 
     private func pickResumeFile() {
@@ -560,8 +454,6 @@ private struct InterviewSetupForm: View {
 private struct RegularCallSetupForm: View {
     @Environment(OverlayViewModel.self) private var vm
     @State private var showCreatePrompt = false
-    @State private var newPromptName    = ""
-    @State private var newPromptContent = ""
 
     var body: some View {
         @Bindable var vm = vm
@@ -571,7 +463,6 @@ private struct RegularCallSetupForm: View {
                     InterviewModeBar()
                     header
                     contextEditor
-                    PrepPanelView()
                     promptPicker
                     modeToggleRow
                     if vm.regularCallAsCall { languagePicker }
@@ -584,7 +475,7 @@ private struct RegularCallSetupForm: View {
             PinnedSetupAction { startRow }
         }
         .sheet(isPresented: $showCreatePrompt) {
-            createPromptSheet
+            CreatePromptSheet(mode: promptMode, isPresented: $showCreatePrompt)
         }
     }
 
@@ -600,79 +491,28 @@ private struct RegularCallSetupForm: View {
     }
 
     private var contextEditor: some View {
-        ContextSection(
+        @Bindable var vm = vm
+        return ContextSection(
             placeholder: "Who is the call with? What's the goal? Any background…",
-            help: "PDF · DOCX · RTF · TXT · MD — text extracted into context."
+            help: "PDF · DOCX · RTF · TXT · MD — text extracted into context.",
+            // The call's own field. It used to be the interview's, so this tab
+            // opened holding a job description.
+            text: $vm.callContext,
+            files: $vm.callContextFiles
         )
     }
 
     private var promptPicker: some View {
-        SetupSection(title: "System prompt") {
-            HStack(spacing: 6) {
-                Menu {
-                    Button {
-                        vm.promptStore.activePresetID = nil
-                    } label: {
-                        HStack {
-                            Text("Default (Call)")
-                            if vm.promptStore.activePresetID == nil {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                    let conversation = vm.promptStore.conversationPresets
-                    if !conversation.isEmpty {
-                        Divider()
-                        ForEach(conversation) { p in
-                            Button {
-                                vm.promptStore.activePresetID = p.id
-                            } label: {
-                                HStack {
-                                    Text(p.name)
-                                    if vm.promptStore.activePresetID == p.id {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "text.bubble.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(Design.Ink.secondary)
-                        Text(vm.promptStore.activePreset?.name ?? "Default (Call)")
-                            .font(.system(size: 12, weight: .medium))
-                            .lineLimit(1)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(Design.Ink.secondary)
-                    }
-                    .setupChip()
-                }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
-
-                Button {
-                    newPromptName = ""
-                    newPromptContent = ""
-                    showCreatePrompt = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Create new")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .setupChip()
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-            }
+        PromptPickerRow(mode: promptMode, defaultLabel: "Default (Call)") {
+            showCreatePrompt = true
         }
+    }
+
+    /// The mode this form's session will actually run: a live call is `.call`,
+    /// a text chat is `.general`. The prompt picker resolves for it, so a call
+    /// cannot display the interview's prompt.
+    private var promptMode: SessionMode {
+        vm.regularCallAsCall ? .call : .general
     }
 
     /// Call vs Chat segmented control. Call = live mic + transcription
@@ -731,45 +571,6 @@ private struct RegularCallSetupForm: View {
             .help("Start (⌘↩)")
         }
     }
-
-    private var createPromptSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("New system prompt")
-                .font(.system(size: 15, weight: .semibold))
-            TextField("Name", text: $newPromptName)
-                .textFieldStyle(.roundedBorder)
-            Text("Prompt").font(.caption).foregroundColor(Design.Ink.secondary)
-            TextEditor(text: $newPromptContent)
-                .font(.system(size: 12))
-                .frame(minHeight: 160)
-                .overlay(RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
-            HStack {
-                Spacer()
-                Button("Cancel") { showCreatePrompt = false }
-                Button("Save") {
-                    let trimmedName = newPromptName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let trimmedContent = newPromptContent.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmedName.isEmpty, !trimmedContent.isEmpty else { return }
-                    let preset = vm.promptStore.add(
-                        name: trimmedName,
-                        content: trimmedContent,
-                        kind: .conversation
-                    )
-                    vm.promptStore.activePresetID = preset.id
-                    showCreatePrompt = false
-                }
-                .keyboardShortcut(.return)
-                .disabled(
-                    newPromptName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || newPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                )
-            }
-        }
-        .padding(18)
-        .frame(width: 460)
-    }
-
 }
 
 // MARK: - Missing-key warning

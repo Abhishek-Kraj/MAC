@@ -281,6 +281,7 @@ final class OverlayViewModel {
     func restoreInterviewSetup() {
         let state = InterviewSetupStore.restore()
         interviewContext = state.context
+        callContext = state.callContext
         interviewAutoGenerate = state.autoGenerate
         interviewFocusMode = state.focusMode
         // Assigning this triggers the didSet, which re-parses the résumé in
@@ -327,6 +328,22 @@ final class OverlayViewModel {
     /// is extracted once at the form and rides as a pending attachment on
     /// the interview's first user turn — same treatment as the resume.
     var interviewContextFiles: [InterviewContextFile] = []
+
+    // MARK: Regular call context
+
+    /// Context for a Regular call, kept separate from the interview's.
+    ///
+    /// One field served both forms until now, so opening the call tab showed
+    /// the interview's job description — and starting a call sent it as "Call
+    /// context". A posting is not what a call is about, and the two forms ask
+    /// for different things ("Role, company, JD" versus "Who is the call with,
+    /// what's the goal").
+    var callContext: String = "" {
+        didSet { InterviewSetupStore.setCallContext(callContext) }
+    }
+    /// Files attached to a call. In memory only, exactly like the interview's:
+    /// extracted at the form, sent once, then cleared.
+    var callContextFiles: [InterviewContextFile] = []
     /// When ON, the AI auto-streams suggested responses as the interview
     /// transcript updates. When OFF, the user hits Send manually. Only
     /// shown / honored in `.interview` setup; Regular call has no such
@@ -2283,7 +2300,7 @@ final class OverlayViewModel {
         // Restore the mode for the reopened session so the right prompt kicks in.
         if let s = sessionStore.sessions.first(where: { $0.id == id }) {
             sessionMode = s.mode
-            promptStore.activePresetID = s.promptPresetID
+            promptStore.setActivePresetID(s.promptPresetID, for: s.mode)
         }
         // Default: jump back to the chat surface so the reopened session is
         // visible. When the caller is already managing the surface (e.g.
@@ -2301,7 +2318,7 @@ final class OverlayViewModel {
         let closingID = sessionStore.activeSessionID
         let closing = sessionStore.activeSession
         sessionStore.startNewSession(mode: sessionMode,
-                                     promptPresetID: promptStore.activePresetID,
+                                     promptPresetID: promptStore.activePresetID(for: sessionMode),
                                      workspaceID: workspaceStore.activeWorkspaceID,
                                      kind: kind)
         regenerateTitle(for: closing, sessionID: closingID)
@@ -2381,19 +2398,19 @@ final class OverlayViewModel {
 
         // Same attachment treatment as the interview setup — see
         // beginInterviewFromSetup for why this doesn't go through
-        // manualInput.
-        let trimmedContext = interviewContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        // manualInput. The call's own context, not the interview's.
+        let trimmedContext = callContext.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedContext.isEmpty {
             pendingAttachments.append(
                 PendingAttachment(name: "Call context", extractedText: trimmedContext)
             )
         }
-        for ctx in interviewContextFiles where !ctx.extractedText.isEmpty {
+        for ctx in callContextFiles where !ctx.extractedText.isEmpty {
             pendingAttachments.append(
                 PendingAttachment(name: ctx.name, extractedText: ctx.extractedText)
             )
         }
-        interviewContextFiles = []
+        callContextFiles = []
 
         if regularCallAsCall {
             startInterviewSession()
@@ -2419,7 +2436,7 @@ final class OverlayViewModel {
             sessionStore.continueSession(id: first.id)
         } else {
             sessionStore.startNewSession(mode: sessionMode,
-                                         promptPresetID: promptStore.activePresetID,
+                                         promptPresetID: promptStore.activePresetID(for: sessionMode),
                                          workspaceID: id)
         }
         primarySurface = .chat
