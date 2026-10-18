@@ -29,8 +29,12 @@ struct PreferencesView: View {
     @State private var customModelDraft = ""
     @AppStorage(KeywordStyle.defaultsKey) private var keywordStyle = KeywordStyle.standard
 
+    /// The input bar's own text size. Uses the same UserDefaults key as the
+    /// bar-customisation store this replaced, so an existing choice survives.
+    /// Read by `InputBarView`.
+    @AppStorage("bar.fontSize") private var barFontSize = 13.0
+
     enum Tab: String, CaseIterable, Identifiable {        case general    = "General"
-        case panel      = "Panel"
         case profile    = "Profile"
         case ai         = "AI"
         case quickAsk   = "Quick Ask"
@@ -43,7 +47,6 @@ struct PreferencesView: View {
         var icon: String {
             switch self {
             case .general:    return "gearshape.fill"
-            case .panel:      return "rectangle.bottomthird.inset.filled"
             case .profile:    return "person.crop.circle.fill"
             case .ai:         return "sparkles"
             case .quickAsk:   return "bolt.fill"
@@ -65,8 +68,6 @@ struct PreferencesView: View {
             // at their level."). Hidden, that line always read "the user is a
             // professional at their company" and the feature was unreachable.
             case .profile:    return true
-            case .panel:
-                return false
             case .memory:     return true
             case .workspaces: return FeatureFlags.workspacesEnabled
             case .peer:       return FeatureFlags.peerControlEnabled
@@ -116,15 +117,14 @@ struct PreferencesView: View {
 
             // Content column. The scrolling body fills the column to the
             // right of the rail. The previous top text-size toolbar was
-            // removed — font size lives in Panel → Bottom panel and the
-            // floating widget on top of every Settings tab was just
+            // removed — answer text size lives in General → Appearance, and
+            // the floating widget on top of every Settings tab was just
             // visual noise.
             VStack(spacing: 0) {
                 ScrollView {
                     Group {
                         switch tab {
                         case .general:    generalTab
-                        case .panel:      panelTab
                         case .profile:    profileTab
                         case .ai:         aiTab
                         case .quickAsk:   quickAskTab
@@ -286,64 +286,6 @@ struct PreferencesView: View {
                 RoundedRectangle(cornerRadius: Design.Radius.md, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
     }
-    /// Panel customisation. Currently scoped to the bottom input bar.
-    @ViewBuilder
-    private var panelTab: some View {
-        @Bindable var bar = vm.barCustomization
-
-        section(title: "Bottom panel",
-                icon: "rectangle.bottomthird.inset.filled",
-                subtitle: "The input bar at the bottom. Choose which controls appear. The brand logo is always shown.") {
-            Toggle(isOn: $bar.showTextField) {
-                labelTwoLine(title: "Text field",
-                             subtitle: "The “Ask anything” input. Hide it if you mostly drive the overlay by voice or shortcuts.")
-            }.toggleStyle(.switch)
-
-            Toggle(isOn: $bar.showNewSession) {
-                labelTwoLine(title: "New session (+)",
-                             subtitle: "Starts a fresh chat session.")
-            }.toggleStyle(.switch)
-
-            Toggle(isOn: $bar.showHistory) {
-                labelTwoLine(title: "History",
-                             subtitle: "Browse past sessions.")
-            }.toggleStyle(.switch)
-
-            Toggle(isOn: $bar.showMode) {
-                labelTwoLine(title: "Mode picker",
-                             subtitle: "Switch between General, Interview, Meeting, Call modes.")
-            }.toggleStyle(.switch)
-
-            Toggle(isOn: $bar.showResume) {
-                labelTwoLine(title: "Resumes",
-                             subtitle: "Open the resume tailoring panel.")
-            }.toggleStyle(.switch)
-
-            Toggle(isOn: $bar.showModel) {
-                labelTwoLine(title: "Model picker",
-                             subtitle: "Switch between Anthropic / OpenAI models.")
-            }.toggleStyle(.switch)
-
-            Toggle(isOn: $bar.showMic) {
-                labelTwoLine(title: "Microphone",
-                             subtitle: "Start / stop voice recording.")
-            }.toggleStyle(.switch)
-
-            Toggle(isOn: $bar.showSend) {
-                labelTwoLine(title: "Send button",
-                             subtitle: "Submit the typed prompt. (You can always press ⏎.)")
-            }.toggleStyle(.switch)
-        }
-
-        section(title: "") {
-            HStack {
-                Spacer()
-                Button("Reset to defaults") { bar.resetToDefaults() }
-                    .buttonStyle(.secondaryCompact)
-            }
-        }
-    }
-
     @ViewBuilder
     private var generalTab: some View {
         @Bindable var vm = vm
@@ -352,6 +294,11 @@ struct PreferencesView: View {
             sliderRow("Background", value: $vm.backgroundOpacity, range: 0.0...1.0,
                       display: { $0 == 0 ? "Off" : "\(Int($0 * 100))%" })
             sliderRow("Text size", value: $vm.textScale, range: 0.8...1.6)
+            // The bar is small and sits over a call; it needs its own size
+            // rather than riding the answer text size. 1pt steps so the label
+            // always names the size that is set.
+            sliderRow("Bar text size", value: $barFontSize, range: 11...16, step: 1,
+                      display: { "\(Int($0))pt" })
             keywordStyleRow
         }
 
@@ -1155,13 +1102,14 @@ struct PreferencesView: View {
 
     private func sliderRow(_ label: String, value: Binding<Double>,
                            range: ClosedRange<Double>,
+                           step: Double = 0.05,
                            display: ((Double) -> String)? = nil) -> some View {
         HStack(spacing: 8) {
             Text(label)
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
                 .frame(width: 90, alignment: .leading)
-            Slider(value: value, in: range, step: 0.05)
+            Slider(value: value, in: range, step: step)
             Text(display?(value.wrappedValue) ?? "\(Int(value.wrappedValue * 100))%")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.secondary)

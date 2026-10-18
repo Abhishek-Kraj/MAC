@@ -752,11 +752,6 @@ final class OverlayViewModel {
     @ObservationIgnored let sessionStore   = SessionStore.shared
     @ObservationIgnored let workspaceStore = WorkspaceStore.shared
 
-    // MARK: - Panel customization
-    /// User-customisable visibility + sizing for the lower input bar.
-    /// Toggles persist to UserDefaults via the store itself.
-    let barCustomization = BarCustomization.shared
-
     /// True while the standalone Settings window is on screen. The overlay's
     /// gear reads this so it looks live — the window is the only place that
     /// state lives, and without it the button reads as inert the moment it

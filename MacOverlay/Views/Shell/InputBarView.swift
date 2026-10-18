@@ -14,6 +14,9 @@ struct InputBarView: View {
     @Environment(OverlayViewModel.self) private var vm
     @FocusState private var inputFocused: Bool
 
+    /// The bar's own text size, set in Settings → General → Appearance.
+    @AppStorage("bar.fontSize") private var barFontSize = 13.0
+
     /// Tracks whether the user has actively engaged with the expanded
     /// shell (clicked a button, focused the text field, opened a
     /// surface). When `false` and the mouse leaves the bar, the shell
@@ -176,10 +179,11 @@ struct InputBarView: View {
         }
     }
 
-    /// One horizontal row, ordered: brand · text-input · + · history · mode
-    /// · resume · settings · model · mic · send. Each non-brand button is
-    /// gated by `BarCustomization` so users can hide ones they don't use
-    /// via Preferences → Panel.
+    /// One horizontal row: the brand, the "ask anything" field, and the
+    /// surface buttons — or, during a live interview, the field and its send
+    /// button. (An earlier version offered a per-button visibility set through
+    /// Settings → Panel; the bar has since been consolidated to the controls
+    /// that matter mid-interview and that tab gated nothing.)
     ///
     /// The text input is the flexible element — it expands to fill any
     /// extra horizontal space the user gives the panel by dragging it
@@ -265,7 +269,7 @@ struct InputBarView: View {
         @Bindable var vm = vm
         return TextField("Ask anything", text: $vm.manualInput, axis: .vertical)
             .textFieldStyle(.plain)
-            .font(.system(size: CGFloat(vm.barCustomization.fontSize)))
+            .font(.system(size: CGFloat(barFontSize)))
             .foregroundColor(Design.Ink.primary)
             .lineLimit(1...3)
             .focused($inputFocused)
