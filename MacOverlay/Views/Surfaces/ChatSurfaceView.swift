@@ -153,7 +153,7 @@ struct ChatSurfaceView: View {
                 // toggle away (list button on the strip).
                 liveFocusView(session: session)
             } else if session.turns.isEmpty && !vm.isSendingToAI && vm.aiResponse.isEmpty {
-                if showsContinueButton(session: session) {
+                if offersResumeInsteadOfStarters(session: session) {
                     // Empty session that's still resumable (a previously-
                     // started interview / call that never got a message).
                     // Replace the starter cards with the continue
@@ -803,7 +803,11 @@ struct ChatSurfaceView: View {
 
     private var modeSubtitle: String {
         switch vm.sessionMode {
-        case .interview: return "Hit Start Interview up top, or pick a starter below."
+        // Not "Start Interview up top": the only Start lives on the Interview
+        // surface, and the top strip that mentions is hover-revealed, so
+        // pointing at it sent the user looking for a control that was not on
+        // screen.
+        case .interview: return "Pick a starter below, or just type."
         case .meeting:   return "Record the conversation, or pick a starter below."
         case .call:      return "Record the call, or pick a starter below."
         case .general:   return "Pick a starter or just type below."
@@ -946,6 +950,19 @@ struct ChatSurfaceView: View {
         case .interview, .regularCall, .normal: return true
         case .quickAsk:                          return false
         }
+    }
+
+    /// Whether an *empty* session should offer "Continue call" instead of the
+    /// starter cards.
+    ///
+    /// `showsContinueButton` is true for `.normal` so that legacy call
+    /// sessions can be resumed from the end of their transcript. Using it for
+    /// an empty session as well meant every brand-new chat — which is always
+    /// `.normal` — showed the mode headline, a "Continue call" button, and no
+    /// starter cards at all. The cards are the only useful thing on that
+    /// screen, and nothing could reach them.
+    private func offersResumeInsteadOfStarters(session: ChatSession) -> Bool {
+        session.kind != .normal && showsContinueButton(session: session)
     }
 
     /// "Continue session" affordance pinned after the last assistant

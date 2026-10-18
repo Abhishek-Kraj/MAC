@@ -1096,9 +1096,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let minForStage = minimumPanelSize(for: stage)
-        if CommandLine.arguments.contains("-dumpviews") {
-            NSLog("TRACE animate stage=\(stage.rawValue) cur=\(cur) target=\(target) min=\(minForStage) hugging=\(responseHugging) surface=\(vm.primarySurface?.rawValue ?? "none")")
-        }
         panel.minSize = minForStage
         // A width the user dragged to under an older, smaller minimum (or
         // kept from the compact bar) must not survive into this stage.
@@ -1117,9 +1114,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if abs(cur.width - target.width) < 1,
            abs(cur.height - target.height) < 1,
            abs(cur.origin.y - newY) < 1 {
-            if CommandLine.arguments.contains("-dumpviews") {
-                NSLog("TRACE animate NOOP cur=\(cur) target=\(target)")
-            }
             return
         }
 
