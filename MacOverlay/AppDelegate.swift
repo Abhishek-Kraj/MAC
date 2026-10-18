@@ -6,9 +6,25 @@ import ScreenCaptureKit
 // Prevents the I-beam cursor from appearing during screen share (the overlay is hidden
 // from capture but the cursor shape is still visible to the interviewer).
 final class OverlayHostingView: NSHostingView<AnyView> {
+    /// The border strips that should advertise a resize cursor, in this view's
+    /// own coordinate space. Set by `AppDelegate`; empty when nothing on the
+    /// panel is resizable (the pill).
+    var resizeBands: (() -> [(PanelResizeEdge, NSRect)])?
+
     override func resetCursorRects() {
         // Do NOT call super — that would let SwiftUI register I-beam rects for text fields.
         addCursorRect(bounds, cursor: .arrow)
+        // The resize borders are added AFTER the arrow, which is what makes
+        // them win: where two cursor rects overlap, the one added last takes
+        // precedence. This is also the only mechanism that works during an
+        // interview — the panel is a nonactivating panel and mouse-moved
+        // events follow the ACTIVE application, so a hover handler never fires
+        // while another app is frontmost, even though dragging the border
+        // works fine. Cursor rects are tracked by the window server per window
+        // and do not care who is active.
+        for (edge, rect) in resizeBands?() ?? [] {
+            addCursorRect(rect, cursor: edge.cursor)
+        }
     }
 }
 
@@ -182,7 +198,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     print("SNAPSHOT \(url.path)")
                 }
                 if CommandLine.arguments.contains("-dumpviews") {
-                    let dump = self.viewGeometryDump().joined(separator: "\n") + "\n"
+                    let dump = (self.viewGeometryDump() + self.dumpWindowFrontage())
+                        .joined(separator: "\n") + "\n"
                     let target = (dir ?? Self.snapshotDirectory)
                         .appendingPathComponent("geometry.txt")
                     try? dump.write(to: target, atomically: true, encoding: .utf8)
@@ -440,6 +457,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Dragging the panel's edges goes through `windowWillResize`.
         panel.delegate = self
         overlayPanel = panel
+        // `isFloatingPanel` forces the panel's level to `.floating`, so it has
+        // to be set BEFORE the level we actually want — the other order looked
+        // right and silently left the overlay at level 3, below Control Center
+        // and anything else floating. Verified via the window list: the panel
+        // reported `layer=3` where `.statusBar + 1` is 26.
+        overlayPanel.isFloatingPanel            = true
         overlayPanel.level                      = .statusBar + 1
         overlayPanel.collectionBehavior         = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         overlayPanel.isOpaque                   = false
@@ -449,11 +472,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         overlayPanel.titleVisibility            = .hidden
         overlayPanel.isMovableByWindowBackground = true
         overlayPanel.hidesOnDeactivate          = false
-        overlayPanel.isFloatingPanel            = true
         overlayPanel.becomesKeyOnlyIfNeeded     = true
-        // Needed so the resize monitor gets `mouseMoved` and can show the
-        // resize cursor along the panel's border.
-        overlayPanel.acceptsMouseMovedEvents    = true
+        // Deliberately no `acceptsMouseMovedEvents`: hover feedback cannot be
+        // used for the border cursor, because mouse-moved events go to the
+        // active application and during an interview that is never this one.
+        // `OverlayHostingView.resetCursorRects` owns the cursor instead.
         overlayPanel.sharingType                = NSWindow.desiredSharingType
         // Initial minSize matches the launch stage; `animateShellFrame`
         // updates it on every stage transition so the user can never
@@ -464,6 +487,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hosting = OverlayHostingView(rootView: AnyView(OverlayView().environment(vm)))
         // Disable intrinsic-size constraints so the panel controls its own size
         hosting.sizingOptions = []
+        // The border cursors are the hosting view's cursor rects, refreshed
+        // whenever the panel's geometry or stage changes.
+        hosting.resizeBands = { [weak self] in self?.currentResizeBands() ?? [] }
+        overlayHostingView = hosting
         overlayPanel.contentView = hosting
 
         // Restore last-used position (constrainFrameRect will clamp if the saved
@@ -473,6 +500,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Resizing from any edge or corner is taken by an event monitor rather
         // than by views inside the shell — see `installPanelResizeMonitor`.
         installPanelResizeMonitor()
+
+        // The window can launch already expanded (the last stage is restored),
+        // in which case no stage transition runs to register the bands.
+        refreshResizeCursors()
 
         overlayPanel.orderFrontRegardless()
     }
@@ -718,6 +749,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // grow-then-snap flicker on every keyboard resize.
             if vm.shellStage == .expanded { lastFullSize = overlayPanel.frame.size }
             if vm.focusHuggingActive { focusHeightUserOverride = true }
+            refreshResizeCursors()
         }
     }
 
@@ -777,11 +809,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// the old grip flicker).
     private var panelResizeAnchor: NSPoint?
 
-    /// Whether `mouseMoved` last left a resize cursor on screen, so it can be
-    /// handed back to the arrow when the pointer leaves the border. Guarded
-    /// rather than set on every move: assigning the arrow unconditionally
-    /// would stomp the I-beam that text fields set through their cursor rects.
-    private var resizeCursorShowing = false
+    /// The hosting view whose cursor rects advertise the resize borders.
+    private var overlayHostingView: OverlayHostingView?
+
+    /// The border strips that should show a resize cursor right now — empty
+    /// except on an expanded panel, since the pill cannot be resized.
+    @MainActor
+    private func currentResizeBands() -> [(PanelResizeEdge, NSRect)] {
+        guard vm.shellStage == .expanded, let hosting = overlayHostingView else { return [] }
+        return PanelResizeEdge.bands(in: hosting.bounds.size, flipped: hosting.isFlipped)
+    }
+
+    /// Re-register the border cursors. Called wherever the panel's geometry or
+    /// stage changes, because the bands are measured from the current size.
+    @MainActor
+    private func refreshResizeCursors() {
+        guard let hosting = overlayHostingView else { return }
+        hosting.window?.invalidateCursorRects(for: hosting)
+    }
 
     /// Claim the panel's border for resizing. Installed with the panel so the
     /// monitor exists for exactly as long as the window it serves.
@@ -790,10 +835,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// rather than here. That decision is exactly what broke the first time —
     /// it used to be eight transparent SwiftUI zones, and not one of them ever
     /// received a press — so it lives in a pure function with tests on it.
+    ///
+    /// The cursor is NOT set from here. It is the hosting view's cursor rects,
+    /// for the reason spelled out on `OverlayHostingView.resetCursorRects`.
     @MainActor
     private func installPanelResizeMonitor() {
         panelResizeMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .mouseMoved]
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
         ) { [weak self] event in
             guard let self else { return event }
             // Local monitors fire on the main thread; the handler type just
@@ -847,35 +895,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return nil
         }
 
-        guard event.window === overlayPanel else { return event }
+        guard event.type == .leftMouseDown, event.window === overlayPanel else { return event }
         // The pill is a fixed-size dot on purpose: its window is exactly the
         // visible circle, so letting it grow would leave a transparent margin
         // that swallows clicks aimed at whatever is underneath.
         guard vm.shellStage == .expanded else { return event }
-
-        switch event.type {
-        case .leftMouseDown:
-            guard let edge = panelResizeEdge(atWindowPoint: event.locationInWindow) else {
-                return event
-            }
-            activeResizeEdge = edge
-            panelResizeAnchor = screenPoint(of: event)
-            panelResizeBaseFrame = overlayPanel.frame
-            return nil
-
-        case .mouseMoved:
-            if let edge = panelResizeEdge(atWindowPoint: event.locationInWindow) {
-                edge.cursor.set()
-                resizeCursorShowing = true
-            } else if resizeCursorShowing {
-                NSCursor.arrow.set()
-                resizeCursorShowing = false
-            }
-            return event
-
-        default:
+        guard let edge = panelResizeEdge(atWindowPoint: event.locationInWindow) else {
             return event
         }
+        activeResizeEdge = edge
+        panelResizeAnchor = screenPoint(of: event)
+        panelResizeBaseFrame = overlayPanel.frame
+        return nil
     }
 
     // MARK: - Drag-to-resize (edge and corner geometry)
@@ -905,6 +936,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panelResizeBaseFrame = nil
             persistPanelOrigin()
             if vm.isUserResizingPanel { vm.isUserResizingPanel = false }
+            // The bands are measured from the panel's size, so they have just
+            // moved.
+            refreshResizeCursors()
             return
         }
         let base: NSRect
@@ -1240,6 +1274,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // kept from the compact bar) must not survive into this stage.
         target.width  = max(target.width,  minForStage.width)
         target.height = max(target.height, minForStage.height)
+        // The resize bands are measured from the panel's size and only exist on
+        // an expanded panel, so a stage change moves them even when the frame
+        // itself does not move.
+        refreshResizeCursors()
 
         // Response-sized panels are fixed-height and top-anchored: the
         // answer card's top edge stays visually locked, and streamed text
@@ -1668,6 +1706,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         run(0)
+    }
+
+    /// Every window this app has on screen, with the level and alpha that
+    /// decide what is actually in front.
+    ///
+    /// Added while chasing a border that would not resize. It earned its place
+    /// immediately: it reported `level=3` for a panel set to `.statusBar + 1`,
+    /// because `isFloatingPanel = true` was being applied after the level and
+    /// forcing `.floating`.
+    ///
+    /// It does NOT try to work out which window a press at a given point would
+    /// reach. `windowNumber(at:belowWindowWithWindowNumber:)` looks tidier than
+    /// it behaves — its search starts below the window you name, so passing 0
+    /// answered with windows underneath the panel and sent the investigation
+    /// after the wrong culprit entirely. A press can also be taken by a view
+    /// inside the shell before any window-level question about it is
+    /// meaningful, which is exactly how the border came to be unreachable while
+    /// this dump looked healthy.
+    @MainActor
+    func dumpWindowFrontage() -> [String] {
+        guard let panel = overlayPanel else { return ["FRONTAGE no panel"] }
+        var out: [String] = []
+        out.append("FRONTAGE panel #\(panel.windowNumber) level=\(panel.level.rawValue) "
+            + "(expect \(NSWindow.Level.statusBar.rawValue + 1)) "
+            + "alpha=\(panel.alphaValue) visible=\(panel.isVisible) frame=\(panel.frame)")
+        for w in NSApp.orderedWindows {
+            out.append("FRONTAGE window #\(w.windowNumber) "
+                + "\(String(describing: type(of: w))) level=\(w.level.rawValue) "
+                + "alpha=\(w.alphaValue) visible=\(w.isVisible) "
+                + "ignoresMouse=\(w.ignoresMouseEvents) frame=\(w.frame)")
+        }
+        // The resize cursor cannot be photographed, so report the regions the
+        // window was told to use instead of a claim that they work. A cursor
+        // rect is not observable from outside the process, which is why this is
+        // the only way to see them without relying on the pointer.
+        if let hosting = overlayHostingView {
+            let bands = currentResizeBands()
+            out.append("FRONTAGE cursor bands: \(bands.count) "
+                + "(stage=\(vm.shellStage.rawValue) flipped=\(hosting.isFlipped) "
+                + "bounds=\(hosting.bounds.size))")
+            for (edge, rect) in bands {
+                out.append("FRONTAGE   \(edge) \(rect)")
+            }
+        } else {
+            out.append("FRONTAGE cursor bands: no hosting view")
+        }
+        return out
     }
 
     func showOverlay() {

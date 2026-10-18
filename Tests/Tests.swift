@@ -921,13 +921,33 @@ func testPanelResizeHitTestCoversEveryBorder() throws {
 
     // The VISIBLE shell edge has to resize. The shell is inset 6pt top and
     // bottom and 14pt per side, so a band that stopped at the window edge would
-    // hide entirely in the invisible margin — which is where the shell is.
-    try assertTrue(PanelResizeEdge.bandHorizontal > 14, "the side bands must reach the card's visible edge")
-    try assertTrue(PanelResizeEdge.bandVertical > 6, "the top/bottom bands must reach the card's visible edge")
+    // hide entirely in the invisible shadow margin — and whether a band is
+    // usable is not a style question: at 16 the press one point inside the card
+    // is not a resize at all, so the panel moves instead and the border looks
+    // dead.
+    try assertTrue(PanelResizeEdge.bandHorizontal > 14, "the side bands must reach past the card's edge")
+    try assertTrue(PanelResizeEdge.bandVertical > 6, "the top/bottom bands must reach past the card's edge")
     try assertEq(edge(14, 400), .leading)
+    try assertEq(edge(25, 400), .leading, "11pt inside the card's edge still resizes")
     try assertEq(edge(426, 400), .trailing)
     try assertEq(edge(220, 6), .bottom)
     try assertEq(edge(220, 794), .top)
+
+    // A real press that missed, taken from the resize log rather than invented.
+    // In a 440-wide panel the user grabbed the trailing border 22.5pt in from
+    // it — 8pt inside the card's visible edge — and the 16pt band of the day
+    // said "interior", so nothing resized.
+    try assertEq(edge(417.5, 294), .trailing, "the press that missed must now resize")
+
+    // The ceiling on those bands is the chrome, which sits close to the window
+    // edge in a 440x800 panel: the close button starts 26pt in from the leading
+    // edge and 16pt down from the top, the bar's brand pill 18pt in and its
+    // trailing cluster ends 30pt in, the compose button 54pt in from the
+    // trailing edge. None of them may be swallowed by a resize.
+    try assertEq(edge(26, 775), nil, "the close button's leading column must stay clickable")
+    try assertTrue(edge(36, 780) == nil, "the close button's centre must stay clickable")
+    try assertTrue(edge(373, 774) == nil, "the compose button must stay clickable")
+    try assertTrue(edge(300, 781) == nil, "the top strip beside the buttons stays clickable")
 
     // Each corner of the window, diagonally opposite its own name.
     try assertEq(edge(2, 2), .bottomLeading)
@@ -937,10 +957,95 @@ func testPanelResizeHitTestCoversEveryBorder() throws {
 
     // Corner bands are wider than the edge bands, so a press beside a corner
     // still picks the corner up...
-    try assertEq(edge(20, 796), .topLeading)
+    try assertEq(edge(24, 796), .topLeading)
     // ...but past that width it is only the edge, not the corner.
-    try assertEq(edge(30, 796), .top)
+    try assertEq(edge(40, 796), .top)
     try assertEq(edge(4, 40), .leading)
+
+    // The whole invisible margin belongs to the resize: every point outside the
+    // shell resolves to an edge or corner, so a press there can never fall
+    // through to `isMovableByWindowBackground` and move the panel instead.
+    for x in stride(from: CGFloat(0), through: 13, by: 1) {
+        try assertTrue(edge(x, 400) != nil, "margin x=\(x) must resize, not move")
+    }
+    for y in stride(from: CGFloat(0), through: 5, by: 1) {
+        try assertTrue(edge(220, y) != nil, "margin y=\(y) must resize, not move")
+        try assertTrue(edge(220, 800 - y) != nil, "margin y=\(800 - y) must resize, not move")
+    }
+}
+
+/// The cursor rects and the hit test are two descriptions of one border, written
+/// from opposite directions — the hit test asks how far a point is from each
+/// edge, the bands lay rects over them — so the only way to trust them is to
+/// sweep one against the other. A cursor rect narrower than the grab region is a
+/// live border wearing an arrow, which is what the panel used to do; wider than
+/// the grab region and the panel looks draggable where it only moves.
+///
+/// Swept rather than spot-checked because both mistakes are off-by-a-few-point
+/// errors: the one that hid for so long was a real press 2.5pt inside the band
+/// silently doing nothing.
+func testPanelResizeCursorBandsMatchTheHitTest() throws {
+    let panel = NSSize(width: 440, height: 800)
+
+    /// The edge whose cursor rect wins at `point`, in view coordinates, the way
+    /// `addCursorRect` resolves an overlap: the rect added last.
+    func band(_ point: NSPoint, _ bands: [(PanelResizeEdge, NSRect)]) -> PanelResizeEdge? {
+        bands.last { $0.1.contains(point) }?.0
+    }
+
+    // Both orientations: the rects are built for whichever way the hosting
+    // view's y-axis runs, and only one of the two can be right.
+    for flipped in [true, false] {
+        let bands = PanelResizeEdge.bands(in: panel, flipped: flipped)
+        try assertEq(Set(bands.map(\.0)), Set(PanelResizeEdge.allCases),
+                     "every edge and corner has exactly one cursor rect")
+
+        // The hosting view is flipped, so a view point has to be swapped into
+        // window coordinates before the hit test can be asked about it.
+        func hitPoint(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+            flipped ? NSPoint(x: x, y: panel.height - y) : NSPoint(x: x, y: y)
+        }
+
+        for x in stride(from: CGFloat(0), through: panel.width, by: 2) {
+            for y in stride(from: CGFloat(0), through: panel.height, by: 2) {
+                let view = NSPoint(x: x, y: y)
+                let hit = PanelResizeEdge.at(point: hitPoint(x, y), in: panel)
+                let cursor = band(view, bands)
+                // A grab region the cursor does not cover is the failure that
+                // matters most, so it gets its own message.
+                if hit != nil {
+                    try assertEq(cursor, hit,
+                                 "a live border at \(view) shows \(String(describing: cursor))")
+                }
+                try assertEq(cursor, hit,
+                             "cursor and hit test disagree at \(view) (flipped: \(flipped))")
+            }
+        }
+
+        // ...and the overhang is exactly one point, not a drift. The hit test
+        // stops at the band boundary, the rect carries one more point so that
+        // the closed boundary is inside it.
+        let mid = panel.height / 2
+        try assertEq(band(NSPoint(x: PanelResizeEdge.bandHorizontal + 0.5, y: mid), bands), .leading)
+        try assertEq(band(NSPoint(x: PanelResizeEdge.bandHorizontal + 1.5, y: mid), bands), nil,
+                     "the padding is one point, not two")
+    }
+
+    // Each strip has to hug the correct end of the view. Window coordinates put
+    // the top at maxY; the hosting view is flipped, so its top is minY.
+    let up = Dictionary(uniqueKeysWithValues: PanelResizeEdge.bands(in: panel, flipped: false))
+    let down = Dictionary(uniqueKeysWithValues: PanelResizeEdge.bands(in: panel, flipped: true))
+    try assertEq(up[.top]?.minY, panel.height - PanelResizeEdge.bandVertical,
+                 "unflipped: the top strip sits against maxY")
+    try assertEq(down[.top]?.minY, 0, "flipped: the top strip sits against minY")
+    try assertEq(up[.bottom]?.minY, 0, "unflipped: the bottom strip sits against minY")
+    try assertEq(down[.bottom]?.minY, panel.height - PanelResizeEdge.bandVertical,
+                 "flipped: the bottom strip sits against maxY")
+    // The two orientations are the same border seen from either end.
+    try assertEq(up[.leading], down[.leading], "the side strips do not depend on the y-axis")
+    try assertEq(up[.trailing], down[.trailing])
+    // Corners reach further along the side than the edges do.
+    try assertEq(down[.topLeading]?.width, PanelResizeEdge.cornerHorizontal + 1)
 }
 
 /// The built-in defaults must survive into the merged catalogue.
@@ -2975,6 +3080,7 @@ struct TestsMain {
         TestRunner.run("OpenCode reasoning allowlist matches the gateway", testOpenCodeReasoningAllowlistMatchesTheGateway)
         TestRunner.run("Panel resize edges pin the opposite side", testPanelResizeEdgesPinTheOppositeSide)
         TestRunner.run("Panel resize hit test covers every border", testPanelResizeHitTestCoversEveryBorder)
+        TestRunner.run("Panel resize cursor bands match the hit test", testPanelResizeCursorBandsMatchTheHitTest)
         TestRunner.run("OpenRouter decodes live payload shape", testOpenRouterDecodesLivePayloadShape)
         TestRunner.run("OpenRouter decode tolerates missing architecture", testOpenRouterDecodeToleratesMissingArchitecture)
         TestRunner.run("No payment code in the source tree", testNoPaymentCodeInSourceTree)
