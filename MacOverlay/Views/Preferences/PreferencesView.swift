@@ -59,7 +59,13 @@ struct PreferencesView: View {
         /// flipping the corresponding FeatureFlag is a one-line change.
         @MainActor var isVisible: Bool {
             switch self {
-            case .panel, .profile:
+            // Profile is the only place name / role / company can be set, and
+            // the mode system prompts substitute them into every answer
+            // ("User context: {NAME} is a {ROLE} at {COMPANY}. Pitch answers
+            // at their level."). Hidden, that line always read "the user is a
+            // professional at their company" and the feature was unreachable.
+            case .profile:    return true
+            case .panel:
                 return false
             case .memory:     return true
             case .workspaces: return FeatureFlags.workspacesEnabled

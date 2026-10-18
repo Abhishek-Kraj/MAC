@@ -2494,12 +2494,15 @@ final class OverlayViewModel {
         if AIManager.shared.isOpenRouterModel(model) {
             return (openRouterAPIKey, "OpenRouter")
         }
-        if AIManager.shared.isNVIDIAModel(model)   { return (nvidiaAPIKey, "NVIDIA") }
-        if AIManager.shared.isMoonshotModel(model) { return (moonshotAPIKey, "Moonshot") }
-        if AIManager.shared.isGrokModel(model)     { return (grokAPIKey, "Grok") }
-        if AIManager.shared.isDeepSeekModel(model) { return (deepSeekAPIKey, "DeepSeek") }
-        if AIManager.shared.isOpenAIModel(model)   { return (openAIApiKey, "OpenAI") }
-        return (apiKey, "Anthropic")
+        // Every id the picker can produce is `openrouter/...` or `opencode/...`:
+        // the built-ins, the fetched catalogue and the hand-typed field all go
+        // through `OpenRouterModel.make(slug:)`, and the persisted selection is
+        // validated against the catalogue at launch. So OpenRouter is the only
+        // gateway left. This used to fall through NVIDIA / Moonshot / Grok /
+        // DeepSeek / OpenAI / Anthropic branches that no prefixed id can match
+        // — and none of those had a key field in Settings, so landing on one
+        // sent the user to a field that does not exist.
+        return (openRouterAPIKey, "OpenRouter")
     }
 
     var keyForSelectedModel: (key: String, provider: String) { key(for: selectedModel) }
