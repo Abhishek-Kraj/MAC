@@ -72,6 +72,10 @@ struct PreferencesView: View {
                 .padding(.horizontal, 6)
 
                 Spacer()
+
+                quitRow
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 10)
             }
             .frame(width: sidebarWidth)
             .background(Color.white.opacity(0.03))
@@ -105,6 +109,10 @@ struct PreferencesView: View {
                     // Prompt library has its own internal padding, so don't
                     // double-pad it. Other tabs need the outer padding.
                     .padding(tab == .prompts ? 0 : 14)
+                    // Extra room under the last control. At 14 the final row
+                    // (Onboarding's button) sat flush against the panel's
+                    // bottom edge, which reads as clipped rather than ended.
+                    .padding(.bottom, tab == .prompts ? 0 : 20)
                     .frame(maxWidth: 520, alignment: .topLeading)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
@@ -191,6 +199,42 @@ struct PreferencesView: View {
         .accessibilityLabel(Text(t.rawValue))
     }
 
+    /// Quit, pinned to the bottom of the rail so it is present on every tab.
+    ///
+    /// The overlay floats above every window and hides itself from screen
+    /// sharing, and Quit lived only in its ⋯ menu. With the overlay hidden —
+    /// or while in Settings, where that menu is not on screen at all — there
+    /// was no way out short of hunting for the menu bar icon. `⌘Q` works too,
+    /// for as long as this window is key.
+    private var quitRow: some View {
+        Button {
+            NSApp.terminate(nil)
+        } label: {
+            HStack(spacing: isSidebarCollapsed ? 0 : 8) {
+                Image(systemName: "power")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(Design.Ink.secondary)
+                    .frame(width: 18, height: 20)
+
+                if !isSidebarCollapsed {
+                    Text("Quit TheCloser")
+                        .font(.system(size: 13))
+                        .foregroundColor(Design.Ink.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: isSidebarCollapsed ? .center : .leading)
+            .padding(.horizontal, isSidebarCollapsed ? 0 : 6)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut("q")
+        .help("Quit TheCloser (⌘Q)")
+        .accessibilityLabel(Text("Quit TheCloser"))
+    }
+
     // MARK: - Tabs
 
     @ViewBuilder
@@ -274,11 +318,14 @@ struct PreferencesView: View {
             }
             .toggleStyle(.switch)
 
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                     labelTwoLine(title: "Transcription engine",
                                  subtitle: "Apple runs on this Mac. ElevenLabs and Grok need a key.")
-                        .layoutPriority(1)
-                    Spacer(minLength: 8)
+                        // Takes all the room the picker doesn't. Without this
+                        // the label was squeezed to its longest word and the
+                        // subtitle wrapped into a five-line sliver with a
+                        // hand's width of dead space beside it.
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Picker("", selection: $vm.transcriptionPreference) {
                         ForEach(OverlayViewModel.TranscriptionPreference.allCases) { p in
                             Text(p.displayName).tag(p)
@@ -286,7 +333,7 @@ struct PreferencesView: View {
                     }
                     .pickerStyle(.menu)
                     .labelsHidden()
-                    .frame(width: 160)
+                    .frame(width: 150)
             }
 
             // Shown instead of letting the macOS dialog reappear on every
@@ -1042,28 +1089,27 @@ struct PreferencesView: View {
         }
     }
 
-    /// How keywords in answers stand out, with a sample answer showing the
-    /// choice. The ⋯ menu has the same setting.
+    /// How keywords in answers stand out. The ⋯ menu has the same setting.
+    ///
+    /// A sample answer used to sit under this picker to show the colour
+    /// against real text. Removed: it restated the options in one fixed
+    /// sentence, took a third of the Appearance section, and pushed the
+    /// sections below it past the bottom of the panel.
     private var keywordStyleRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text("Keywords")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .frame(width: 90, alignment: .leading)
-                Picker("", selection: $keywordStyle) {
-                    ForEach(KeywordStyle.allCases.filter { !$0.isHighlight }) { Text($0.displayName).tag($0) }
-                    Divider()
-                    ForEach(KeywordStyle.allCases.filter(\.isHighlight)) { Text($0.displayName).tag($0) }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .frame(width: 160)
-                Spacer()
+        HStack(spacing: 8) {
+            Text("Keywords")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .frame(width: 90, alignment: .leading)
+            Picker("", selection: $keywordStyle) {
+                ForEach(KeywordStyle.allCases.filter { !$0.isHighlight }) { Text($0.displayName).tag($0) }
+                Divider()
+                ForEach(KeywordStyle.allCases.filter(\.isHighlight)) { Text($0.displayName).tag($0) }
             }
-            MarkdownResponseView(text: KeywordStyle.sample, baseSize: 12 * vm.textScale)
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: Design.Radius.md).fill(Design.Surface.inputFill))
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(width: 160)
+            Spacer()
         }
     }
 

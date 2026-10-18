@@ -1723,6 +1723,75 @@ func testGapClassificationUsesRiskNotProse() throws {
     try assertEq(noOverlap.count, 0, "an unrelated area matches nothing")
 }
 
+/// The Settings panel must end inside itself, and only say things once.
+///
+/// Two defects reported from a screenshot: a sample sentence under the
+/// keyword picker ("Lead with the key point…") that restated the options and
+/// cost a third of the section, and a last row sitting flush against the
+/// panel's bottom edge so it read as clipped.
+func testSettingsPanelIsNotClippedAndKeepsNoSampleBlock() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let prefs = try String(
+        contentsOf: root.appending(path: "MacOverlay/Views/Preferences/PreferencesView.swift"),
+        encoding: .utf8)
+    let markdown = try String(
+        contentsOf: root.appending(path: "MacOverlay/Views/Shared/MarkdownResponseView.swift"),
+        encoding: .utf8)
+
+    try assertTrue(!prefs.contains("KeywordStyle.sample"),
+                   "the sample answer block is gone")
+    try assertTrue(!markdown.contains("Let the key point\\n" ) && !markdown.contains("Lead with the"),
+                   "and its constant no longer exists")
+
+    try assertTrue(prefs.contains(".padding(.bottom, tab == .prompts ? 0 : 20)"),
+                   "the scroll content has bottom padding so the last row is not flush")
+
+    // The transcription row: the label must be given the leftover width
+    // rather than collapsing to its longest word.
+    try assertTrue(prefs.contains("Transcription engine"),
+                   "the transcription row still exists")
+    let row = prefs
+        .components(separatedBy: "Transcription engine").dropFirst().first?
+        .components(separatedBy: "needsScreenRecordingPermission").first ?? ""
+    try assertTrue(row.contains(".frame(maxWidth: .infinity, alignment: .leading)"),
+                   "its label takes the remaining width")
+    try assertTrue(!row.contains(".layoutPriority(1)"),
+                   "and is no longer squeezed by the old layout priority")
+}
+
+/// Quitting must not require finding the overlay's "\u{2026}" menu.
+///
+/// The overlay floats above every window and hides itself from screen
+/// sharing. Quit lived only in that menu, so with the overlay hidden — or
+/// while in Settings, where the menu is not on screen — there was no way
+/// out short of the menu bar icon.
+func testSettingsHasAQuitThatWorks() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let prefs = try String(
+        contentsOf: root.appending(path: "MacOverlay/Views/Preferences/PreferencesView.swift"),
+        encoding: .utf8)
+
+    try assertTrue(prefs.contains("private var quitRow"),
+                   "Settings has a quit row")
+    try assertTrue(prefs.contains("NSApp.terminate(nil)"),
+                   "wired to actually terminate")
+    try assertTrue(prefs.contains("quitRow\n                    .padding"),
+                   "pinned into the rail rather than tucked inside one tab")
+    // On every tab: it belongs to the rail, not to a tab's content. The
+    // rail is `body`, so body has to reference it — and the General tab's
+    // own content must not be the only place it lives.
+    let body = prefs.components(separatedBy: "private var sidebarHeader").first ?? ""
+    try assertTrue(body.contains("quitRow"),
+                   "the rail in body renders the quit row, so every tab has it")
+    let general = prefs
+        .components(separatedBy: "private var generalTab").dropFirst().first?
+        .components(separatedBy: "private var quickAskTab").first ?? ""
+    try assertTrue(!general.contains("quitRow"),
+                   "and it is not tucked inside the General tab alone")
+}
+
 /// The app must be inspectable, and gettable-out-of.
 ///
 /// The overlay is a floating panel above every window that hides itself from
@@ -2467,6 +2536,8 @@ struct TestsMain {
         TestRunner.run("Role detection budgets for reasoning", testRoleDetectionBudgetLeavesRoomForReasoning)
         TestRunner.run("Prepared banner breaks down sources", testPreparedBannerBreaksDownSources)
         TestRunner.run("App is inspectable and quittable", testAppCanBeInspectedAndQuitFromInsideIt)
+        TestRunner.run("Settings has a working Quit", testSettingsHasAQuitThatWorks)
+        TestRunner.run("Settings is not clipped", testSettingsPanelIsNotClippedAndKeepsNoSampleBlock)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)
