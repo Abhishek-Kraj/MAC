@@ -14,7 +14,7 @@ struct ModelRow: View {
             HStack(spacing: 8) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 12))
-                    .foregroundColor(isSelected ? .accentColor : .secondary.opacity(0.5))
+                    .foregroundColor(isSelected ? Design.Accent.brand : .secondary.opacity(0.5))
                 Text(model.name)
                     .font(.system(size: 12))
                     .foregroundColor(.primary)
@@ -111,7 +111,7 @@ struct ModelFilterBar: View {
                                               weight: store.tier == t ? .semibold : .regular))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(store.tier == t ? Color.accentColor.opacity(0.25)
+                                .background(store.tier == t ? Design.Accent.brand.opacity(0.25)
                                           : Color.white.opacity(0.05))
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                         }

@@ -155,9 +155,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // programmatic expand is undone before anything can be drawn.
             // The capture happens inside that 350ms window, right after a
             // final assertion, so the stage it draws is the one asked for.
+            var didFresh = false
             func openSurface() {
                 if openSettingsWindow { self.showPreferences() }
                 guard surface != nil || forceExpanded else { return }
+                // `-fresh` clears the active session once, so the Interview
+                // surface draws its setup form rather than resuming whatever
+                // session was last open. That setup form is the screen the
+                // user actually starts from, and it is otherwise impossible to
+                // photograph from a shell — the app always resumes. Once only:
+                // this runs on every tick, and starting a session per tick
+                // would litter the store with empty sessions.
+                if CommandLine.arguments.contains("-fresh"), !didFresh {
+                    didFresh = true
+                    self.vm.startNewSession()
+                }
                 self.vm.primarySurface = surface
                 self.vm.shellStage = .expanded
                 self.animateShellFrame(stage: .expanded)
@@ -993,9 +1005,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     static let pillMinSize             = NSSize(width: 240, height: 60)
     static let expandedCompactMinSize  = NSSize(width: 360, height: 80)
     /// With a surface open the width can't go below the width the layouts
-    /// are designed for: narrower, Settings clips its rail and pushes
-    /// switches out of their cards, and the setup screen's buttons wrap
-    /// one letter per line.
+    /// are designed for: narrower, and the setup screen's buttons wrap one
+    /// letter per line. Settings used to be the other example here, but it is
+    /// its own window now (min 720x520) and this panel minimum cannot clip it.
     static let expandedMinSize         = NSSize(width: 440, height: 420)
 
     /// The smallest the panel may be right now. Every way of resizing
@@ -1258,6 +1270,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showPreferences() {
         MainActor.assumeIsolated {
             if let w = preferencesWindow {
+                vm.preferencesWindowOpen = true
                 w.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
                 return
@@ -1279,6 +1292,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             w.contentViewController = NSHostingController(
                 rootView: PreferencesView()
                     .environment(vm)
+                    // Same tint the overlay root carries
+                    // (`OverlayContentView`). Without it this window falls
+                    // back to the *system* accent for every Toggle, Slider and
+                    // Picker while the overlay uses the brand blue — the same
+                    // control drawn two different colours depending on which
+                    // window it is in.
+                    .tint(Design.Accent.brand)
                     // Self-contained ground. The hosting view is transparent,
                     // so without this the window's own background shows
                     // through and, in light mode, that is white — with the
@@ -1295,15 +1315,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if w.frame.origin == .zero { w.center() }
 
             preferencesWindow = w
+            vm.preferencesWindowOpen = true
+            // The overlay's gear tints while this window is up. The window is
+            // not released on close, so its lifecycle is observed rather than
+            // assumed: `didMiniaturize`/`didDeminiaturize` matter because
+            // `isVisible` goes false when it is in the Dock.
+            for name in [NSWindow.willCloseNotification,
+                         NSWindow.didMiniaturizeNotification,
+                         NSWindow.didDeminiaturizeNotification] {
+                NotificationCenter.default.addObserver(
+                    self, selector: #selector(preferencesWindowVisibilityChanged),
+                    name: name, object: w)
+            }
             w.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
     }
 
-    /// True while the Settings window is on screen. The bar's Profile button
-    /// uses this to show that the window it opens is already open.
-    @MainActor var isPreferencesVisible: Bool {
-        preferencesWindow?.isVisible ?? false
+    @objc private func preferencesWindowVisibilityChanged() {
+        MainActor.assumeIsolated {
+            vm.preferencesWindowOpen = preferencesWindow?.isVisible ?? false
+        }
     }
 
     // MARK: - Pictures of the app

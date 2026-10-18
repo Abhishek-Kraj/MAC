@@ -753,7 +753,20 @@ final class OverlayViewModel {
     var showHistoryPanel       = false
     var showPromptLibraryPanel = false
 
+    /// True while the standalone Settings window is on screen. The overlay's
+    /// gear reads this so it looks live — the window is the only place that
+    /// state lives, and without it the button reads as inert the moment it
+    /// has done its job.
+    var preferencesWindowOpen = false
+
     // MARK: - Shell layout (new UX)
+    //
+    // Settings is deliberately NOT a case here. It used to be a surface of
+    // this panel; it is now its own window (`AppDelegate.showPreferences`),
+    // because keys, the prep bank, gap analysis, the résumé and the model
+    // catalogue do not fit in 440pt without clipping. Keeping a case that no
+    // code can ever select left four dead `switch` arms and a `PreferencesView`
+    // that was unreachable.
     enum PrimarySurface: String, Hashable, CaseIterable, Codable {
         case chat       // live transcript + conversation bubbles (default)
         case interview  // interview setup + live interview surface
@@ -762,7 +775,6 @@ final class OverlayViewModel {
         case prompts    // prompt library
         case calendar
         case browser
-        case settings
 
         var displayName: String {
             switch self {
@@ -773,7 +785,6 @@ final class OverlayViewModel {
             case .prompts:   return "Prompts"
             case .calendar:  return "Calendar"
             case .browser:   return "Browser"
-            case .settings:  return "Settings"
             }
         }
         var icon: String {
@@ -785,7 +796,6 @@ final class OverlayViewModel {
             case .prompts:   return "text.bubble"
             case .calendar:  return "calendar"
             case .browser:   return "globe"
-            case .settings:  return "gearshape"
             }
         }
         var activeIcon: String {
@@ -797,7 +807,6 @@ final class OverlayViewModel {
             case .prompts:   return "text.bubble.fill"
             case .calendar:  return "calendar"
             case .browser:   return "globe"
-            case .settings:  return "gearshape.fill"
             }
         }
     }
@@ -813,8 +822,6 @@ final class OverlayViewModel {
         }
     }
     @ObservationIgnored var onPrimarySurfaceChange: ((PrimarySurface?) -> Void)?
-    var sidebarCollapsed: Bool = false
-
     /// Which corner of the NSPanel the pill is anchored to, based on where
     /// the panel sits relative to the screen. When the pill is near the
     /// right edge, the shell flips so panels appear to its left; when near
@@ -989,9 +996,10 @@ final class OverlayViewModel {
     }
 
     /// How see-through the open screen is. The Background setting is for
-    /// answers shown over a call; setup, Settings, History, Prompts and the
-    /// browser are read up close, and text from the window behind showing
-    /// through them looks broken, so they're solid.
+    /// answers shown over a call; setup, History, Prompts and the browser are
+    /// read up close, and text from the window behind showing through them
+    /// looks broken, so they're solid. Settings no longer appears here — it is
+    /// a separate window with its own opaque background.
     var surfaceOpacity: Double {
         let live = primarySurface == .chat
             || (primarySurface == .interview && interviewSurfaceShowsChat)
@@ -1004,7 +1012,7 @@ final class OverlayViewModel {
 
     /// Chat/interview answer surfaces use the compact fixed response
     /// panel while a response is pending or visible. Setup, history,
-    /// browser, preferences, and other tool surfaces keep the full panel.
+    /// browser and other tool surfaces keep the full panel.
     var usesResponseHuggingPanel: Bool {
         guard shellStage == .expanded else { return false }
         switch primarySurface {
@@ -1737,7 +1745,7 @@ final class OverlayViewModel {
         // mid-interview, where regular status text is suppressed.
         let (modelKey, modelProvider) = keyForSelectedModel
         if modelKey.isEmpty {
-            statusMessage = "Error: no \(modelProvider) API key — add it in Profile → API keys, or pick another model."
+            statusMessage = "Error: no \(modelProvider) API key — add it in Settings → AI, or pick another model."
             return
         }
 

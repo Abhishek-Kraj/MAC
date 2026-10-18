@@ -72,7 +72,7 @@ struct AIResponsePanelView: View {
                 .font(.system(size: 8))
                 .foregroundColor(.white)
                 .padding(3)
-                .background(Circle().fill(Color.accentColor))
+                .background(Circle().fill(Design.Accent.brand))
             Text("Prepared")
                 .font(.system(size: 10, weight: .semibold))
             if vm.canShowGenerated {
@@ -81,7 +81,7 @@ struct AIResponsePanelView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.accentColor)
+                .foregroundColor(Design.Accent.brand)
             }
         }
         .help(vm.preparedSource)

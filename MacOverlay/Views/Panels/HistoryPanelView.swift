@@ -358,13 +358,13 @@ private struct SessionRow: View {
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(isActive
-                      ? Color.accentColor.opacity(0.10)
+                      ? Design.Accent.brand.opacity(0.10)
                       : Color.white.opacity(hovering ? 0.07 : 0.04))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(isActive
-                              ? Color.accentColor.opacity(0.45)
+                              ? Design.Accent.brand.opacity(0.45)
                               : Color.white.opacity(hovering ? 0.18 : 0.10),
                               lineWidth: 0.5)
         )

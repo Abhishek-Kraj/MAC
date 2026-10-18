@@ -84,10 +84,10 @@ enum FeatureFlags {
     /// correctly under the hood.
     static let workspacesEnabled = false
 
-    /// Sessions / chat history sidebar entry. Re-enabled in the redesigned
-    /// UI — there's now a dedicated History button next to the New Session
-    /// "+" in the composer that brings up the headed surface for browsing
-    /// past sessions. The underlying flag still exists so we can take it
-    /// back out cleanly if needed.
+    /// Sessions / chat history. There is deliberately no dedicated History
+    /// button: the bar's `historyButton` is parked and not rendered. History
+    /// is reached from the top strip's "…" menu and from "Previous sessions"
+    /// on the interview setup screen. The flag stays so the entry can be
+    /// gated where it *is* shown.
     static let sessionsHistoryEnabled = true
 }

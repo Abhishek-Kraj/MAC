@@ -49,7 +49,7 @@ struct InspectorRootView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "stethoscope")
-                .foregroundColor(.accentColor)
+                .foregroundColor(Design.Accent.brand)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Troubleshooting").font(.system(size: 13, weight: .semibold))
                 Text("Quitting is here. It will not be hard to find again.")

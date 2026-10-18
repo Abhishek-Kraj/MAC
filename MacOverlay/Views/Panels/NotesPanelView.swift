@@ -77,7 +77,7 @@ struct NotesPanelView: View {
                 Image(systemName: "plus.circle.fill")
                     .font(.system(size: 13))
                     .foregroundColor(draftNote.trimmingCharacters(in: .whitespaces).isEmpty
-                                     ? .secondary.opacity(0.4) : .accentColor)
+                                     ? .secondary.opacity(0.4) : Design.Accent.brand)
             }
             .buttonStyle(.plain)
             .disabled(draftNote.trimmingCharacters(in: .whitespaces).isEmpty)

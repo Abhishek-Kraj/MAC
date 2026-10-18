@@ -157,7 +157,7 @@ struct BrowserTabItemView: View {
             HStack(spacing: 5) {
                 Image(systemName: faviconIcon)
                     .font(.system(size: 9))
-                    .foregroundColor(isActive ? .accentColor : .secondary.opacity(0.7))
+                    .foregroundColor(isActive ? Design.Accent.brand : .secondary.opacity(0.7))
                 Text(tab.title.isEmpty ? (tab.url.host ?? "Tab") : tab.title)
                     .font(.system(size: 11, weight: isActive ? .medium : .regular))
                     .foregroundColor(isActive ? .primary : .secondary)
@@ -181,7 +181,7 @@ struct BrowserTabItemView: View {
 
             // Browser-style underline indicator for the active tab.
             Rectangle()
-                .fill(isActive ? Color.accentColor : .clear)
+                .fill(isActive ? Design.Accent.brand : .clear)
                 .frame(height: 1.5)
                 .padding(.horizontal, 4)
         }

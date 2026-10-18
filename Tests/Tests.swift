@@ -1786,6 +1786,104 @@ func testEverySettingsTabSharesOneFrame() throws {
                    "and Prompts supplies its own card to match the others")
 }
 
+
+/// One accent, everywhere.
+///
+/// `Color.accentColor` is a fixed system colour — it does not follow the
+/// `.tint()` each root sets, so the same Toggle or Slider rendered brand blue
+/// in the overlay and whatever the Mac's accent happened to be in Settings.
+/// The app has exactly one brand accent; read that.
+func testTheAccentIsAlwaysTheBrandOne() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let files = FileManager.default.enumerator(
+        at: root.appending(path: "MacOverlay"),
+        includingPropertiesForKeys: nil)!
+        .compactMap { $0 as? URL }
+        .filter { $0.pathExtension == "swift" }
+
+    try assertTrue(!files.isEmpty, "found the sources to scan")
+    var offenders: [String] = []
+    for url in files {
+        let text = try String(contentsOf: url, encoding: .utf8)
+        if text.contains("accentColor") { offenders.append(url.lastPathComponent) }
+    }
+    try assertTrue(offenders.isEmpty,
+                   "no file reads the system accent: \(offenders.joined(separator: ", "))")
+
+    // Both roots must carry the tint, or a control falls back to the OS accent.
+    let appDelegate = try String(
+        contentsOf: root.appending(path: "MacOverlay/AppDelegate.swift"), encoding: .utf8)
+    let content = try String(
+        contentsOf: root.appending(path: "MacOverlay/OverlayContentView.swift"), encoding: .utf8)
+    try assertTrue(content.contains(".tint(Design.Accent.brand)"),
+                   "the overlay root tints with the brand accent")
+    try assertTrue(appDelegate.contains(".tint(Design.Accent.brand)"),
+                   "and so does the Settings window root")
+}
+
+/// The prep card's actions sit on their own row.
+///
+/// They shared the headline's `HStack` behind a `Spacer()`. The headline
+/// claimed the width and `StyledButton` is `lineLimit(1)`, so in the 440pt
+/// panel the capsules were squeezed to "View 6…" and "Add m…" — the buttons
+/// that are the only route into the bank, unreadable.
+func testPrepActionsAreOnTheirOwnRow() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let prep = try String(
+        contentsOf: root.appending(path: "MacOverlay/Views/Panels/PrepPanelView.swift"),
+        encoding: .utf8)
+
+    try assertTrue(prep.contains("// Actions get their own row"),
+                   "the actions are documented as their own row")
+    try assertTrue(prep.contains("Button(\"View \\(questionCount) questions\")"),
+                   "and the full label is still there to be shown")
+    // The regression: buttons inside the headline HStack, past a bare Spacer().
+    try assertTrue(!prep.contains("""
+                    Spacer()
+                    if isRunning {
+"""),
+                   "the action buttons are no longer inside the headline row")
+    // And the banner stopped restating what the headline already says.
+    try assertTrue(!prep.contains("Text(\"Prepared — \\(questionCount) questions\")"),
+                   "the banner does not repeat the count")
+    try assertTrue(!prep.contains("Button(\"View\") { showBank = true }"),
+                   "nor duplicates the View button")
+}
+
+/// No trace of Settings-as-a-surface, and the gear reflects the window.
+func testSettingsLeavesNoDeadSurfaceBehind() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    func read(_ p: String) throws -> String {
+        try String(contentsOf: root.appending(path: p), encoding: .utf8)
+    }
+
+    let vm = try read("MacOverlay/OverlayViewModel.swift")
+    let content = try read("MacOverlay/OverlayContentView.swift")
+    let strip = try read("MacOverlay/Views/Shell/TopStripView.swift")
+    let appDelegate = try read("MacOverlay/AppDelegate.swift")
+    let bar = try read("MacOverlay/Views/Shell/InputBarView.swift")
+
+    try assertTrue(!vm.contains("case settings"),
+                   "the surface enum has no settings case left")
+    try assertTrue(!content.contains("PreferencesView()"),
+                   "the panel cannot render Preferences")
+    try assertTrue(!strip.contains("case .settings?"),
+                   "nor name it in the header")
+    try assertTrue(!vm.contains("sidebarCollapsed"),
+                   "the in-panel sidebar flag is gone")
+    try assertTrue(!appDelegate.contains("isPreferencesVisible"),
+                   "and so is the dead visibility accessor")
+
+    // The gear must light while the window is up, or it reads as inert.
+    try assertTrue(vm.contains("var preferencesWindowOpen"),
+                   "the model tracks the window's visibility")
+    try assertTrue(bar.contains("active: active"),
+                   "and the gear reads it")
+}
+
 /// The bar itself must offer a way out.
 ///
 /// Quit was reachable from Settings, the overlay's "…" menu, the menu bar and
@@ -2631,6 +2729,9 @@ struct TestsMain {
         TestRunner.run("Settings has a working Quit", testSettingsHasAQuitThatWorks)
         TestRunner.run("Settings is not clipped", testSettingsPanelIsNotClippedAndKeepsNoSampleBlock)
         TestRunner.run("The bar offers Quit", testTheBarOffersQuit)
+        TestRunner.run("Accent is always the brand one", testTheAccentIsAlwaysTheBrandOne)
+        TestRunner.run("Prep actions sit on their own row", testPrepActionsAreOnTheirOwnRow)
+        TestRunner.run("Settings leaves no dead surface", testSettingsLeavesNoDeadSurfaceBehind)
         TestRunner.run("Settings is its own window", testSettingsIsItsOwnWindow)
         TestRunner.run("Settings tabs share one frame", testEverySettingsTabSharesOneFrame)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)

@@ -259,8 +259,8 @@ struct OverlayView: View {
     private static let panelInsetLeading: CGFloat = 8
     private static let panelInsetTrailing: CGFloat = 8
 
-    /// Top card content — title + body. `.headed` (title-only) state is
-    /// gone; if the user opens a surface, they see its body.
+    /// Top card content — title + body. There is no title-only shell state
+    /// any more: if the user opens a surface, they see its body.
     /// Hover-reveal chrome content: editable session title, close,
     /// compose, ⋯. Opacity / hit-testing are applied by `revealOnHover`
     /// so the optional opaque backing fades together with the title.
@@ -383,8 +383,6 @@ struct OverlayView: View {
                 CalendarPanelView()
             case .browser:
                 BrowserShellSurface()
-            case .settings:
-                PreferencesView()
             case .none:
                 EmptyView()
             }

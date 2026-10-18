@@ -37,16 +37,25 @@ struct PrepPanelView: View {
     var body: some View {
         prepSectionCard(title: "Interview prep", systemImage: "text.book.closed") {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
                     statusIcon
                     VStack(alignment: .leading, spacing: 2) {
                         Text(headline)
                             .font(.system(size: 12, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(detail)
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Spacer()
+                    Spacer(minLength: 0)
+                }
+
+                // Actions get their own row. Sharing the headline's row left
+                // them truncated to "View 6…" / "Add m…": the headline claimed
+                // the width and `StyledButton` is `lineLimit(1)`, so the
+                // capsules had nothing left to shrink into.
+                HStack(spacing: 6) {
                     if isRunning {
                         Button("Stop") { generator.cancel() }
                             .buttonStyle(.secondaryCompact)
@@ -54,16 +63,15 @@ struct PrepPanelView: View {
                         // The way to actually see what was prepared. It was
                         // missing entirely: nothing anywhere set `showBank`,
                         // so the bank was generated and then unreachable.
-                        HStack(spacing: 6) {
-                            Button("View \(questionCount) questions") { showBank = true }
-                                .buttonStyle(.primaryCompact)
-                            Button("Add more") { showSetup = true }
-                                .buttonStyle(.secondaryCompact)
-                        }
+                        Button("View \(questionCount) questions") { showBank = true }
+                            .buttonStyle(.primaryCompact)
+                        Button("Add more") { showSetup = true }
+                            .buttonStyle(.secondaryCompact)
                     } else {
                         Button(prepareButtonTitle) { showSetup = true }
                             .buttonStyle(.primaryCompact)
                     }
+                    Spacer(minLength: 0)
                 }
 
                 // Unmissable confirmation. Preparing takes minutes and used to
@@ -122,26 +130,30 @@ struct PrepPanelView: View {
                     .font(.system(size: 14))
                     .foregroundColor(.green)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Prepared — \(questionCount) questions")
+                    // Deliberately not "Prepared — 62 questions". The headline
+                    // two lines above already states the count and the role,
+                    // so this strip is only worth its space for the thing it
+                    // alone knows: where the questions came from. "22 questions"
+                    // alone reads as a finished state with no route onward,
+                    // which is how a bank of imported questions looks identical
+                    // to one researched properly.
+                    Text("Prepared")
                         .font(.system(size: 12, weight: .semibold))
-                    // Where they came from. "22 questions" alone reads as a
-                    // finished state with no route onward, which is how a bank
-                    // of imported questions looks identical to a bank that was
-                    // researched properly.
                     Text(breakdown).font(.system(size: 10)).foregroundColor(.secondary)
                 }
-                Spacer()
-                Button("View") { showBank = true }
-                    .buttonStyle(.secondaryCompact)
+                Spacer(minLength: 0)
             }
 
             // The next step, said out loud. These two paths are independent:
             // a bank can be entirely imported, entirely researched, or both.
+            // The button for it lives in the action row at the top of the card
+            // — repeating it here was a second "Add more" a few points below
+            // the first.
             if isPlaceholderBank || researchedCount == 0 {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 10))
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(Design.Accent.brand)
                     Text(isPlaceholderBank
                          ? "Open prep to name this role, then research \(generator.questionCount) more from your job description."
                          : "Research \(generator.questionCount) more from your job description — these are kept and added to.")
@@ -149,8 +161,6 @@ struct PrepPanelView: View {
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
-                    Button("Add more") { showSetup = true }
-                        .buttonStyle(.primaryCompact)
                 }
             }
         }
@@ -210,7 +220,7 @@ struct PrepPanelView: View {
         if isRunning {
             Image(systemName: "arrow.triangle.2.circlepath")
                 .font(.system(size: 13))
-                .foregroundColor(.accentColor)
+                .foregroundColor(Design.Accent.brand)
                 .rotationEffect(.degrees(spin))
                 .onAppear {
                     withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {

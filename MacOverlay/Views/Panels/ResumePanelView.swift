@@ -813,10 +813,10 @@ struct ResumePanelView: View {
                                 Image(systemName: "eye").font(.system(size: 11))
                                 Text("Preview").font(.system(size: 11, weight: .medium))
                             }
-                            .foregroundColor(.accentColor)
+                            .foregroundColor(Design.Accent.brand)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 5)
-                            .background(Color.accentColor.opacity(0.08))
+                            .background(Design.Accent.brand.opacity(0.08))
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
@@ -909,7 +909,7 @@ private struct ResumeDragBadge: View {
             HStack(spacing: 10) {
                 Image(systemName: "doc.fill")
                     .font(.system(size: 20))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(Design.Accent.brand)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(url.lastPathComponent)
                         .font(.system(size: 11, weight: .medium))
@@ -927,10 +927,10 @@ private struct ResumeDragBadge: View {
             .padding(.vertical, 8)
             .allowsHitTesting(false)
         }
-        .background(Color.accentColor.opacity(0.06))
+        .background(Design.Accent.brand.opacity(0.06))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.accentColor.opacity(0.2), lineWidth: 0.5)
+                .stroke(Design.Accent.brand.opacity(0.2), lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .padding(.horizontal, 10)
@@ -1002,7 +1002,7 @@ private struct ResumeFileRow: View {
                 HStack(spacing: 8) {
                     Image(systemName: "doc.fill")
                         .font(.system(size: 14))
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(Design.Accent.brand)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(url.lastPathComponent)
                             .font(.system(size: 11, weight: .medium))
@@ -1348,7 +1348,7 @@ private struct GenerationDetailView: View {
                 .foregroundColor(isActive ? .white : .secondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(isActive ? Color.accentColor : Color.secondary.opacity(0.08))
+                .background(isActive ? Design.Accent.brand : Color.secondary.opacity(0.08))
         }
         .buttonStyle(.plain)
     }
@@ -1360,7 +1360,7 @@ private struct GenerationDetailView: View {
                 .foregroundColor(isActive ? .white : .secondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(isActive ? Color.accentColor : Color.secondary.opacity(0.1))
+                .background(isActive ? Design.Accent.brand : Color.secondary.opacity(0.1))
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)

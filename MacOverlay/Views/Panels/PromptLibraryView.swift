@@ -167,13 +167,13 @@ struct PromptLibraryView: View {
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 8) {
                 RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(isActive ? Color.accentColor : .clear)
+                    .fill(isActive ? Design.Accent.brand : .clear)
                     .frame(width: 2.5)
                     .padding(.vertical, 4)
 
                 Image(systemName: p.icon)
                     .font(.system(size: 11))
-                    .foregroundColor(isActive ? .accentColor : .secondary.opacity(0.7))
+                    .foregroundColor(isActive ? Design.Accent.brand : .secondary.opacity(0.7))
                     .frame(width: 18, height: 18)
                     .padding(.top, 2)
 
@@ -223,7 +223,7 @@ struct PromptLibraryView: View {
         .background(
             RoundedRectangle(cornerRadius: Design.Radius.md, style: .continuous)
                 .fill(isActive && !isEditing
-                      ? Color.accentColor.opacity(0.08)
+                      ? Design.Accent.brand.opacity(0.08)
                       : .clear)
         )
         .contentShape(Rectangle())

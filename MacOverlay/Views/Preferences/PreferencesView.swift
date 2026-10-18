@@ -217,7 +217,7 @@ struct PreferencesView: View {
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(active ? Color.accentColor.opacity(0.22) : .clear)
+                    .fill(active ? Design.Accent.brand.opacity(0.22) : .clear)
             )
             .contentShape(Rectangle())
         }
@@ -832,7 +832,7 @@ struct PreferencesView: View {
             HStack(spacing: 8) {
                 Image(systemName: on ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 13))
-                    .foregroundColor(on ? .accentColor : .secondary.opacity(0.5))
+                    .foregroundColor(on ? Design.Accent.brand : .secondary.opacity(0.5))
                 Text(model.name)
                     .font(.system(size: 12))
                     .foregroundColor(.primary)
@@ -872,7 +872,7 @@ struct PreferencesView: View {
             HStack(spacing: 8) {
                 Image(systemName: on ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 13))
-                    .foregroundColor(on ? .accentColor : .secondary.opacity(0.5))
+                    .foregroundColor(on ? Design.Accent.brand : .secondary.opacity(0.5))
                 Text(name)
                     .font(.system(size: 12))
                     .foregroundColor(.primary)
@@ -1230,7 +1230,12 @@ struct PreferencesView: View {
                 }
                 .disabled(overrideBinding.wrappedValue.isEmpty)
                 Button {
-                    vm.primarySurface = .prompts
+                    // Switch to this window's own Prompts tab. This used to
+                    // set `vm.primarySurface = .prompts`, which from a
+                    // standalone window silently flipped the overlay panel
+                    // behind it to a screen the user could not see — the
+                    // panel changed for no visible reason.
+                    tab = .prompts
                 } label: {
                     Label("Manage prompts library", systemImage: "text.bubble")
                 }
@@ -1262,7 +1267,7 @@ struct PreferencesView: View {
             Group {
                 if let preset = activePreset {
                     Text("Using preset “\(preset.name)”")
-                        .font(.caption2).foregroundColor(.accentColor)
+                        .font(.caption2).foregroundColor(Design.Accent.brand)
                 } else {
                     Text(overrideBinding.wrappedValue.isEmpty
                          ? "Default: \(defaultText)"
@@ -1335,7 +1340,7 @@ private struct WorkspaceRow: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
-                        .background(Color.accentColor)
+                        .background(Design.Accent.brand)
                         .clipShape(Capsule())
                 }
                 if workspace.isDefault {
@@ -1395,7 +1400,7 @@ private struct WorkspaceRow: View {
                             Spacer()
                             Image(systemName: on ? "checkmark.circle.fill" : "circle")
                                 .font(.system(size: 13))
-                                .foregroundColor(on ? .accentColor : .secondary.opacity(0.5))
+                                .foregroundColor(on ? Design.Accent.brand : .secondary.opacity(0.5))
                         }
                         .padding(.horizontal, 6)
                         .padding(.vertical, 4)
@@ -1409,11 +1414,11 @@ private struct WorkspaceRow: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isActive ? Color.accentColor.opacity(0.06) : Color.primary.opacity(0.03))
+                .fill(isActive ? Design.Accent.brand.opacity(0.06) : Color.primary.opacity(0.03))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isActive ? Color.accentColor.opacity(0.3) : Color.clear, lineWidth: 1)
+                .stroke(isActive ? Design.Accent.brand.opacity(0.3) : Color.clear, lineWidth: 1)
         )
     }
 

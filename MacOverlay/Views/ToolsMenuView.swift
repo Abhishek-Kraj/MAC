@@ -93,7 +93,7 @@ struct ToolsMenuView: View {
                     .frame(width: 32, height: 32)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(t.active ? Color.accentColor : Color.primary.opacity(0.06))
+                            .fill(t.active ? Design.Accent.brand : Color.primary.opacity(0.06))
                     )
                 Text(t.title)
                     .font(.system(size: 10, weight: .medium))

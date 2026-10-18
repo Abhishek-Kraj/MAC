@@ -204,8 +204,8 @@ struct InputBarView: View {
 
             if vm.shellStage != .pill {
                 // Two layouts depending on whether an interview is running:
-                //   - Idle: brand pill + four surface icons (Interview,
-                //     Resume, Browser, Profile). Flows start from a surface.
+                //   - Idle: brand pill + the bar's icons (Interview, and the
+                //     flags below). Flows start from a surface.
                 //   - Active interview: text field + model picker + stop
                 //     button. The surface icons disappear so the user can
                 //     focus on the live conversation; they come back the
@@ -358,6 +358,9 @@ struct InputBarView: View {
 
     // MARK: - Left utilities
 
+    /// Parked — not rendered anywhere. `composeButton` in the top strip is
+    /// what actually binds ⌘N; this one deliberately has no shortcut so
+    /// reviving it cannot create a second registration for the same key.
     private var newSessionButton: some View {
         Button {
             vm.startNewSession()
@@ -369,7 +372,6 @@ struct InputBarView: View {
             iconCircle(systemName: "plus", tint: Design.Ink.secondary, weight: .semibold)
         }
         .buttonStyle(.plain)
-        .keyboardShortcut("n", modifiers: .command)
         .help("New session (⌘N)")
     }
 
@@ -393,9 +395,10 @@ struct InputBarView: View {
 
     @ViewBuilder
     private var surfaceButtons: some View {
-        // Bar surface set: Interview, Resumes, Browser, Profile — the middle
-        // two behind feature flags, both currently on. Everything else (mode
-        // picker, model picker, history, mic, send, text field) is parked —
+        // Bar surface set: Interview, then Settings — which is not a surface
+        // at all but the standalone Settings window. Resumes and Browser sit
+        // behind flags (`resumesEnabled` is false, `browserEnabled` is true).
+        // The rest (mode picker, model picker, history, mic) is parked —
         // flows start by clicking one of these icons.
         surfaceButton(.interview, icon: "desktopcomputer", label: "Interview")
         if FeatureFlags.resumesEnabled {
@@ -410,7 +413,7 @@ struct InputBarView: View {
         // overlay's "…" menu. The overlay floats above every window and hides
         // itself from screen sharing, so getting out of it meant opening a
         // surface first, or hunting for the menu bar icon. Set apart by a
-        // divider so it is not struck while reaching for Profile.
+        // divider so it is not struck while reaching for Settings.
         divider
 
         Button {
@@ -430,16 +433,18 @@ struct InputBarView: View {
     ///
     /// Settings are not a surface of this panel — they are their own window
     /// (see `AppDelegate.showPreferences`). So this does not set
-    /// `primarySurface` and never highlights as "current": it brings a window
-    /// forward, and the window is where that state lives.
+    /// `primarySurface`: it brings a window forward and tints while that
+    /// window is up, which is where the state lives.
     private var settingsButton: some View {
         let attention = !vm.missingRequiredKeys.isEmpty
+        let active = vm.preferencesWindowOpen
         return Button {
             (NSApp.delegate as? AppDelegate)?.showPreferences()
         } label: {
             SurfaceIcon(systemName: "gearshape.fill",
-                        tint: attention ? Design.Accent.amber : Design.Ink.secondary,
-                        active: false,
+                        tint: attention ? Design.Accent.amber
+                              : (active ? Design.Ink.primary : Design.Ink.secondary),
+                        active: active,
                         attention: attention)
         }
         .buttonStyle(.plain)

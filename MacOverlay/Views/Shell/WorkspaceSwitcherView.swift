@@ -93,7 +93,7 @@ struct NewWorkspaceSheet: View {
                             .font(.system(size: 13))
                             .foregroundColor(icon == opt ? .white : .primary)
                             .frame(width: 26, height: 26)
-                            .background(icon == opt ? Color.accentColor : Color.secondary.opacity(0.1))
+                            .background(icon == opt ? Design.Accent.brand : Color.secondary.opacity(0.1))
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                     }
                     .buttonStyle(.plain)
@@ -136,7 +136,7 @@ struct NewWorkspaceSheet: View {
                             Spacer()
                             Image(systemName: on ? "checkmark.circle.fill" : "circle")
                                 .font(.system(size: 13))
-                                .foregroundColor(on ? .accentColor : .secondary.opacity(0.5))
+                                .foregroundColor(on ? Design.Accent.brand : .secondary.opacity(0.5))
                         }
                         .padding(.horizontal, 6)
                         .padding(.vertical, 4)

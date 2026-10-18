@@ -1043,7 +1043,7 @@ private struct MissingKeyWarning: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Open Profile → API keys")
+        .help("Open Settings → AI to add your API keys")
     }
 }
 

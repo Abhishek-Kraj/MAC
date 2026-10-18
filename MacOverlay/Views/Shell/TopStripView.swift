@@ -69,7 +69,6 @@ struct TopStripView: View {
         case .prompts?:   return "Prompts"
         case .calendar?:  return "Calendar"
         case .browser?:   return "Browser"
-        case .settings?:  return "Settings"
         case .none:       return vm.sessionStore.activeSession.displayTitle
         }
     }
@@ -234,11 +233,15 @@ struct TopStripView: View {
                     }
                 }
             } label: {
+                // No `.keyboardShortcut` here. `composeButton` in this same
+                // strip already binds ⌘N, and two registrations for one key
+                // equivalent make which one fires implementation-defined.
+                // The label carries the hint instead.
                 Label(vm.primarySurface == .interview
-                      ? "New interview setup"
-                      : "New Session",
+                      ? "New interview setup (⌘N)"
+                      : "New Session (⌘N)",
                       systemImage: "square.and.pencil")
-            }.keyboardShortcut("n", modifiers: .command)
+            }
 
             Button {
                 withAnimation(Design.Motion.spring) {
