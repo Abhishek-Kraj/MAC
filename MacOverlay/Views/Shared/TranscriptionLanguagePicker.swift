@@ -31,10 +31,7 @@ struct TranscriptionLanguagePicker: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(Design.Ink.secondary)
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(Capsule().fill(Design.Surface.controlFill))
-            .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+            .setupChip()
         }
         // `.button` + plain keeps the capsule label; `.borderlessButton`
         // draws only its text, in the tint colour.

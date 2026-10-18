@@ -35,7 +35,7 @@ struct PrepPanelView: View {
     }
 
     var body: some View {
-        prepSectionCard(title: "Interview prep", systemImage: "text.book.closed") {
+        SetupSection(title: "Interview prep") {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top, spacing: 8) {
                     statusIcon
@@ -929,24 +929,5 @@ struct QuestionEditor: View {
         }
         .padding(16)
         .frame(width: 520, height: 340)
-    }
-}
-
-/// Matches the card used elsewhere on the interview setup screen, which is
-/// private to that view and cannot be reused here.
-private func prepSectionCard<Content: View>(
-    title: String, systemImage: String,
-    @ViewBuilder content: () -> Content
-) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-        HStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(Design.Ink.secondary)
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(Design.Ink.primary)
-        }
-        content()
     }
 }

@@ -62,20 +62,7 @@ private struct InterviewModeBar: View {
                         Text(mode.displayName)
                             .font(.system(size: 12, weight: .semibold))
                     }
-                    .foregroundColor(vm.interviewSurfaceMode == mode ? Design.Ink.inverse : Design.Ink.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(
-                        vm.interviewSurfaceMode == mode
-                        ? Design.Ink.primary
-                        : Design.Surface.controlFill
-                    ))
-                    .overlay(Capsule().strokeBorder(
-                        vm.interviewSurfaceMode == mode
-                        ? Color.white.opacity(0.22)
-                        : Design.Surface.hairline,
-                        lineWidth: 0.5
-                    ))
+                    .setupChip(selected: vm.interviewSurfaceMode == mode)
                 }
                 .buttonStyle(.plain)
             }
@@ -185,15 +172,15 @@ private struct InterviewSetupForm: View {
     }
 
     private var languagePicker: some View {
-        sectionCard(title: "Language", systemImage: "character.bubble") {
+        SetupSection(title: "Language") {
             TranscriptionLanguagePicker()
         }
     }
 
     private var sessionPicker: some View {
-        sectionCard(title: "Session", systemImage: "rectangle.on.rectangle") {
+        SetupSection(title: "Session") {
             HStack(spacing: 6) {
-                segmentChip(
+                SetupChipButton(
                     title: "New interview",
                     icon: "plus.circle",
                     selected: vm.interviewResumeSessionID == nil
@@ -227,19 +214,7 @@ private struct InterviewSetupForm: View {
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundColor(Design.Ink.secondary)
                     }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(
-                        vm.interviewResumeSessionID == nil
-                        ? Design.Surface.controlFill
-                        : Design.Surface.raisedFill
-                    ))
-                    .overlay(Capsule().strokeBorder(
-                        vm.interviewResumeSessionID == nil
-                        ? Design.Surface.hairline
-                        : Color.white.opacity(0.22),
-                        lineWidth: 0.5
-                    ))
+                    .setupChip(selected: vm.interviewResumeSessionID != nil)
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
@@ -254,14 +229,14 @@ private struct InterviewSetupForm: View {
            let s = vm.sessionStore.sessions.first(where: { $0.id == id }) {
             return s.displayTitle
         }
-        return "Previous session…"
+        return "Previous session"
     }
 
     private var resumePicker: some View {
-        sectionCard(title: "Resume", systemImage: "doc.richtext", optional: true) {
-            HStack(spacing: 8) {
+        SetupSection(title: "Resume", optional: true) {
+            HStack(spacing: 6) {
                 if let url = vm.interviewResumeFileURL {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Image(systemName: "doc.fill")
                             .font(.system(size: 10))
                             .foregroundColor(Design.Ink.secondary)
@@ -269,6 +244,7 @@ private struct InterviewSetupForm: View {
                             .font(.system(size: 12))
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            .layoutPriority(-1)
                         Button {
                             vm.interviewResumeFileURL = nil
                         } label: {
@@ -279,11 +255,7 @@ private struct InterviewSetupForm: View {
                         .buttonStyle(.plain)
                         .help("Remove resume")
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Design.Surface.controlFill))
-                    .overlay(RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+                    .setupChip()
                 }
 
                 Button {
@@ -292,15 +264,15 @@ private struct InterviewSetupForm: View {
                     HStack(spacing: 5) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 11, weight: .medium))
-                        Text(vm.interviewResumeFileURL == nil ? "Upload file" : "Replace…")
-                            .font(.system(size: 12, weight: .medium))
+                        Text(vm.interviewResumeFileURL == nil ? "Upload file" : "Replace")
                     }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(Design.Surface.controlFill))
-                    .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+                    .setupChip()
                 }
                 .buttonStyle(.plain)
+                // A whole word beats half of one: without this both the
+                // filename and this button truncate, so the row reads
+                // "A...pdf  Repla..." and neither says what it does.
+                .fixedSize()
                 .help("PDF · DOCX · RTF · TXT · MD")
 
                 // Resume text is extracted in the background the moment the
@@ -308,18 +280,17 @@ private struct InterviewSetupForm: View {
                 // states have to be visible: a failure that renders nothing
                 // is indistinguishable from no file having been chosen, and
                 // that is exactly how a scanned PDF used to look.
+                //
+                // One line, always. The status used to wrap to two lines and
+                // sat beside a chip and a button of two different heights, so
+                // the row read as broken rather than as a row.
                 if vm.interviewResumeFileURL != nil {
                     if vm.isPreparingResume {
-                        HStack(spacing: 5) {
-                            ProgressView().controlSize(.mini)
-                            Text("Reading…")
-                                .font(.system(size: 11))
-                                .foregroundColor(Design.Ink.secondary)
-                        }
+                        status("Reading…")
                     } else if let problem = vm.interviewResumeError {
                         // The reason, in full, and a way out. Truncating this
                         // hides the only actionable sentence in it.
-                        HStack(alignment: .top, spacing: 5) {
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.system(size: 10))
                                 .foregroundColor(.orange)
@@ -333,107 +304,43 @@ private struct InterviewSetupForm: View {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 10))
                                 .foregroundColor(.green)
-                            Text("Ready · \(vm.interviewResumeText.count) characters")
+                            Text("Ready")
                                 .font(.system(size: 11))
                                 .foregroundColor(Design.Ink.secondary)
+                                .lineLimit(1)
+                                .help("\(vm.interviewResumeText.count) characters read from the CV")
                         }
+                        .fixedSize()
                     }
                 }
 
                 Spacer()
             }
         }
+    }
+
+    /// A spinner and its label, on the row's own height so the row cannot grow
+    /// taller than the chips beside it.
+    private func status(_ text: String) -> some View {
+        HStack(spacing: 5) {
+            ProgressView().controlSize(.mini)
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundColor(Design.Ink.secondary)
+                .lineLimit(1)
+        }
+        .fixedSize()
     }
 
     private var contextEditor: some View {
-        @Bindable var vm = vm
-        return sectionCard(title: "Context", systemImage: "text.alignleft", optional: true) {
-            VStack(alignment: .leading, spacing: 8) {
-                ZStack(alignment: .topLeading) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Design.Surface.inputFill)
-                        .overlay(RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
-                    TextEditor(text: $vm.interviewContext)
-                        .scrollContentBackground(.hidden)
-                        .font(.system(size: 12))
-                        .padding(8)
-                        .frame(minHeight: 80, maxHeight: 140)
-                    if vm.interviewContext.isEmpty {
-                        Text("Role, company, JD, talking points…")
-                            .font(.system(size: 12))
-                            .foregroundColor(Design.Ink.muted)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 14)
-                            .allowsHitTesting(false)
-                    }
-                }
-
-                contextFilesRow
-            }
-        }
-    }
-
-    /// "Attach files" button + chip list for extra context files (JD PDF,
-    /// notes, briefing docs). Their extracted text rides as a pending
-    /// attachment on the interview's first user turn — same as the resume.
-    private var contextFilesRow: some View {
-        @Bindable var vm = vm
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Button { pickContextFiles() } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "paperclip")
-                            .font(.system(size: 11, weight: .medium))
-                        Text(vm.interviewContextFiles.isEmpty
-                             ? "Attach files"
-                             : "Attach more")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Design.Surface.controlFill))
-                    .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
-                }
-                .buttonStyle(.plain)
-                .help("PDF · DOCX · RTF · TXT · MD — text is extracted and sent as context.")
-
-                Spacer()
-            }
-
-            if !vm.interviewContextFiles.isEmpty {
-                FlowChipList(files: vm.interviewContextFiles) { id in
-                    vm.interviewContextFiles.removeAll { $0.id == id }
-                }
-            }
-        }
-    }
-
-    private func pickContextFiles() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [
-            .pdf, .plainText,
-            UTType(filenameExtension: "docx") ?? .data,
-            UTType(filenameExtension: "rtf")  ?? .data,
-            UTType(filenameExtension: "md")   ?? .plainText,
-        ]
-        guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
-            // Skip duplicates (same URL already attached).
-            if vm.interviewContextFiles.contains(where: { $0.url == url }) { continue }
-            let text = (try? ResumeImporter.importFile(url: url)) ?? ""
-            guard !text.isEmpty else { continue }
-            vm.interviewContextFiles.append(
-                .init(url: url, name: url.lastPathComponent, extractedText: text)
-            )
-        }
+        ContextSection(
+            placeholder: "Role, company, JD, talking points…",
+            help: "PDF · DOCX · RTF · TXT · MD — text is extracted and sent as context."
+        )
     }
 
     private var promptPicker: some View {
-        sectionCard(title: "System prompt", systemImage: "text.bubble") {
+        SetupSection(title: "System prompt") {
             HStack(spacing: 6) {
                 Menu {
                     Button {
@@ -474,10 +381,7 @@ private struct InterviewSetupForm: View {
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundColor(Design.Ink.secondary)
                     }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(Design.Surface.controlFill))
-                    .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+                    .setupChip()
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
@@ -495,10 +399,7 @@ private struct InterviewSetupForm: View {
                         Text("Create new")
                             .font(.system(size: 12, weight: .medium))
                     }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(Design.Surface.controlFill))
-                    .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+                    .setupChip()
                 }
                 .buttonStyle(.plain)
                 .help("Save a new system prompt and use it")
@@ -522,7 +423,7 @@ private struct InterviewSetupForm: View {
     /// picking this mid-answer.
     private var depthRow: some View {
         @Bindable var vm = vm
-        return sectionCard(title: "Answer depth", systemImage: "text.alignleft") {
+        return SetupSection(title: "Answer depth") {
             HStack(spacing: 10) {
                 Picker("", selection: $vm.answerDepth) {
                     ForEach(AnswerDepth.allCases) { d in
@@ -543,7 +444,7 @@ private struct InterviewSetupForm: View {
     }
 
     private var modelPickerRow: some View {
-        sectionCard(title: "Answer model", systemImage: "cpu") {
+        SetupSection(title: "Answer model") {
             HStack(spacing: 10) {
                 Text("Used for every answer in this interview. Switchable mid-session.")
                     .font(.system(size: 11))
@@ -648,55 +549,6 @@ private struct InterviewSetupForm: View {
         }
     }
 
-    // MARK: Card scaffold
-
-    @ViewBuilder
-    private func sectionCard<Content: View>(
-        title: String,
-        systemImage: String,
-        optional: Bool = false,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(Design.Ink.secondary)
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(Design.Ink.primary)
-                if optional {
-                    Text("Optional")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(Design.Ink.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Design.Surface.controlFill))
-                }
-            }
-            content()
-        }
-    }
-
-    private func segmentChip(title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .medium))
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-            }
-            .foregroundColor(selected ? Design.Ink.inverse : Design.Ink.primary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(Capsule().fill(selected ? Design.Ink.primary : Design.Surface.controlFill))
-            .overlay(Capsule().strokeBorder(
-                selected ? Color.white.opacity(0.22) : Design.Surface.hairline,
-                lineWidth: 0.5
-            ))
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 // MARK: - Regular call setup form
@@ -742,67 +594,20 @@ private struct RegularCallSetupForm: View {
     }
 
     private var languagePicker: some View {
-        sectionCard(title: "Language", systemImage: "character.bubble") {
+        SetupSection(title: "Language") {
             TranscriptionLanguagePicker()
         }
     }
 
-    /// Re-uses the same Context section layout as the interview form so
-    /// the two tabs look consistent. Free-text on top, attached files
-    /// below as chips.
     private var contextEditor: some View {
-        @Bindable var vm = vm
-        return sectionCard(title: "Context", systemImage: "text.alignleft", optional: true) {
-            VStack(alignment: .leading, spacing: 8) {
-                ZStack(alignment: .topLeading) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Design.Surface.inputFill)
-                        .overlay(RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
-                    TextEditor(text: $vm.interviewContext)
-                        .scrollContentBackground(.hidden)
-                        .font(.system(size: 12))
-                        .padding(8)
-                        .frame(minHeight: 80, maxHeight: 140)
-                    if vm.interviewContext.isEmpty {
-                        Text("Who is the call with? What's the goal? Any background…")
-                            .font(.system(size: 12))
-                            .foregroundColor(Design.Ink.muted)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 14)
-                            .allowsHitTesting(false)
-                    }
-                }
-
-                HStack(spacing: 6) {
-                    Button { pickContextFiles() } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "paperclip")
-                                .font(.system(size: 11, weight: .medium))
-                            Text(vm.interviewContextFiles.isEmpty ? "Attach files" : "Attach more")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Design.Surface.controlFill))
-                        .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
-                    }
-                    .buttonStyle(.plain)
-                    .help("PDF · DOCX · RTF · TXT · MD — text extracted into context.")
-                    Spacer()
-                }
-
-                if !vm.interviewContextFiles.isEmpty {
-                    FlowChipList(files: vm.interviewContextFiles) { id in
-                        vm.interviewContextFiles.removeAll { $0.id == id }
-                    }
-                }
-            }
-        }
+        ContextSection(
+            placeholder: "Who is the call with? What's the goal? Any background…",
+            help: "PDF · DOCX · RTF · TXT · MD — text extracted into context."
+        )
     }
 
     private var promptPicker: some View {
-        sectionCard(title: "System prompt", systemImage: "text.bubble") {
+        SetupSection(title: "System prompt") {
             HStack(spacing: 6) {
                 Menu {
                     Button {
@@ -843,10 +648,7 @@ private struct RegularCallSetupForm: View {
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundColor(Design.Ink.secondary)
                     }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(Design.Surface.controlFill))
-                    .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+                    .setupChip()
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
@@ -864,10 +666,7 @@ private struct RegularCallSetupForm: View {
                         Text("Create new")
                             .font(.system(size: 12, weight: .medium))
                     }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(Design.Surface.controlFill))
-                    .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+                    .setupChip()
                 }
                 .buttonStyle(.plain)
 
@@ -881,14 +680,14 @@ private struct RegularCallSetupForm: View {
     /// Chat = text-only, the user types in the bar.
     private var modeToggleRow: some View {
         @Bindable var vm = vm
-        return sectionCard(title: "Mode", systemImage: "waveform.circle") {
+        return SetupSection(title: "Mode") {
             HStack(spacing: 6) {
-                segmentChip(title: "Call (live)",
+                SetupChipButton(title: "Call (live)",
                             icon: "phone.fill",
                             selected: vm.regularCallAsCall) {
                     vm.regularCallAsCall = true
                 }
-                segmentChip(title: "Chat (text)",
+                SetupChipButton(title: "Chat (text)",
                             icon: "bubble.left.and.bubble.right.fill",
                             selected: !vm.regularCallAsCall) {
                     vm.regularCallAsCall = false
@@ -971,75 +770,6 @@ private struct RegularCallSetupForm: View {
         .frame(width: 460)
     }
 
-    private func pickContextFiles() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [
-            .pdf, .plainText,
-            UTType(filenameExtension: "docx") ?? .data,
-            UTType(filenameExtension: "rtf")  ?? .data,
-            UTType(filenameExtension: "md")   ?? .plainText,
-        ]
-        guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
-            if vm.interviewContextFiles.contains(where: { $0.url == url }) { continue }
-            let text = (try? ResumeImporter.importFile(url: url)) ?? ""
-            guard !text.isEmpty else { continue }
-            vm.interviewContextFiles.append(
-                .init(url: url, name: url.lastPathComponent, extractedText: text)
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func sectionCard<Content: View>(
-        title: String,
-        systemImage: String,
-        optional: Bool = false,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(Design.Ink.secondary)
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(Design.Ink.primary)
-                if optional {
-                    Text("Optional")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(Design.Ink.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Design.Surface.controlFill))
-                }
-            }
-            content()
-        }
-    }
-
-    private func segmentChip(title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .medium))
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-            }
-            .foregroundColor(selected ? Design.Ink.inverse : Design.Ink.primary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Capsule().fill(selected ? Design.Ink.primary : Design.Surface.controlFill))
-            .overlay(Capsule().strokeBorder(
-                selected ? Color.white.opacity(0.22) : Design.Surface.hairline,
-                lineWidth: 0.5
-            ))
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 // MARK: - Missing-key warning
@@ -1076,87 +806,5 @@ private struct MissingKeyWarning: View {
         }
         .buttonStyle(.plain)
         .help("Open Settings → AI to add your API keys")
-    }
-}
-
-// MARK: - Context-file chip list
-
-/// Simple wrapping chip list for attached interview-context files. Each chip
-/// shows a file-type icon, the filename (truncated middle), and an `x` to
-/// remove. Wraps to multiple lines when the file count exceeds row width.
-private struct FlowChipList: View {
-    let files: [OverlayViewModel.InterviewContextFile]
-    let onRemove: (UUID) -> Void
-
-    var body: some View {
-        // Lightweight wrap layout: VStack of HStacks built greedily by
-        // estimated width. Keeps the dependency footprint low (no custom
-        // Layout) and the file counts are small.
-        let rows = pack(files, perRow: 3)
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(rows.indices, id: \.self) { i in
-                HStack(spacing: 6) {
-                    ForEach(rows[i]) { f in chip(f) }
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-    }
-
-    private func chip(_ f: OverlayViewModel.InterviewContextFile) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: iconFor(f.name))
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(Design.Ink.secondary)
-            Text(f.name)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(Design.Ink.primary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Button {
-                onRemove(f.id)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Design.Ink.tertiary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Design.Surface.controlFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Design.Surface.hairline, lineWidth: 0.5)
-        )
-    }
-
-    private func iconFor(_ name: String) -> String {
-        let ext = (name as NSString).pathExtension.lowercased()
-        switch ext {
-        case "pdf":          return "doc.richtext.fill"
-        case "docx", "doc":  return "doc.text.fill"
-        case "rtf":          return "doc.text.fill"
-        case "md", "txt":    return "doc.plaintext.fill"
-        default:             return "doc.fill"
-        }
-    }
-
-    private func pack(_ items: [OverlayViewModel.InterviewContextFile],
-                      perRow: Int) -> [[OverlayViewModel.InterviewContextFile]] {
-        guard perRow > 0 else { return [items] }
-        var out: [[OverlayViewModel.InterviewContextFile]] = []
-        var bucket: [OverlayViewModel.InterviewContextFile] = []
-        for f in items {
-            bucket.append(f)
-            if bucket.count == perRow {
-                out.append(bucket); bucket.removeAll()
-            }
-        }
-        if !bucket.isEmpty { out.append(bucket) }
-        return out
     }
 }
