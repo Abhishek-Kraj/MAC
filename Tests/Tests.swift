@@ -685,9 +685,14 @@ func testOpenRouterMergedOrderAndDedup() throws {
 /// OpenCode is a second gateway, not a second name for OpenRouter's models.
 ///
 /// Its entries carry the app's own `opencode/` prefix, group under one
-/// provider, and strip to a bare slug the gateway understands. The free tier is
-/// the whole reason the second provider is here, so it is asserted rather than
-/// assumed — a free model that quietly acquires a price is a bug.
+/// provider, and strip to a bare slug the gateway understands.
+///
+/// Nothing here is flagged free, and that is the point of the assertion below
+/// rather than an accident: probed live on 2026-10-18, every free OpenCode
+/// model answers `HTTP 403 FreeTierError` — "OpenCode's free tier can only be
+/// used from within OpenCode" — to a third-party client, spoofed User-Agent
+/// included. A free entry in this list is a model that fails the moment the
+/// user picks it, mid-interview.
 func testOpenCodeIsWiredAsItsOwnGateway() throws {
     let entries = OpenRouterCatalog.openCodeBuiltins
     try assertTrue(!entries.isEmpty, "there is an OpenCode set")
@@ -701,12 +706,6 @@ func testOpenCodeIsWiredAsItsOwnGateway() throws {
         // The gateway takes the bare slug.
         let stripped = String(m.id.dropFirst("opencode/".count))
         try assertTrue(!stripped.contains("/"), "\(m.id) strips to a bare slug")
-        // A slug that says it is free must be flagged free. The converse is not
-        // required: `big-pickle` is a free stealth model with no `-free` in the
-        // name, which is exactly why the flag exists rather than a name test.
-        if stripped.hasSuffix("-free") {
-            try assertTrue(m.isFree, "\(m.id) names itself free but is not flagged free")
-        }
     }
 
     // NVIDIA's rule is "contains a slash", which an unprefixed OpenCode id would
@@ -714,15 +713,234 @@ func testOpenCodeIsWiredAsItsOwnGateway() throws {
     try assertTrue(ai.isNVIDIAModel(entries[0].id),
                    "NVIDIA's loose rule also matches OpenCode ids; order in the router matters")
 
-    let free = entries.filter(\.isFree)
-    try assertTrue(free.count >= 5, "several free models are offered (found \(free.count))")
-    for m in free {
-        try assertEq(m.blendedPrice ?? -1, 0.0, "\(m.id) is priced at zero")
+    for m in entries {
+        try assertTrue(!m.isFree,
+                       "\(m.id) is flagged free, but OpenCode's free tier 403s from a third-party app")
     }
 
-    let ids = Set(entries.map(\.id))
-    try assertTrue(ids.contains("opencode/deepseek-v4.1-flash-free"),
-                   "the free DeepSeek model is offered")
+    // Reasoning is a per-model allowlist on this gateway: most models reject
+    // `reasoning_effort` with HTTP 400, so nothing outside the measured set may
+    // be given it, and nothing inside it may be missing.
+    let bareIDs = Set(entries.map { String($0.id.dropFirst("opencode/".count)) })
+    try assertTrue(
+        OpenRouterCatalog.openCodeReasoningEffortIDs.isSubset(of: bareIDs),
+        "the reasoning allowlist names a model the app does not offer")
+}
+
+/// Every OpenCode id the app offers must exist on the gateway, AND have been
+/// probed to actually answer on it.
+///
+/// The snapshot below is `GET https://opencode.ai/inference/v1/models` recorded
+/// on 2026-10-18 (85 models; that endpoint needs no key). Curating the list by
+/// hand from the pricing page is how four ids the gateway does not serve at all
+/// — `nemotron-3-ultra-free`, `mimo-v2.5-free`, `ll-alpha-free`, `exo-free` —
+/// got in, and picking one would have failed at the request, mid-interview.
+///
+/// Existing is not enough, though: `/models` also advertises ids that refuse
+/// every request, and ids that speak a protocol this app cannot send. So the
+/// catalogue is pinned against the probe results as well — `probedOK` is what
+/// answered HTTP 200 to a real chat/completions call, and `rejected` is
+/// everything that did not. Adding a model that has not been probed fails the
+/// test on purpose.
+func testOpenCodeIdsExistOnTheGateway() throws {
+    let live = Set("""
+        beam-free big-pickle claude-fable-5 claude-fable-5-1 claude-haiku-4-5 claude-haiku-5-5
+        claude-opus-4-5 claude-opus-4-6 claude-opus-4-7 claude-opus-4-8 claude-opus-5
+        claude-opus-5-5 claude-opus-5-5-backup claude-sonnet-4-5 claude-sonnet-4-6 claude-sonnet-5
+        claude-sonnet-5-5 deepseek-v4-flash deepseek-v4-pro deepseek-v4.1-flash
+        deepseek-v4.1-flash-free gemini-3-flash gemini-3.1-pro gemini-3.5-flash
+        gemini-3.5-flash-lite gemini-3.6-flash gemini-3.7-flash gemini-3.8-flash gemini-4-argon
+        glm-5 glm-5.1 glm-5.2 glm-5.3 glm-5.3-flash glm-5.3-flash-free gpt-5 gpt-5-codex gpt-5-nano
+        gpt-5.1 gpt-5.1-codex gpt-5.1-codex-max gpt-5.1-codex-mini gpt-5.2 gpt-5.2-codex
+        gpt-5.3-codex gpt-5.3-codex-spark gpt-5.4 gpt-5.4-mini gpt-5.4-nano gpt-5.4-pro gpt-5.5
+        gpt-5.5-pro gpt-5.6-luna gpt-5.6-sol gpt-5.6-terra gpt-6-astra gpt-6-luna gpt-6-sol
+        gpt-6.1-sol grok-4.5 grok-4.6 grok-4.7 grok-build-0.1 jev-1.13 jev-1.13-free kimi-k2.5
+        kimi-k2.6 kimi-k2.7-code kimi-k3 longcat-2.5-preview-free mimo-v2.6-flash-free
+        minimax-m2.5 minimax-m2.7 minimax-m3 mistral-large-4 muse-spark-1.2 muse-spark-1.3
+        nemotron-3.5-lightning-free nemotron-3.5-super-vl-free qwen3.5-plus qwen3.6-plus
+        qwen3.8-flash qwen3.8-max space-bunny-free test
+        """.split(whereSeparator: \.isWhitespace).map(String.init))
+
+    try assertTrue(live.count > 50, "the snapshot is the real list, not a stub")
+    for m in OpenRouterCatalog.openCodeBuiltins {
+        let bare = String(m.id.dropFirst("opencode/".count))
+        try assertTrue(live.contains(bare), "\(bare) is not served by the OpenCode gateway")
+        try assertTrue(openCodeProbedOK.contains(bare),
+                       "\(bare) was never probed — a model that has not answered a real request must not ship")
+        try assertTrue(!openCodeProbedRejected.contains(bare),
+                       "\(bare) was probed and failed; it must not be offered")
+    }
+
+    // The recorded probe results must themselves be plausible, so an emptying
+    // of these sets cannot silently weaken the test above.
+    try assertTrue(openCodeProbedOK.count >= 5, "the probed-OK set is real")
+    try assertTrue(openCodeProbedRejected.count >= 10, "the rejected set is real")
+}
+
+/// What answered HTTP 200 to `POST /inference/openai/v1/chat/completions` with
+/// the app's own request shape, and a real key, on 2026-10-18.
+private let openCodeProbedOK: Set<String> = [
+    "deepseek-v4.1-flash", "deepseek-v4-pro", "glm-5.3-flash", "glm-5.3",
+    "minimax-m3", "kimi-k3", "mistral-large-4", "qwen3.8-max", "qwen3.8-flash",
+]
+
+/// What that same probe rejected, and why. Kept as one set because the
+/// catalogue must avoid all of them; the reason only matters to whoever
+/// revisits the list. Every id here was actually called — this is a record,
+/// not a guess.
+private let openCodeProbedRejected: Set<String> = [
+    // Free tier: HTTP 403 FreeTierError for any third-party client, whether or
+    // not the User-Agent claims to be OpenCode.
+    "deepseek-v4.1-flash-free", "glm-5.3-flash-free", "big-pickle",
+    "mimo-v2.6-flash-free", "nemotron-3.5-lightning-free",
+    "nemotron-3.5-super-vl-free", "longcat-2.5-preview-free",
+    "space-bunny-free", "beam-free",
+    // Other protocols: HTTP 400 ModelProtocolUnsupported on chat/completions.
+    "claude-haiku-5-5", "gpt-5.4-nano", "gemini-3.5-flash-lite",
+    // Advertised by /models but failing every request: HTTP 403/410 server_error.
+    "kimi-k2.6", "kimi-k2.7-code", "minimax-m2.7",
+]
+
+/// The OpenCode reasoning knob is a per-model allowlist, because most models on
+/// that gateway answer `reasoning_effort` with HTTP 400 — which mid-interview
+/// is a broken answer, not a slower one. So both halves are asserted: the
+/// listed models get the field, and nothing else does.
+func testOpenCodeReasoningAllowlistMatchesTheGateway() throws {
+    let allowed = OpenRouterCatalog.openCodeReasoningEffortIDs
+    let offered = Set(OpenRouterCatalog.openCodeBuiltins.map {
+        String($0.id.dropFirst("opencode/".count))
+    })
+    try assertTrue(!allowed.isEmpty, "something is allowed to skip its thinking")
+    try assertTrue(allowed.isSubset(of: offered),
+                   "the allowlist must not name a model the app does not offer")
+
+    let previous = AIManager.allowModelThinking
+    defer { AIManager.allowModelThinking = previous }
+
+    AIManager.allowModelThinking = false
+    for bare in offered {
+        let effort = AIManager.openCodeReasoningEffort(for: bare)
+        if allowed.contains(bare) {
+            try assertEq(effort, "minimal" as String?,
+                         "\(bare) is on the allowlist but was given no effort")
+        } else {
+            try assertEq(effort, nil as String?,
+                         "\(bare) is not on the allowlist, and sending the field fails the request")
+        }
+    }
+
+    // The user's escape hatch outranks the allowlist.
+    AIManager.allowModelThinking = true
+    for bare in allowed {
+        try assertEq(AIManager.openCodeReasoningEffort(for: bare), nil as String?,
+                     "thinking was left on, so no effort may be requested")
+    }
+}
+
+/// Every edge and corner resizes the side the user grabbed and holds the
+/// opposite side still. This is what made the panel "difficult" to size when a
+/// single bottom-trailing grip was the only affordance, and it is arithmetic —
+/// not something to confirm by dragging at a live window.
+func testPanelResizeEdgesPinTheOppositeSide() throws {
+    let base = NSRect(x: 100, y: 200, width: 440, height: 800)
+    let minimum = NSSize(width: 440, height: 420)
+
+    // Trailing: the width follows the drag, the leading edge does not move,
+    // and a vertical component is ignored by a vertical-only-free edge.
+    let trailing = PanelResizeEdge.trailing.resizedFrame(from: base, dx: 60, dy: 999, minimum: minimum)
+    try assertEq(trailing.width, 500)
+    try assertEq(trailing.height, 800, "the trailing edge cannot change the height")
+    try assertEq(trailing.origin, base.origin, "the leading edge is pinned")
+
+    // Leading: the trailing edge is pinned instead, so the origin travels.
+    let leading = PanelResizeEdge.leading.resizedFrame(from: base, dx: -60, dy: 0, minimum: minimum)
+    try assertEq(leading.width, 500)
+    try assertEq(leading.maxX, base.maxX, "the trailing edge is pinned")
+
+    // Bottom: grows downward with the top edge held.
+    let bottom = PanelResizeEdge.bottom.resizedFrame(from: base, dx: 0, dy: 60, minimum: minimum)
+    try assertEq(bottom.height, 860)
+    try assertEq(bottom.maxY, base.maxY, "the top edge is pinned")
+
+    // Top: grows upward with the bottom edge held.
+    let top = PanelResizeEdge.top.resizedFrame(from: base, dx: 0, dy: -60, minimum: minimum)
+    try assertEq(top.height, 860)
+    try assertEq(top.origin.y, base.origin.y, "the bottom edge is pinned")
+
+    // Corners move both axes and pin the diagonally opposite corner.
+    let bottomTrailing = PanelResizeEdge.bottomTrailing
+        .resizedFrame(from: base, dx: 20, dy: 30, minimum: minimum)
+    try assertEq(bottomTrailing.size, NSSize(width: 460, height: 830))
+    try assertEq(bottomTrailing.origin.x, base.origin.x)
+    try assertEq(bottomTrailing.maxY, base.maxY, "the top-left corner is pinned")
+
+    let topLeading = PanelResizeEdge.topLeading
+        .resizedFrame(from: base, dx: -20, dy: -30, minimum: minimum)
+    try assertEq(topLeading.size, NSSize(width: 460, height: 830))
+    try assertEq(topLeading.maxX, base.maxX, "the right edge is pinned")
+    try assertEq(topLeading.origin.y, base.origin.y, "the bottom edge is pinned")
+
+    // Dragging the other way shrinks, but never below the stage minimum — and
+    // an edge still cannot touch the axis it does not control. The delta is
+    // aimed per edge, since "inward" is leftward for a leading edge and
+    // rightward for a trailing one.
+    for edge in PanelResizeEdge.allCases {
+        let shrunk = edge.resizedFrame(from: base,
+                                       dx: -10_000 * edge.widthSign,
+                                       dy: -10_000 * edge.heightSign,
+                                       minimum: minimum)
+        if edge.widthSign != 0 {
+            try assertEq(shrunk.width, minimum.width, "\(edge) shrank past the minimum width")
+        } else {
+            try assertEq(shrunk.width, base.width, "\(edge) must not touch the width")
+        }
+        if edge.heightSign != 0 {
+            try assertEq(shrunk.height, minimum.height, "\(edge) shrank past the minimum height")
+        } else {
+            try assertEq(shrunk.height, base.height, "\(edge) must not touch the height")
+        }
+    }
+}
+
+/// Which border a press grabs.
+///
+/// This is the half that actually failed in the app: the resize bands used to
+/// be eight transparent SwiftUI zones, none of which ever received a press
+/// because a surface's `NSScrollView` takes the mouse-down first. The bands are
+/// pure geometry now, so at least the "is this point on the border" decision
+/// can be pinned down.
+func testPanelResizeHitTestCoversEveryBorder() throws {
+    let panel = NSSize(width: 440, height: 800)
+    func edge(_ x: CGFloat, _ y: CGFloat) -> PanelResizeEdge? {
+        PanelResizeEdge.at(point: NSPoint(x: x, y: y), in: panel)
+    }
+
+    // Interior: nothing, or the panel would be impossible to click.
+    try assertTrue(edge(220, 400) == nil, "the middle of the panel is not a resize")
+    try assertTrue(edge(220, 20) == nil, "20pt from the bottom edge is still the interior")
+
+    // The VISIBLE shell edge has to resize. The shell is inset 6pt top and
+    // bottom and 14pt per side, so a band that stopped at the window edge would
+    // hide entirely in the invisible margin — which is where the shell is.
+    try assertTrue(PanelResizeEdge.bandHorizontal > 14, "the side bands must reach the card's visible edge")
+    try assertTrue(PanelResizeEdge.bandVertical > 6, "the top/bottom bands must reach the card's visible edge")
+    try assertEq(edge(14, 400), .leading)
+    try assertEq(edge(426, 400), .trailing)
+    try assertEq(edge(220, 6), .bottom)
+    try assertEq(edge(220, 794), .top)
+
+    // Each corner of the window, diagonally opposite its own name.
+    try assertEq(edge(2, 2), .bottomLeading)
+    try assertEq(edge(438, 2), .bottomTrailing)
+    try assertEq(edge(2, 798), .topLeading)
+    try assertEq(edge(438, 798), .topTrailing)
+
+    // Corner bands are wider than the edge bands, so a press beside a corner
+    // still picks the corner up...
+    try assertEq(edge(20, 796), .topLeading)
+    // ...but past that width it is only the edge, not the corner.
+    try assertEq(edge(30, 796), .top)
+    try assertEq(edge(4, 40), .leading)
 }
 
 /// The built-in defaults must survive into the merged catalogue.
@@ -2753,6 +2971,10 @@ struct TestsMain {
         TestRunner.run("OpenRouter merged order and dedup", testOpenRouterMergedOrderAndDedup)
         TestRunner.run("OpenRouter builtins cover the defaults", testOpenRouterBuiltinsCoverDefaults)
         TestRunner.run("OpenCode is its own gateway", testOpenCodeIsWiredAsItsOwnGateway)
+        TestRunner.run("OpenCode ids exist on the gateway", testOpenCodeIdsExistOnTheGateway)
+        TestRunner.run("OpenCode reasoning allowlist matches the gateway", testOpenCodeReasoningAllowlistMatchesTheGateway)
+        TestRunner.run("Panel resize edges pin the opposite side", testPanelResizeEdgesPinTheOppositeSide)
+        TestRunner.run("Panel resize hit test covers every border", testPanelResizeHitTestCoversEveryBorder)
         TestRunner.run("OpenRouter decodes live payload shape", testOpenRouterDecodesLivePayloadShape)
         TestRunner.run("OpenRouter decode tolerates missing architecture", testOpenRouterDecodeToleratesMissingArchitecture)
         TestRunner.run("No payment code in the source tree", testNoPaymentCodeInSourceTree)

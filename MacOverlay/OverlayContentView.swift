@@ -121,23 +121,20 @@ struct OverlayView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        // Drag grip on the trailing edge — lets the user widen / narrow the
-        // panel on screen. Only shown with a surface open (where extra room
-        // matters and the shell is committed-open, so it can't auto-collapse
-        // mid-drag). Revealed on hover like the rest of the chrome; kept
-        // hit-testable even when faded so an in-flight drag is never dropped
-        // if the cursor briefly leaves the panel bounds.
-        // Corner drag-resize — the single resize affordance (the old
-        // trailing-edge grip was redundant once the corner could do both
-        // axes). Bottom-trailing, width AND height together with the top
-        // edge pinned; hover-revealed like the rest of the chrome.
+        // Resize from any edge or corner, the way a normal window does. The
+        // grabbing is NOT done by a view here: every surface body is an AppKit
+        // `NSScrollView`, which receives the mouse-down before SwiftUI's
+        // gesture recognition runs, so a transparent overlay lost the press
+        // (and the panel moved instead, because it is movable by background).
+        // `AppDelegate.installPanelResizeMonitor` claims the border before any
+        // view sees it. This chip is only the affordance.
         .overlay(alignment: .bottomTrailing) {
-            if vm.shellStage == .expanded && vm.primarySurface != nil {
-                CornerResizeGrip { dx, dy, ended in
-                    vm.onCornerResize?(dx, dy, ended)
-                }
-                .opacity(chromeHovering ? 1 : 0)
-                .animation(.easeInOut(duration: 0.18), value: chromeHovering)
+            if vm.shellStage == .expanded {
+                ResizeGripHint()
+                    .opacity(chromeHovering ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.18), value: chromeHovering)
+                    .padding(.trailing, 2)
+                    .padding(.bottom, 2)
             }
         }
         .animation(Design.Motion.standard, value: vm.shellStage)
@@ -407,75 +404,6 @@ private struct FocusShellHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
-    }
-}
-
-/// Diagonal corner grip at the panel's bottom-trailing. Reports cumulative
-/// drag translation in both axes so AppDelegate can resize the host panel's
-/// width and height together.
-private struct CornerResizeGrip: View {
-    /// `(cumulative dx, cumulative dy, isEnded)`, dy positive = downward.
-    let onResize: (CGFloat, CGFloat, Bool) -> Void
-    @State private var hovering = false
-    /// Screen-space anchor captured on the first drag event. See the
-    /// gesture below for why SwiftUI's own translation can't be used.
-    @State private var dragAnchor: NSPoint?
-
-    var body: some View {
-        Image(systemName: "arrow.up.left.and.arrow.down.right")
-            .font(.system(size: 8, weight: .bold))
-            .foregroundColor(Design.Ink.tertiary)
-            .frame(width: 18, height: 18)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(hovering ? Design.Surface.controlHoverFill
-                                   : Design.Surface.controlFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(Design.Surface.hairline, lineWidth: 0.5)
-            )
-            .contentShape(Rectangle())
-            .onHover { h in
-                hovering = h
-                if h { Self.diagonalCursor.push() } else { NSCursor.pop() }
-            }
-            // Screen-space deltas, NOT SwiftUI's translation. The grip
-            // lives INSIDE the window it resizes, so any window-relative
-            // coordinate space (.global is window-relative on macOS) moves
-            // under the cursor as the panel grows — each event then reports
-            // a translation polluted by the resize it just caused, which is
-            // exactly the feedback loop that made dragging flicker.
-            // `NSEvent.mouseLocation` is absolute screen space and cannot
-            // feed back. Screen y grows upward, so invert it to keep
-            // "drag down = taller".
-            .gesture(
-                DragGesture(minimumDistance: 1)
-                    .onChanged { _ in
-                        let loc = NSEvent.mouseLocation
-                        let anchor = dragAnchor ?? loc
-                        if dragAnchor == nil { dragAnchor = loc }
-                        onResize(loc.x - anchor.x, anchor.y - loc.y, false)
-                    }
-                    .onEnded { _ in
-                        let loc = NSEvent.mouseLocation
-                        let anchor = dragAnchor ?? loc
-                        onResize(loc.x - anchor.x, anchor.y - loc.y, true)
-                        dragAnchor = nil
-                    }
-            )
-            .help("Drag to resize")
-            .padding(.trailing, 2)
-            .padding(.bottom, 2)
-    }
-
-    /// Real diagonal resize cursor on macOS 15+, crosshair fallback below
-    /// (AppKit exposes no public diagonal cursor before then).
-    private static var diagonalCursor: NSCursor {
-        if #available(macOS 15.0, *) {
-            return .frameResize(position: .bottomRight, directions: .all)
-        }
-        return .crosshair
     }
 }
 

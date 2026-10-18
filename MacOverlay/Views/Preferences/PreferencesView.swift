@@ -549,12 +549,12 @@ struct PreferencesView: View {
     private var apiKeysSection: some View {
         @Bindable var vm = vm
         section(title: "API keys",
-                subtitle: "OpenRouter or OpenCode runs the models — add whichever you have; OpenCode carries a free tier. ElevenLabs or xAI (Grok) transcribes. Stored only on this Mac.") {
+                subtitle: "OpenRouter or OpenCode runs the models — add whichever you have. ElevenLabs or xAI (Grok) transcribes. Stored only on this Mac.") {
             KeyFieldView(label: "OpenRouter", placeholder: "sk-or-…",     text: $vm.openRouterAPIKey)
             KeyFieldView(label: "OpenCode",
                          placeholder: "opencode.ai key",
                          text: $vm.openCodeAPIKey,
-                         hint: "A second provider, with models that cost nothing: DeepSeek V4.1 Flash Free, GLM 5.3 Flash Free and others. Get a key at opencode.ai/console.")
+                         hint: "A second gateway, billed per request like OpenRouter — useful when OpenRouter is busy or out of credit. Its free models only run inside OpenCode's own app, so for zero-cost interviews pick a Free model from the OpenRouter list below. Key at opencode.ai/console.")
             KeyFieldView(label: "ElevenLabs", placeholder: "sk_…",        text: $vm.elevenLabsAPIKey)
             KeyFieldView(label: "xAI (Grok)", placeholder: "xai-…",       text: $vm.grokAPIKey)
         }

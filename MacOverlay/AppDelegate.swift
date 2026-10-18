@@ -145,7 +145,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Open the surface AND resize the panel. Setting the stage alone
             // is not enough at launch: the panel is created at the pill size
-            // (360x80) and expands through the stage-change callback, so
+            // (80x64) and expands through the stage-change callback, so
             // assigning the stage without animating left the surface drawn
             // into an 80pt-tall window.
             //
@@ -195,7 +195,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 ticks -= 1
                 guard ticks > 0 else {
                     // Final assertion, then draw before the dwell fires.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { capture() }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                        capture()
+                        if CommandLine.arguments.contains("-resizeprobe") {
+                            self.probePanelResize()
+                        }
+                    }
                     return
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { tick() }
@@ -292,11 +297,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.animateShellFrame(stage: stage)
         }
 
-        // Corner grip: resize width + height together, top edge pinned.
-        vm.onCornerResize = { [weak self] dx, dy, ended in
-            self?.handleCornerResize(translationX: dx, translationY: dy, ended: ended)
-        }
-
         // Drag handles behind the header strip and the input bar.
         vm.onPanelDrag = { [weak self] dx, dy, ended in
             self?.handlePanelDrag(dx: dx, dy: dy, ended: ended)
@@ -375,8 +375,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Overlay Panel
 
-    /// `.pill` — small capsule that just shows the brand logo.
-    static let collapsedSize = NSSize(width: 360, height: 80)
+    /// `.pill` — the brand dot. Just big enough for the logo capsule (a
+    /// 52pt circle) plus the panel's own 6pt padding, so the window and the
+    /// visible dot are the SAME size: a transparent margin would be window
+    /// area that swallows clicks meant for whatever is underneath, which
+    /// defeats the point of a collapsed overlay. Small so the pill can reach
+    /// any screen edge.
+    static let collapsedSize = NSSize(width: 80, height: 64)
     /// `.pill` with a floating result popup (resume score / generated
     /// resume / quick-ask) anchored above the brand. Grows the panel
     /// tall and wide enough to host the popup without expanding the
@@ -410,7 +415,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func setupOverlayPanel() {
         // If the user lands on the welcome / sign-in flow at launch, the
         // hero content needs the full panel — starting at the pill size
-        // (360×80) leaves the content clipped out the bottom of the
+        // (80×64) leaves the content clipped out the bottom of the
         // window. Decide the initial stage + size BEFORE the panel goes
         // on screen so there's no visible resize jump.
         let needsHeroLayout = !vm.hasCompletedOnboarding || vm.showOnboarding
@@ -446,6 +451,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         overlayPanel.hidesOnDeactivate          = false
         overlayPanel.isFloatingPanel            = true
         overlayPanel.becomesKeyOnlyIfNeeded     = true
+        // Needed so the resize monitor gets `mouseMoved` and can show the
+        // resize cursor along the panel's border.
+        overlayPanel.acceptsMouseMovedEvents    = true
         overlayPanel.sharingType                = NSWindow.desiredSharingType
         // Initial minSize matches the launch stage; `animateShellFrame`
         // updates it on every stage transition so the user can never
@@ -461,6 +469,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Restore last-used position (constrainFrameRect will clamp if the saved
         // origin is on a monitor that's no longer connected).
         restorePanelOrigin()
+
+        // Resizing from any edge or corner is taken by an event monitor rather
+        // than by views inside the shell — see `installPanelResizeMonitor`.
+        installPanelResizeMonitor()
 
         overlayPanel.orderFrontRegardless()
     }
@@ -685,6 +697,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func resizePanel(dw: CGFloat, dh: CGFloat) {
         DispatchQueue.main.async { [self] in
+            // The pill is a fixed-size dot; ⌃⇧ + arrows must not inflate it
+            // into a bigger transparent window that would swallow clicks meant
+            // for whatever is underneath. Nothing is readable at that size
+            // anyway.
+            guard vm.shellStage != .pill else { return }
             let f  = overlayPanel.frame
             let minimum = minimumPanelSize(for: vm.shellStage)
             let nw = max(minimum.width,  f.width  + dw)
@@ -695,7 +712,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 NSRect(x: f.origin.x, y: newOriginY, width: nw, height: nh),
                 display: true, animate: false
             )
-            // Same precedence as the corner grip: a manual resize outranks
+            // Same precedence as a drag-resize: a manual resize outranks
             // content tracking. Without this the next Live Focus height
             // report animated the panel straight back — a visible
             // grow-then-snap flicker on every keyboard resize.
@@ -707,7 +724,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Drag-to-move (panel drag handles)
 
     /// Origin captured at the start of a handle drag — same stable-base
-    /// reasoning as `cornerResizeBaseFrame`.
+    /// reasoning as `panelResizeBaseFrame`.
     private var panelDragBaseOrigin: NSPoint?
 
     /// Drag-to-move from a `PanelDragArea`. `setFrame` rather than
@@ -732,12 +749,141 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if ended { panelDragBaseOrigin = nil }
     }
 
-    // MARK: - Drag-to-resize (corner grip)
+    // MARK: - Drag-to-resize (any edge or corner)
 
-    /// Frame captured at the start of a grip drag. The grip reports
-    /// deltas cumulative from the drag's start, so we apply them against
-    /// this stable base rather than compounding per-event deltas.
-    private var cornerResizeBaseFrame: NSRect?
+    /// Local mouse monitor that owns the panel's border.
+    ///
+    /// This replaced eight invisible SwiftUI zones with `DragGesture`s. They
+    /// were the obvious way to do it and they did not work, for a reason worth
+    /// writing down: every surface body is an AppKit `NSScrollView`, and the
+    /// leading and trailing edge strips run straight through it. An AppKit view
+    /// hit-tested under the press gets the mouse-down before SwiftUI's gesture
+    /// recognition ever runs, so the zone never fired — and because the panel
+    /// is `isMovableByWindowBackground`, the press it did not get MOVED the
+    /// panel instead.
+    ///
+    /// A local monitor is the one hook that runs before an event reaches any
+    /// view, so the border belongs to the resize and nothing else gets to
+    /// interpret the press. It also gives the resize cursors a home that a
+    /// scroll view's cursor rects cannot stomp on.
+    private var panelResizeMonitor: Any?
+
+    /// The border the in-flight resize grabbed, if any.
+    private var activeResizeEdge: PanelResizeEdge?
+
+    /// Absolute screen point the resize began at. Absolute because the window
+    /// moves under the cursor as it grows — a window-relative delta would be
+    /// polluted by the resize it just caused (the same feedback loop that made
+    /// the old grip flicker).
+    private var panelResizeAnchor: NSPoint?
+
+    /// Whether `mouseMoved` last left a resize cursor on screen, so it can be
+    /// handed back to the arrow when the pointer leaves the border. Guarded
+    /// rather than set on every move: assigning the arrow unconditionally
+    /// would stomp the I-beam that text fields set through their cursor rects.
+    private var resizeCursorShowing = false
+
+    /// Claim the panel's border for resizing. Installed with the panel so the
+    /// monitor exists for exactly as long as the window it serves.
+    ///
+    /// Which edge a press falls on is decided by `PanelResizeEdge.at(point:in:)`
+    /// rather than here. That decision is exactly what broke the first time —
+    /// it used to be eight transparent SwiftUI zones, and not one of them ever
+    /// received a press — so it lives in a pure function with tests on it.
+    @MainActor
+    private func installPanelResizeMonitor() {
+        panelResizeMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .mouseMoved]
+        ) { [weak self] event in
+            guard let self else { return event }
+            // Local monitors fire on the main thread; the handler type just
+            // isn't annotated, which is why every AppKit callback in this file
+            // reaches main-actor state the same way.
+            return MainActor.assumeIsolated { self.handlePanelResizeEvent(event) }
+        }
+    }
+
+    /// Which edge or corner is under `point`, in window coordinates, or nil
+    /// for the interior.
+    @MainActor
+    private func panelResizeEdge(atWindowPoint point: NSPoint) -> PanelResizeEdge? {
+        guard let panel = overlayPanel else { return nil }
+        return PanelResizeEdge.at(point: point, in: panel.frame.size)
+    }
+
+    /// Absolute screen point of `event`, in screen coordinates (y up).
+    ///
+    /// Derived from the event itself rather than `NSEvent.mouseLocation`: the
+    /// global read lags the real cursor and does not move at all for a
+    /// synthesised drag, and the window's own frame is what the event was
+    /// measured against, so adding it back gives an exact absolute point even
+    /// though the panel moves under the cursor as it resizes.
+    @MainActor
+    private func screenPoint(of event: NSEvent) -> NSPoint {
+        guard let panel = overlayPanel else { return event.locationInWindow }
+        return NSPoint(x: panel.frame.minX + event.locationInWindow.x,
+                       y: panel.frame.minY + event.locationInWindow.y)
+    }
+
+    /// One mouse event, on its way to a view. Returns nil to swallow it.
+    @MainActor
+    private func handlePanelResizeEvent(_ event: NSEvent) -> NSEvent? {
+        // A resize in flight keeps the drag even after the pointer leaves the
+        // panel — same as dragging the edge of any window past the screen.
+        if event.type == .leftMouseDragged || event.type == .leftMouseUp {
+            guard let edge = activeResizeEdge else { return event }
+            let anchor = panelResizeAnchor ?? screenPoint(of: event)
+            let now = screenPoint(of: event)
+            // Screen y grows upward; the edge arithmetic wants "down is
+            // positive" like every other drag in the app.
+            handlePanelResize(edge: edge,
+                              dx: now.x - anchor.x,
+                              dy: anchor.y - now.y,
+                              ended: event.type == .leftMouseUp)
+            if event.type == .leftMouseUp {
+                activeResizeEdge = nil
+                panelResizeAnchor = nil
+            }
+            return nil
+        }
+
+        guard event.window === overlayPanel else { return event }
+        // The pill is a fixed-size dot on purpose: its window is exactly the
+        // visible circle, so letting it grow would leave a transparent margin
+        // that swallows clicks aimed at whatever is underneath.
+        guard vm.shellStage == .expanded else { return event }
+
+        switch event.type {
+        case .leftMouseDown:
+            guard let edge = panelResizeEdge(atWindowPoint: event.locationInWindow) else {
+                return event
+            }
+            activeResizeEdge = edge
+            panelResizeAnchor = screenPoint(of: event)
+            panelResizeBaseFrame = overlayPanel.frame
+            return nil
+
+        case .mouseMoved:
+            if let edge = panelResizeEdge(atWindowPoint: event.locationInWindow) {
+                edge.cursor.set()
+                resizeCursorShowing = true
+            } else if resizeCursorShowing {
+                NSCursor.arrow.set()
+                resizeCursorShowing = false
+            }
+            return event
+
+        default:
+            return event
+        }
+    }
+
+    // MARK: - Drag-to-resize (edge and corner geometry)
+
+    /// Frame captured at the start of a resize drag. The drag reports deltas
+    /// cumulative from its start, so we apply them against this stable base
+    /// rather than compounding per-event deltas.
+    private var panelResizeBaseFrame: NSRect?
 
     /// Set once the user drag-resizes while Live Focus is on screen. Their
     /// chosen height then wins over content tracking — without this the
@@ -746,40 +892,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Cleared on any stage / surface transition (see animateShellFrame).
     private var focusHeightUserOverride = false
 
-    /// Corner drag-resize: width and height together. SwiftUI drag
-    /// translation is +y downward; the panel keeps its TOP edge pinned and
-    /// grows downward, so dragging the bottom-right grip toward the screen
-    /// corner enlarges the panel exactly the way a normal window corner
-    /// does. Remembers both dimensions in `lastFullSize` so pill ↔ expanded
-    /// transitions restore the user's size.
+    /// Edge / corner drag-resize. `dx` grows to the right, `dy` grows
+    /// downward; the edge the user grabbed decides which sides of the frame
+    /// those move, so the opposite edge stays pinned exactly the way a normal
+    /// window's does. Remembers both dimensions in `lastFullSize` so
+    /// pill ↔ expanded transitions restore the user's size.
     @MainActor
-    private func handleCornerResize(translationX dx: CGFloat,
-                                    translationY dy: CGFloat,
-                                    ended: Bool) {
+    private func handlePanelResize(edge: PanelResizeEdge,
+                                   dx: CGFloat, dy: CGFloat, ended: Bool) {
         guard let panel = overlayPanel else { return }
         if ended {
-            cornerResizeBaseFrame = nil
+            panelResizeBaseFrame = nil
             persistPanelOrigin()
             if vm.isUserResizingPanel { vm.isUserResizingPanel = false }
             return
         }
         let base: NSRect
-        if let b = cornerResizeBaseFrame {
+        if let b = panelResizeBaseFrame {
             base = b
         } else {
             base = panel.frame
-            cornerResizeBaseFrame = base
+            panelResizeBaseFrame = base
         }
         // Flag only on transition — re-setting it per mouse event would
         // invalidate observers 60+ times a second for no layout change.
         if !vm.isUserResizingPanel { vm.isUserResizingPanel = true }
-        let minimum = minimumPanelSize(for: vm.shellStage)
-        let newW = max(minimum.width,  base.width  + dx)
-        let newH = max(minimum.height, base.height + dy)
-        // Top edge pinned: maxY constant, origin.y follows the height.
-        let frame = NSRect(x: base.origin.x,
-                           y: base.maxY - newH,
-                           width: newW, height: newH)
+        let frame = edge.resizedFrame(from: base, dx: dx, dy: dy,
+                                      minimum: minimumPanelSize(for: vm.shellStage))
         // Unanimated + no implicit animation: the drag IS the animation.
         // Letting an implicit animation chase each mouse event puts the
         // panel a frame behind the cursor, which reads as lag/judder.
@@ -826,7 +965,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               vm.focusHuggingActive,
               vm.shellStage == .expanded,
               !focusHeightUserOverride,
-              cornerResizeBaseFrame == nil else { return }
+              panelResizeBaseFrame == nil else { return }
 
         let targetH = min(max(h + Self.focusPanelChrome,
                               Self.expandedCompactMinSize.height),
@@ -1000,9 +1139,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// MINIMUM panel size — the user can manually resize, but never below
-    /// this. Two values: pill (just the brand) and expanded (wide enough
+    /// this. Two values: pill (just the brand dot) and expanded (wide enough
     /// for every visible bar element).
-    static let pillMinSize             = NSSize(width: 240, height: 60)
+    static let pillMinSize             = collapsedSize
     static let expandedCompactMinSize  = NSSize(width: 360, height: 80)
     /// With a surface open the width can't go below the width the layouts
     /// are designed for: narrower, and the setup screen's buttons wrap one
@@ -1011,7 +1150,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     static let expandedMinSize         = NSSize(width: 440, height: 420)
 
     /// The smallest the panel may be right now. Every way of resizing
-    /// uses it: stage changes, the corner grip, ⌃⇧ + arrows, and dragging
+    /// uses it: stage changes, the resize edges, ⌃⇧ + arrows, and dragging
     /// the panel's edges (`windowWillResize`). It's worked out from the
     /// current screen each time rather than read from `minSize`, which is
     /// only updated on stage and surface changes.
@@ -1455,6 +1594,82 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return out
     }
 
+    /// Drags each border of the panel and prints the frame it produced.
+    ///
+    /// `--args -snapshot <dir> -surface interview -resizeprobe`. This exists
+    /// because the pointer cannot be driven from outside the process — posting
+    /// events at the session tap needs Accessibility, which is not granted —
+    /// so a change to how the border is grabbed is otherwise unverifiable from
+    /// a shell. Posting into this app's own queue exercises the real path:
+    /// event → local monitor → `handlePanelResize` → `setFrame`.
+    ///
+    /// Events are posted one per run-loop turn so each is created against the
+    /// frame the previous one produced; batched, they would all carry the
+    /// pre-resize window frame and report inflated deltas.
+    ///
+    /// `NSEvent.mouseEvent`'s location is in the WINDOW's coordinates when a
+    /// windowNumber is given, not the screen's — the first run of this passed
+    /// screen points and only two borders resized.
+    @MainActor
+    func probePanelResize() {
+        guard let panel = overlayPanel else { return }
+        print("PROBE stage=\(vm.shellStage) surface=\(vm.primarySurface?.rawValue ?? "none") frame=\(panel.frame)")
+
+        func post(_ type: NSEvent.EventType, _ location: NSPoint) {
+            guard let e = NSEvent.mouseEvent(
+                with: type, location: location, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: panel.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1,
+                pressure: type == .leftMouseUp ? 0 : 1
+            ) else {
+                print("PROBE could not build \(type)")
+                return
+            }
+            NSApp.postEvent(e, atStart: false)
+        }
+
+        // Each case: a point on the named border, dragged 100pt outward along
+        // the axis that border controls. The expectation column is what the
+        // frame should show afterwards — in particular which edge stays put.
+        let w = panel.frame.width, h = panel.frame.height
+        let cases: [(String, NSPoint, NSPoint, String)] = [
+            ("trailing", NSPoint(x: w - 5, y: h / 2), NSPoint(x: w + 95, y: h / 2),
+             "100 wider, leading edge pinned"),
+            ("leading", NSPoint(x: 5, y: h / 2), NSPoint(x: -95, y: h / 2),
+             "100 wider, trailing edge pinned"),
+            ("top", NSPoint(x: w / 2, y: h - 5), NSPoint(x: w / 2, y: h + 95),
+             "100 taller, bottom edge pinned"),
+            ("bottom", NSPoint(x: w / 2, y: 5), NSPoint(x: w / 2, y: -95),
+             "100 taller, top edge pinned"),
+            ("bottomTrailing", NSPoint(x: w - 5, y: 5), NSPoint(x: w + 95, y: -95),
+             "100 wider and taller, top-left corner pinned"),
+            ("interior", NSPoint(x: w / 2, y: h / 2), NSPoint(x: w / 2 + 100, y: h / 2),
+             "unchanged — the press belongs to the view under it"),
+        ]
+
+        func run(_ index: Int) {
+            guard index < cases.count else {
+                print("PROBE done")
+                return
+            }
+            let (name, start, end, expect) = cases[index]
+            let before = panel.frame
+            post(.leftMouseDown, start)
+            post(.leftMouseDragged, end)
+            post(.leftMouseUp, end)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                print("PROBE \(name) [\(expect)]: "
+                    + "\(before.size) @\(before.origin) -> \(panel.frame.size) @\(panel.frame.origin)")
+                // Put it back before the next case so every drag starts from
+                // the same frame.
+                panel.setFrame(before, display: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { run(index + 1) }
+            }
+        }
+        run(0)
+    }
+
     func showOverlay() {
         overlayPanel.orderFrontRegardless()
         MainActor.assumeIsolated { BrowserWindow.shared.setVisible(true) }
@@ -1532,9 +1747,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     deinit {
-        if let m = localKeyMonitor   { NSEvent.removeMonitor(m) }
-        if let m = optionKeyMonitor  { NSEvent.removeMonitor(m) }
-        if let m = localFlagsMonitor { NSEvent.removeMonitor(m) }
+        if let m = localKeyMonitor    { NSEvent.removeMonitor(m) }
+        if let m = optionKeyMonitor   { NSEvent.removeMonitor(m) }
+        if let m = localFlagsMonitor  { NSEvent.removeMonitor(m) }
+        if let m = panelResizeMonitor { NSEvent.removeMonitor(m) }
         HotkeyManager.shared.unregister()
         dictationManager?.stop()
     }
@@ -1604,10 +1820,20 @@ extension AppDelegate: NSWindowDelegate {
     /// Dragging an edge of the panel. AppKit doesn't reliably hold a
     /// borderless panel to `minSize` here, which let it be dragged narrow
     /// enough to break every layout, so the minimum is applied directly.
+    ///
+    /// The pill is pinned outright instead of clamped: its window is
+    /// deliberately the same size as the visible dot, so letting it grow
+    /// would leave a transparent margin that swallows clicks aimed at the
+    /// app underneath — the one thing a collapsed overlay must never do.
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
         guard sender === overlayPanel else { return frameSize }
-        let minimum = MainActor.assumeIsolated { minimumPanelSize(for: vm.shellStage) }
-        return NSSize(width: max(frameSize.width, minimum.width),
-                      height: max(frameSize.height, minimum.height))
+        return MainActor.assumeIsolated {
+            let minimum = minimumPanelSize(for: vm.shellStage)
+            if vm.shellStage == .pill {
+                return vm.hasPillPopup ? Self.pillWithPopupSize : Self.collapsedSize
+            }
+            return NSSize(width: max(frameSize.width, minimum.width),
+                          height: max(frameSize.height, minimum.height))
+        }
     }
 }

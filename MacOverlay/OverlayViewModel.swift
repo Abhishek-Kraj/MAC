@@ -547,8 +547,10 @@ final class OverlayViewModel {
     }
     /// OpenCode Console API key. Ids prefixed `opencode/` route through
     /// opencode.ai's OpenAI-compatible gateway (one key, any model) — see
-    /// AIManager. This is the second provider: it carries a genuinely free tier,
-    /// so an interview can run without spending anything.
+    /// AIManager. This is the second *paid* provider: a fallback for when
+    /// OpenRouter is busy or out of credit. OpenCode's free tier is locked to
+    /// their own app (HTTP 403 for any other client), so free interviews run on
+    /// OpenRouter's `:free` models instead.
     var openCodeAPIKey: String {
         didSet { UserDefaults.standard.set(openCodeAPIKey, forKey: "openCodeAPIKey") }
     }
@@ -880,18 +882,12 @@ final class OverlayViewModel {
     }
     @ObservationIgnored var onShellStageChange: ((ShellStage) -> Void)?
 
-    /// Corner drag-resize: `(cumulative dx, cumulative dy, ended)` in
-    /// screen-space points, reported on every change and once more with
-    /// `ended: true` when the drag finishes. The single resize affordance —
-    /// AppDelegate resizes the panel in BOTH dimensions, keeping the top
-    /// edge pinned so the card stays put while the panel grows downward,
-    /// and remembers the size so it survives stage transitions.
-    @ObservationIgnored var onCornerResize: ((CGFloat, CGFloat, Bool) -> Void)?
-
-    /// Drag-to-move from a `PanelDragArea` handle: same shape as
-    /// `onCornerResize` — `(cumulative dx, cumulative dy, ended)` in
-    /// screen-space points. AppDelegate moves the panel by that offset from
-    /// the origin the drag started at.
+    /// Drag-to-move from a `PanelDragArea` handle:
+    /// `(cumulative dx, cumulative dy, ended)` in screen-space points.
+    /// AppDelegate moves the panel by that offset from the origin the drag
+    /// started at. Panel *resizing* has no callback here on purpose — it is
+    /// taken by an AppKit event monitor before any view sees the press (see
+    /// `AppDelegate.installPanelResizeMonitor`).
     @ObservationIgnored var onPanelDrag: ((CGFloat, CGFloat, Bool) -> Void)?
 
     /// Live Focus content-height reports from SwiftUI. AppDelegate matches
@@ -907,7 +903,7 @@ final class OverlayViewModel {
     /// to the answer the user resized on, not to one they navigated to.
     @ObservationIgnored var onResumeFocusTracking: (() -> Void)?
 
-    /// True while a corner-grip drag-resize is in flight. Views drop
+    /// True while a drag-resize is in flight. Views drop
     /// their layout animations for the duration — the drag itself is the
     /// animation, and any easing that lags the cursor (the focus card's
     /// height glide re-triggered by every width-induced text rewrap)

@@ -40,11 +40,14 @@ class AIManager {
     /// so they are distinguishable from NVIDIA's `vendor/model`. It is a
     /// separate account, so it needs its own key and its own branch.
     ///
-    /// Why it is here at all: OpenRouter bills every request, and a live
-    /// interview is a long stream of them. OpenCode's free tier —
-    /// `deepseek-v4.1-flash-free`, `glm-5.3-flash-free`, `big-pickle` and
-    /// several Nemotron/MiMo entries — costs nothing per request, so a second
-    /// provider means the interview can run without spending anything.
+    /// Why it is here at all: a live interview is a long stream of requests, and
+    /// a second account means a second balance — if OpenRouter is out of credit
+    /// or having a bad day, the interview can still finish. It is NOT a way to
+    /// spend nothing: OpenCode's free tier answers `HTTP 403 FreeTierError`
+    /// ("can only be used from within OpenCode") to any third-party client,
+    /// probed 2026-10-18. Zero-cost interviews come from OpenRouter's own
+    /// `:free` models. Its endpoint also only speaks OpenAI chat/completions
+    /// for a subset of its models — see `openCodeBuiltins`.
     static let openCodePrefix = "opencode/"
     static let openCodeEndpoint = "https://opencode.ai/inference/openai/v1/chat/completions"
 
@@ -92,6 +95,24 @@ class AIManager {
     static var allowModelThinking: Bool {
         get { UserDefaults.standard.bool(forKey: "allowModelThinking") }
         set { UserDefaults.standard.set(newValue, forKey: "allowModelThinking") }
+    }
+
+    /// The OpenCode gateway's reasoning knob, which is NOT OpenRouter's.
+    ///
+    /// Both are OpenAI-shaped, but they take different fields. Measured against
+    /// the live gateway on 2026-10-18 with GLM 5.3 Flash and the same prompt,
+    /// OpenRouter's nested `reasoning: {effort: minimal, exclude: true}` cut
+    /// `reasoning_content` from 456 characters to 205, while the flat
+    /// `reasoning_effort: "minimal"` cut it to 33. The flat form is what the
+    /// gateway honours, so it is what is sent.
+    ///
+    /// Deliberately an allowlist rather than a default: most OpenCode models
+    /// reject the field outright with `HTTP 400 invalid_request_error` —
+    /// `deepseek-v4.1-flash`, `minimax-m3`, `kimi-k3`, `qwen3.8-max` and
+    /// `mistral-large-4` all did — which would break the answer.
+    static func openCodeReasoningEffort(for model: String) -> String? {
+        if allowModelThinking { return nil }
+        return OpenRouterCatalog.openCodeReasoningEffortIDs.contains(model) ? "minimal" : nil
     }
 
     func isGrokModel(_ model: String) -> Bool {
@@ -233,7 +254,14 @@ class AIManager {
             "model": model, tokenField: maxTokens,
             "messages": messages
         ]
-        if let reasoning = AIManager.reasoning(for: model) { body["reasoning"] = reasoning }
+        if baseURL == AIManager.openCodeEndpoint {
+            // Its own field, and only for the models that accept it.
+            if let effort = AIManager.openCodeReasoningEffort(for: model) {
+                body["reasoning_effort"] = effort
+            }
+        } else if let reasoning = AIManager.reasoning(for: model) {
+            body["reasoning"] = reasoning
+        }
         // Strict JSON output — supported by OpenAI / DeepSeek / Moonshot / Grok.
         // Forces a parseable JSON object instead of prose/markdown-wrapped text.
         if jsonMode { body["response_format"] = ["type": "json_object"] }
@@ -1059,7 +1087,13 @@ class AIManager {
             "stream": true,
             "stream_options": ["include_usage": true]
         ]
-        if let reasoning = AIManager.reasoning(for: model) { body["reasoning"] = reasoning }
+        if baseURL == AIManager.openCodeEndpoint {
+            if let effort = AIManager.openCodeReasoningEffort(for: model) {
+                body["reasoning_effort"] = effort
+            }
+        } else if let reasoning = AIManager.reasoning(for: model) {
+            body["reasoning"] = reasoning
+        }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: req)

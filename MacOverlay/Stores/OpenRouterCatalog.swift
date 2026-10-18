@@ -149,8 +149,12 @@ struct OpenRouterModel: Identifiable, Hashable, Codable {
     /// `supportsImages` is false across the board on purpose. A wrong "yes"
     /// offers ⌘⇧⏎ (screenshot to the AI) to a model that cannot read it, and the
     /// request fails mid-interview; a wrong "no" only hides a shortcut.
+    /// `blended` is nil wherever OpenCode does not publish a machine-readable
+    /// price, which is everywhere: `GET /inference/v1/models` returns bare
+    /// ids and nothing else. A nil price shows as *unpriced* rather than as a
+    /// fabricated number — a wrong "cheap" badge is worse than no badge.
     static func openCode(_ slug: String, _ name: String,
-                         free: Bool = false, blended: Double) -> OpenRouterModel {
+                         free: Bool = false, blended: Double? = nil) -> OpenRouterModel {
         OpenRouterModel(
             id: "opencode/\(slug)",
             name: name,
@@ -348,40 +352,51 @@ final class OpenRouterCatalog {
 
     /// OpenCode Console's curated set.
     ///
-    /// Prices are USD per 1M tokens blended (prompt + completion) as published
-    /// at opencode.ai/docs/zen on 2026-10-18, and they are the provider's own
-    /// numbers rather than an estimate. The free entries are free on OpenCode's
-    /// side — the pitch for a second provider, since a live interview is a long
-    /// stream of paid requests on OpenRouter.
+    /// Every entry here speaks OpenCode's OpenAI-compatible endpoint
+    /// (`/inference/openai/v1/chat/completions`) and was probed live against it
+    /// on 2026-10-18 with a real key. Three whole families are deliberately
+    /// absent, each for a reason that would otherwise surface as a failure in
+    /// the middle of an interview:
     ///
-    /// Deliberately not the flagship Claude/GPT entries: those are reachable
-    /// through OpenRouter with a key the user may already have, and listing the
-    /// same model twice under two providers only makes the picker longer. What
-    /// is here is the free tier plus the cheap fast models an interview
-    /// actually wants.
+    ///  · **The free tier.** `deepseek-v4.1-flash-free`, `glm-5.3-flash-free`,
+    ///    `big-pickle`, the Nemotron / MiMo / LongCat / Space Bunny / Beam
+    ///    entries — every one answers `HTTP 403 FreeTierError`, "OpenCode's
+    ///    free tier can only be used from within OpenCode". Spoofing a client
+    ///    User-Agent does not change it. Free models therefore come from
+    ///    OpenRouter's own `:free` tier, which *does* work from this app.
+    ///  · **The other protocols.** `claude-*` speak Anthropic's messages API,
+    ///    `gpt-5.4-nano` and friends speak the OpenAI *responses* API, and
+    ///    `gemini-3.5-flash-lite` speaks Google's — all answer `HTTP 400
+    ///    ModelProtocolUnsupported` on chat/completions. Reaching them would
+    ///    mean three more request builders, which is not worth it while
+    ///    OpenRouter already carries the same models.
+    ///  · **Advertised but broken.** `kimi-k2.6`, `kimi-k2.7-code` and
+    ///    `minimax-m2.7` are listed by `/models` yet answered 403/410
+    ///    `server_error` on every probe.
+    ///
+    /// Prices are only given where the provider publishes one at all; the
+    /// rest show as unpriced rather than as a number this app made up.
     nonisolated static let openCodeBuiltins: [OpenRouterModel] = [
-        // Free on OpenCode for a limited time, zero retention unless noted.
-        .openCode("deepseek-v4.1-flash-free", "DeepSeek V4.1 Flash (free)", free: true, blended: 0),
-        .openCode("glm-5.3-flash-free",       "GLM 5.3 Flash (free)",       free: true, blended: 0),
-        .openCode("big-pickle",               "Big Pickle (free)",          free: true, blended: 0),
-        .openCode("nemotron-3-ultra-free",    "Nemotron 3 Ultra (free)",    free: true, blended: 0),
-        .openCode("nemotron-3.5-lightning-free", "Nemotron 3.5 Lightning (free)", free: true, blended: 0),
-        .openCode("nemotron-3.5-super-vl-free",  "Nemotron 3.5 Super VL (free)",  free: true, blended: 0),
-        .openCode("mimo-v2.6-flash-free",     "MiMo V2.6 Flash (free)",     free: true, blended: 0),
-        .openCode("mimo-v2.5-free",           "MiMo V2.5 (free)",           free: true, blended: 0),
-        .openCode("longcat-2.5-preview-free", "LongCat 2.5 Preview (free)", free: true, blended: 0),
-        .openCode("space-bunny-free",         "Space Bunny (free)",         free: true, blended: 0),
-        .openCode("ll-alpha-free",            "LL Alpha (free)",            free: true, blended: 0),
-        .openCode("beam-free",                "Beam (free)",                free: true, blended: 0),
-        .openCode("exo-free",                 "Exo (free)",                 free: true, blended: 0),
-        // Paid, but the cheap fast tier — the ones worth reaching for during a
-        // live interview when the free queue is busy.
-        .openCode("claude-haiku-5-5",         "Claude Haiku 5.5",           blended: 0.60),
-        .openCode("qwen3.8-flash",            "Qwen3.8 Flash",              blended: 0.62),
-        .openCode("glm-5.3-flash",            "GLM 5.3 Flash",              blended: 0.65),
-        .openCode("gpt-5.4-nano",             "GPT 5.4 Nano",               blended: 1.45),
-        .openCode("deepseek-v4.1-flash",      "DeepSeek V4.1 Flash",        blended: 1.50),
-        .openCode("gemini-3.5-flash-lite",    "Gemini 3.5 Flash Lite",      blended: 2.80),
+        // Cheap and fast — the ones worth reaching for during a live interview.
+        .openCode("qwen3.8-flash",       "Qwen3.8 Flash",       blended: 0.62),
+        .openCode("glm-5.3-flash",       "GLM 5.3 Flash",       blended: 0.65),
+        .openCode("deepseek-v4.1-flash", "DeepSeek V4.1 Flash", blended: 1.50),
+        // Stronger, and priced by request rather than published per token.
+        .openCode("glm-5.3",             "GLM 5.3"),
+        .openCode("deepseek-v4-pro",     "DeepSeek V4 Pro"),
+        .openCode("minimax-m3",          "MiniMax M3"),
+        .openCode("kimi-k3",             "Kimi K3"),
+        .openCode("mistral-large-4",     "Mistral Large 4"),
+        .openCode("qwen3.8-max",         "Qwen3.8 Max"),
+    ]
+
+    /// OpenCode models that accept `reasoning_effort` AND measurably shorten
+    /// their thinking when given it, probed 2026-10-18. GLM 5.3 Flash went
+    /// from 456 characters of `reasoning_content` to 33. Most OpenCode models
+    /// answer `HTTP 400 invalid_request_error` when the field is sent at all,
+    /// so this is an allowlist — see `AIManager.openCodeReasoningEffort(for:)`.
+    nonisolated static let openCodeReasoningEffortIDs: Set<String> = [
+        "glm-5.3-flash", "glm-5.3", "qwen3.8-flash",
     ]
 
     /// Everything selectable: custom first, then built-ins, then the fetched

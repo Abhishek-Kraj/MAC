@@ -68,7 +68,11 @@ struct InputBarView: View {
                 // 440pt panel — so expanding left a stub hanging off the
                 // bottom-left corner with empty space beside it, which is
                 // what "the expansion is not aligned" was.
-                .frame(maxWidth: .infinity)
+                //
+                // Collapsed is the exception: there the row must hug the
+                // brand button so the capsule is a small dot, not a
+                // full-width bar with the logo at one end.
+                .frame(maxWidth: vm.shellStage == .pill ? nil : CGFloat.infinity)
                 // Drag handle behind the row — this is the only chrome on
                 // screen in `.pill`, so without it the collapsed overlay
                 // can't be moved by mouse at all. In front of the capsule
