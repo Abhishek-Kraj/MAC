@@ -140,6 +140,29 @@ struct OpenRouterModel: Identifiable, Hashable, Codable {
         )
     }
 
+    /// An OpenCode Console entry.
+    ///
+    /// Unlike OpenRouter's, the id is the app's own `opencode/<slug>` — the
+    /// gateway itself takes the bare slug — and the provider is a fixed group
+    /// rather than one derived from a `vendor/` head.
+    ///
+    /// `supportsImages` is false across the board on purpose. A wrong "yes"
+    /// offers ⌘⇧⏎ (screenshot to the AI) to a model that cannot read it, and the
+    /// request fails mid-interview; a wrong "no" only hides a shortcut.
+    static func openCode(_ slug: String, _ name: String,
+                         free: Bool = false, blended: Double) -> OpenRouterModel {
+        OpenRouterModel(
+            id: "opencode/\(slug)",
+            name: name,
+            provider: "OpenCode",
+            supportsImages: false,
+            isFree: free,
+            contextLength: nil,
+            supportedParameters: nil,
+            blendedPrice: blended
+        )
+    }
+
     /// `qwen/qwen3-235b:free` → `Qwen3 235B (free)`.
     static func displayName(for bare: String) -> String {
         var s = bare
@@ -323,11 +346,49 @@ final class OpenRouterCatalog {
         ("moonshotai/kimi-k2.6",         "Kimi K2.6",             "Kimi"),
     ].map { OpenRouterModel.make(slug: $0.0, name: $0.1) }
 
+    /// OpenCode Console's curated set.
+    ///
+    /// Prices are USD per 1M tokens blended (prompt + completion) as published
+    /// at opencode.ai/docs/zen on 2026-10-18, and they are the provider's own
+    /// numbers rather than an estimate. The free entries are free on OpenCode's
+    /// side — the pitch for a second provider, since a live interview is a long
+    /// stream of paid requests on OpenRouter.
+    ///
+    /// Deliberately not the flagship Claude/GPT entries: those are reachable
+    /// through OpenRouter with a key the user may already have, and listing the
+    /// same model twice under two providers only makes the picker longer. What
+    /// is here is the free tier plus the cheap fast models an interview
+    /// actually wants.
+    nonisolated static let openCodeBuiltins: [OpenRouterModel] = [
+        // Free on OpenCode for a limited time, zero retention unless noted.
+        .openCode("deepseek-v4.1-flash-free", "DeepSeek V4.1 Flash (free)", free: true, blended: 0),
+        .openCode("glm-5.3-flash-free",       "GLM 5.3 Flash (free)",       free: true, blended: 0),
+        .openCode("big-pickle",               "Big Pickle (free)",          free: true, blended: 0),
+        .openCode("nemotron-3-ultra-free",    "Nemotron 3 Ultra (free)",    free: true, blended: 0),
+        .openCode("nemotron-3.5-lightning-free", "Nemotron 3.5 Lightning (free)", free: true, blended: 0),
+        .openCode("nemotron-3.5-super-vl-free",  "Nemotron 3.5 Super VL (free)",  free: true, blended: 0),
+        .openCode("mimo-v2.6-flash-free",     "MiMo V2.6 Flash (free)",     free: true, blended: 0),
+        .openCode("mimo-v2.5-free",           "MiMo V2.5 (free)",           free: true, blended: 0),
+        .openCode("longcat-2.5-preview-free", "LongCat 2.5 Preview (free)", free: true, blended: 0),
+        .openCode("space-bunny-free",         "Space Bunny (free)",         free: true, blended: 0),
+        .openCode("ll-alpha-free",            "LL Alpha (free)",            free: true, blended: 0),
+        .openCode("beam-free",                "Beam (free)",                free: true, blended: 0),
+        .openCode("exo-free",                 "Exo (free)",                 free: true, blended: 0),
+        // Paid, but the cheap fast tier — the ones worth reaching for during a
+        // live interview when the free queue is busy.
+        .openCode("claude-haiku-5-5",         "Claude Haiku 5.5",           blended: 0.60),
+        .openCode("qwen3.8-flash",            "Qwen3.8 Flash",              blended: 0.62),
+        .openCode("glm-5.3-flash",            "GLM 5.3 Flash",              blended: 0.65),
+        .openCode("gpt-5.4-nano",             "GPT 5.4 Nano",               blended: 1.45),
+        .openCode("deepseek-v4.1-flash",      "DeepSeek V4.1 Flash",        blended: 1.50),
+        .openCode("gemini-3.5-flash-lite",    "Gemini 3.5 Flash Lite",      blended: 2.80),
+    ]
+
     /// Everything selectable: custom first, then built-ins, then the fetched
     /// catalogue. De-duplicated by id, earliest definition winning.
     nonisolated static func merged(custom: [OpenRouterModel], fetched: [OpenRouterModel]) -> [OpenRouterModel] {
         var seen = Set<String>()
-        return (custom + builtins + fetched).filter { seen.insert($0.id).inserted }
+        return (custom + builtins + openCodeBuiltins + fetched).filter { seen.insert($0.id).inserted }
     }
 
     // MARK: - Fetching
@@ -447,6 +508,7 @@ final class OpenRouterCatalog {
         // so the difference was always empty and nothing was ever hidden.
         var keep = Set(custom.map(\.id))
         keep.formUnion(Self.builtins.map(\.id))
+        keep.formUnion(Self.openCodeBuiltins.map(\.id))
         if let selected = UserDefaults.standard.string(forKey: "selectedModel") {
             keep.insert(selected)
         }

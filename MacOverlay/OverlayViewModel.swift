@@ -545,6 +545,13 @@ final class OverlayViewModel {
     var openRouterAPIKey: String {
         didSet { UserDefaults.standard.set(openRouterAPIKey, forKey: "openRouterAPIKey") }
     }
+    /// OpenCode Console API key. Ids prefixed `opencode/` route through
+    /// opencode.ai's OpenAI-compatible gateway (one key, any model) — see
+    /// AIManager. This is the second provider: it carries a genuinely free tier,
+    /// so an interview can run without spending anything.
+    var openCodeAPIKey: String {
+        didSet { UserDefaults.standard.set(openCodeAPIKey, forKey: "openCodeAPIKey") }
+    }
     var elevenLabsAPIKey: String {
         didSet {
             UserDefaults.standard.set(elevenLabsAPIKey, forKey: "elevenLabsAPIKey")
@@ -1144,6 +1151,7 @@ final class OverlayViewModel {
         deepSeekAPIKey     = UserDefaults.standard.string(forKey: "deepSeekAPIKey") ?? ""
         nvidiaAPIKey       = UserDefaults.standard.string(forKey: "nvidiaAPIKey") ?? ""
         openRouterAPIKey   = UserDefaults.standard.string(forKey: "openRouterAPIKey") ?? ""
+        openCodeAPIKey     = UserDefaults.standard.string(forKey: "openCodeAPIKey") ?? ""
         elevenLabsAPIKey   = UserDefaults.standard.string(forKey: "elevenLabsAPIKey") ?? ""
         transcriptionPreference = TranscriptionPreference(
             rawValue: UserDefaults.standard.string(forKey: "transcriptionPreference") ?? ""
@@ -2000,7 +2008,7 @@ final class OverlayViewModel {
     /// noise the user ignores, but a missed question leaves them stranded
     /// mid-interview. When in doubt, answer.
     private func classifyNeedsResponse(_ text: String) async -> Bool {
-        guard hasOpenRouterAccess else { return true }
+        guard hasModelAccess else { return true }
         do {
             let raw = try await AIManager.shared.sendMessage(
                 text,
@@ -2184,6 +2192,7 @@ final class OverlayViewModel {
                     deepSeekAPIKey: self.deepSeekAPIKey,
                     nvidiaAPIKey:   self.nvidiaAPIKey,
                     openRouterAPIKey: self.openRouterAPIKey,
+                    openCodeAPIKey: self.openCodeAPIKey,
                     model:          model,
                     screenshot:     nil,
                     systemPrompt:   resolvedPrompt,
@@ -2478,10 +2487,14 @@ final class OverlayViewModel {
     // MARK: - Helpers
 
     /// The API key + provider display name required by `selectedModel`.
-    /// Centralises the Anthropic / OpenAI / Kimi routing so every key check
-    /// and error message stays in sync with `AIManager`'s routing.
-    /// API key + provider label for an arbitrary model id.
+    /// Centralises the per-provider routing so every key check and error message
+    /// stays in sync with `AIManager`'s router — including the two prefixed
+    /// gateways, OpenCode and OpenRouter, which must be tested before NVIDIA's
+    /// `vendor/model` rule.
     func key(for model: String) -> (key: String, provider: String) {
+        if AIManager.shared.isOpenCodeModel(model) {
+            return (openCodeAPIKey, "OpenCode")
+        }
         if AIManager.shared.isOpenRouterModel(model) {
             return (openRouterAPIKey, "OpenRouter")
         }
@@ -2505,16 +2518,20 @@ final class OverlayViewModel {
         keyForSelectedModel.key.isEmpty
     }
 
-    /// OpenRouter models run on the user's own key.
-    var hasOpenRouterAccess: Bool { !openRouterAPIKey.isEmpty }
+    /// Whether the selected model's own provider key is present. This used to
+    /// be "is there an OpenRouter key", which quietly made OpenRouter mandatory:
+    /// choosing a free OpenCode model still reported no access and the answer
+    /// never started.
+    var hasModelAccess: Bool { !keyForSelectedModel.key.isEmpty }
 
-    /// Keys still to add before starting an interview: OpenRouter runs the
-    /// models, and ElevenLabs or xAI transcribes (the picked one, when
-    /// ElevenLabs or Grok is picked).
+    /// Keys still to add before starting an interview: the key for the model
+    /// the user picked, and one for transcription (ElevenLabs or xAI, when one
+    /// of those is picked).
     var missingRequiredKeys: [String] {
         func empty(_ key: String) -> Bool { key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         var missing: [String] = []
-        if empty(openRouterAPIKey) { missing.append("OpenRouter") }
+        let model = keyForSelectedModel
+        if empty(model.key) { missing.append(model.provider) }
         switch transcriptionPreference {
         case .grok:        if empty(grokAPIKey) { missing.append("xAI") }
         case .elevenLabs:  if empty(elevenLabsAPIKey) { missing.append("ElevenLabs") }

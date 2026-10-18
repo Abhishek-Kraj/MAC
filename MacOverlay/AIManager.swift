@@ -35,6 +35,18 @@ class AIManager {
     /// `vendor/model`; the prefix is stripped before the request.
     static let openRouterPrefix = "openrouter/"
     static let openRouterEndpoint = "https://openrouter.ai/api/v1/chat/completions"
+    /// OpenCode Console (OpenAI-compatible). Same shape as OpenRouter — one key
+    /// reaches the whole gateway, and ids carry an explicit `opencode/` prefix
+    /// so they are distinguishable from NVIDIA's `vendor/model`. It is a
+    /// separate account, so it needs its own key and its own branch.
+    ///
+    /// Why it is here at all: OpenRouter bills every request, and a live
+    /// interview is a long stream of them. OpenCode's free tier —
+    /// `deepseek-v4.1-flash-free`, `glm-5.3-flash-free`, `big-pickle` and
+    /// several Nemotron/MiMo entries — costs nothing per request, so a second
+    /// provider means the interview can run without spending anything.
+    static let openCodePrefix = "opencode/"
+    static let openCodeEndpoint = "https://opencode.ai/inference/openai/v1/chat/completions"
 
     func isOpenAIModel(_ model: String) -> Bool {
         AIManager.openAIPrefixes.contains { model.hasPrefix($0) }
@@ -94,6 +106,11 @@ class AIManager {
     /// NVIDIA, since the stripped id is itself `vendor/model`).
     func isOpenRouterModel(_ model: String) -> Bool { model.hasPrefix(AIManager.openRouterPrefix) }
 
+    /// OpenCode ids carry their own `opencode/` prefix, checked before NVIDIA
+    /// for the same reason as OpenRouter's: the stripped id could otherwise be
+    /// mistaken for a namespaced NVIDIA one.
+    func isOpenCodeModel(_ model: String) -> Bool { model.hasPrefix(AIManager.openCodePrefix) }
+
     /// NVIDIA NIM models are `vendor/model` namespaced — the slash is unique to
     /// them across our catalogue, so it doubles as the routing signal.
     func isNVIDIAModel(_ model: String) -> Bool { model.contains("/") }
@@ -107,6 +124,7 @@ class AIManager {
         deepSeekAPIKey: String = "",
         nvidiaAPIKey: String = "",
         openRouterAPIKey: String = "",
+        openCodeAPIKey: String = "",
         model: String,
         screenshot: NSImage? = nil,
         systemPrompt: String = "You are a helpful assistant. Respond helpfully and concisely.",
@@ -117,9 +135,13 @@ class AIManager {
         // Ignored on the Anthropic path. Use for prompts that must return JSON.
         jsonMode: Bool = false
     ) async throws -> String {
-        // OpenRouter first — its ids carry the explicit `openrouter/` prefix,
-        // which would otherwise match NVIDIA's `vendor/model` rule. Strip the
-        // prefix before sending the real model id.
+        // The two prefixed gateways first — their explicit `opencode/` and
+        // `openrouter/` prefixes would otherwise match NVIDIA's `vendor/model`
+        // rule. Strip the prefix before sending the real model id.
+        if isOpenCodeModel(model) {
+            let real = String(model.dropFirst(AIManager.openCodePrefix.count))
+            return try await sendOpenAI(text, apiKey: openCodeAPIKey, model: real, screenshot: screenshot, systemPrompt: systemPrompt, history: history, maxTokens: maxTokens, timeoutInterval: timeoutInterval, baseURL: AIManager.openCodeEndpoint, tokenField: "max_tokens", jsonMode: jsonMode)
+        }
         if isOpenRouterModel(model) {
             let real = String(model.dropFirst(AIManager.openRouterPrefix.count))
             return try await sendOpenAI(text, apiKey: openRouterAPIKey, model: real, screenshot: screenshot, systemPrompt: systemPrompt, history: history, maxTokens: maxTokens, timeoutInterval: timeoutInterval, baseURL: AIManager.openRouterEndpoint, tokenField: "max_tokens", jsonMode: jsonMode)
@@ -798,6 +820,7 @@ class AIManager {
         deepSeekAPIKey: String = "",
         nvidiaAPIKey: String = "",
         openRouterAPIKey: String = "",
+        openCodeAPIKey: String = "",
         model: String,
         screenshot: NSImage? = nil,
         systemPrompt: String = "You are a helpful assistant. Respond helpfully and concisely.",
@@ -806,7 +829,16 @@ class AIManager {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    if isOpenRouterModel(model) {
+                    if isOpenCodeModel(model) {
+                        let real = String(model.dropFirst(AIManager.openCodePrefix.count))
+                        try await streamOpenAI(text, apiKey: openCodeAPIKey, model: real,
+                                               screenshot: screenshot, systemPrompt: systemPrompt,
+                                               history: history,
+                                               baseURL: AIManager.openCodeEndpoint,
+                                               tokenField: "max_tokens") { event in
+                            continuation.yield(event)
+                        }
+                    } else if isOpenRouterModel(model) {
                         let real = String(model.dropFirst(AIManager.openRouterPrefix.count))
                         try await streamOpenAI(text, apiKey: openRouterAPIKey, model: real,
                                                screenshot: screenshot, systemPrompt: systemPrompt,

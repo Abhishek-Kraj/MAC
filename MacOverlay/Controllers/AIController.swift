@@ -160,6 +160,7 @@ final class AIController {
                     deepSeekAPIKey: vm.deepSeekAPIKey,
                     nvidiaAPIKey:   vm.nvidiaAPIKey,
                     openRouterAPIKey: vm.openRouterAPIKey,
+                    openCodeAPIKey: vm.openCodeAPIKey,
                     model:          vm.selectedModel,
                     screenshot:     screenshot,
                     systemPrompt:   systemPrompt,
@@ -312,7 +313,7 @@ final class AIController {
         guard let vm else { return }
         guard !session.titleManuallySet else { return }
         guard !session.turns.isEmpty else { return }
-        guard vm.hasOpenRouterAccess else { return }
+        guard vm.hasModelAccess else { return }
 
         let transcript = session.turns.prefix(8).map {
             "\($0.role.rawValue.capitalized): \($0.content)"

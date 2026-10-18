@@ -539,10 +539,33 @@ struct PreferencesView: View {
         }
     }
 
+    /// The keys come first.
+    ///
+    /// They are the prerequisite — without one, nothing else on this tab does
+    /// anything — while the model catalogue below is a browse-and-configure
+    /// surface several hundred rows long. With the list in front of them,
+    /// "where do I paste my key" was a scroll past the whole catalogue.
+    @ViewBuilder
+    private var apiKeysSection: some View {
+        @Bindable var vm = vm
+        section(title: "API keys",
+                subtitle: "OpenRouter or OpenCode runs the models — add whichever you have; OpenCode carries a free tier. ElevenLabs or xAI (Grok) transcribes. Stored only on this Mac.") {
+            KeyFieldView(label: "OpenRouter", placeholder: "sk-or-…",     text: $vm.openRouterAPIKey)
+            KeyFieldView(label: "OpenCode",
+                         placeholder: "opencode.ai key",
+                         text: $vm.openCodeAPIKey,
+                         hint: "A second provider, with models that cost nothing: DeepSeek V4.1 Flash Free, GLM 5.3 Flash Free and others. Get a key at opencode.ai/console.")
+            KeyFieldView(label: "ElevenLabs", placeholder: "sk_…",        text: $vm.elevenLabsAPIKey)
+            KeyFieldView(label: "xAI (Grok)", placeholder: "xai-…",       text: $vm.grokAPIKey)
+        }
+    }
+
     @ViewBuilder
     private var aiTab: some View {
         @Bindable var vm = vm
         let store = vm.promptStore
+
+        apiKeysSection
 
 
         section(title: "Answer speed",
@@ -572,13 +595,6 @@ struct PreferencesView: View {
                 Link("Request it", destination: modelRequestURL)
             }
             .font(.system(size: 11))
-        }
-
-        section(title: "API keys",
-                subtitle: "OpenRouter runs the models. ElevenLabs or xAI (Grok) transcribes: add the one you use. Stored only on this Mac.") {
-            KeyFieldView(label: "OpenRouter", placeholder: "sk-or-…",     text: $vm.openRouterAPIKey)
-            KeyFieldView(label: "ElevenLabs", placeholder: "sk_…",        text: $vm.elevenLabsAPIKey)
-            KeyFieldView(label: "xAI (Grok)", placeholder: "xai-…",       text: $vm.grokAPIKey)
         }
 
         if FeatureFlags.resumesEnabled {
@@ -714,21 +730,41 @@ struct PreferencesView: View {
                     .foregroundColor(.secondary.opacity(0.8))
             }
 
-            ForEach(store.groupedModels, id: \.provider) { group in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(group.provider)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary.opacity(0.85))
-                        .textCase(.uppercase)
-                        .kerning(0.4)
-                    LazyVStack(spacing: 1) {
-                        ForEach(group.models, id: \.id) { m in
-                            visibilityToggleRow(model: m, visibility: visibility,
-                                                allIDs: allIDs)
+            // The catalogue is 465 models. Rendered inline it made this tab
+            // thousands of points tall, so reaching the toolbars below it — and
+            // the API-key fields under those — meant scrolling past every
+            // provider in full. The list now scrolls inside a fixed height and
+            // the toolbar, filters and counts above it stay put.
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(store.groupedModels, id: \.provider) { group in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(group.provider)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(.secondary.opacity(0.85))
+                                .textCase(.uppercase)
+                                .kerning(0.4)
+                            LazyVStack(spacing: 1) {
+                                ForEach(group.models, id: \.id) { m in
+                                    visibilityToggleRow(model: m, visibility: visibility,
+                                                        allIDs: allIDs)
+                                }
+                            }
                         }
                     }
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
             }
+            .frame(maxHeight: 380)
+            .background(
+                RoundedRectangle(cornerRadius: Design.Radius.md)
+                    .fill(Design.Surface.inputFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Design.Radius.md)
+                    .strokeBorder(Design.Surface.hairline, lineWidth: 0.5)
+            )
 
             HStack(spacing: 6) {
                 // Scoped to the active filters — see `showAll(among:)`.

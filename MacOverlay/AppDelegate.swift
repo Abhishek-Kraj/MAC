@@ -1270,13 +1270,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
+            // Read the saved frame BEFORE the window exists. `setFrameAutosaveName`
+            // (below) writes the window's *current* frame into this key, and at
+            // that point the window is still a degenerate 1×titlebar rect — so
+            // it overwrote the very value it was meant to restore, which is why
+            // the saved size never came back. AppKit stores "x y w h …" with the
+            // screen frame appended; NSRectFromString reads the first four.
+            let savedFrame = UserDefaults.standard
+                .string(forKey: "NSWindow Frame TheCloserPreferences")
+                .map(NSRectFromString) ?? .zero
+
             let w = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 880, height: 700),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered, defer: false)
             w.title = "Settings"
             w.isReleasedWhenClosed = false
-            w.setFrameAutosaveName("TheCloserPreferences")
             // The app is designed dark — every surface is built from white
             // overlays on a dark ground — and the overlay never follows the
             // system appearance. A standalone window would, so on a Mac in
@@ -1298,15 +1307,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // through and, in light mode, that is white — with the
                     // darkAqua text drawn white on top of it.
                     .background(Design.Surface.shellFill))
-            // Set explicitly after installing the controller: NSHostingController's
-            // fitting size wins over the initial content rect, so the window
-            // otherwise opens at `contentMinSize`.
+            // Set after installing the controller: NSHostingController's fitting
+            // size otherwise wins over the initial content rect.
             w.contentMinSize = NSSize(width: 720, height: 520)
-            w.setContentSize(NSSize(width: 880, height: 700))
+            // The saved frame wins when there is a usable one; otherwise the
+            // default. The hosting controller's fitting size would otherwise
+            // win over the initial content rect, which is why a size is set at
+            // all.
+            let onScreen = NSScreen.main?.visibleFrame ?? .zero
+            if savedFrame.width  >= w.contentMinSize.width,
+               savedFrame.height >= w.contentMinSize.height,
+               onScreen.isEmpty || savedFrame.intersects(onScreen) {
+                w.setFrame(savedFrame, display: false)
+            } else {
+                w.setContentSize(NSSize(width: 880, height: 700))
+            }
             // Holds API keys and the résumé, so it follows the same
             // hide-from-screen-sharing rule as the overlay.
             w.sharingType = NSWindow.desiredSharingType
             if w.frame.origin == .zero { w.center() }
+            // Only now, with a real frame in hand, hand the frame to AppKit to
+            // keep up to date.
+            w.setFrameAutosaveName("TheCloserPreferences")
 
             preferencesWindow = w
             vm.preferencesWindowOpen = true

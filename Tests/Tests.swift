@@ -672,12 +672,57 @@ func testOpenRouterMergedOrderAndDedup() throws {
     let custom = [OpenRouterModel.make(slug: "me/custom", name: "Custom")]
     let fetched = [OpenRouterModel.make(slug: "vendor/new"), custom[0]]
     let merged = OpenRouterCatalog.merged(custom: custom, fetched: fetched)
-    try assertEq(merged.count, custom.count + OpenRouterCatalog.builtins.count + 1,
-                 "custom + builtins + one new fetched, custom not duplicated")
+    try assertEq(merged.count,
+                 custom.count + OpenRouterCatalog.builtins.count
+                              + OpenRouterCatalog.openCodeBuiltins.count + 1,
+                 "custom + builtins + OpenCode + one new fetched, custom not duplicated")
     try assertEq(merged[0].id, custom[0].id, "custom first")
     try assertEq(merged[0].name, "Custom", "custom entry wins over its fetched twin")
     let ids = Set(merged.map(\.id))
     try assertEq(ids.count, merged.count, "no duplicate ids")
+}
+
+/// OpenCode is a second gateway, not a second name for OpenRouter's models.
+///
+/// Its entries carry the app's own `opencode/` prefix, group under one
+/// provider, and strip to a bare slug the gateway understands. The free tier is
+/// the whole reason the second provider is here, so it is asserted rather than
+/// assumed — a free model that quietly acquires a price is a bug.
+func testOpenCodeIsWiredAsItsOwnGateway() throws {
+    let entries = OpenRouterCatalog.openCodeBuiltins
+    try assertTrue(!entries.isEmpty, "there is an OpenCode set")
+
+    let ai = AIManager.shared
+    for m in entries {
+        try assertTrue(m.id.hasPrefix("opencode/"), "\(m.id) carries the OpenCode prefix")
+        try assertEq(m.provider, "OpenCode", "\(m.id) groups under OpenCode")
+        try assertTrue(ai.isOpenCodeModel(m.id), "the router recognises \(m.id)")
+
+        // The gateway takes the bare slug.
+        let stripped = String(m.id.dropFirst("opencode/".count))
+        try assertTrue(!stripped.contains("/"), "\(m.id) strips to a bare slug")
+        // A slug that says it is free must be flagged free. The converse is not
+        // required: `big-pickle` is a free stealth model with no `-free` in the
+        // name, which is exactly why the flag exists rather than a name test.
+        if stripped.hasSuffix("-free") {
+            try assertTrue(m.isFree, "\(m.id) names itself free but is not flagged free")
+        }
+    }
+
+    // NVIDIA's rule is "contains a slash", which an unprefixed OpenCode id would
+    // match — the reason AIManager tests OpenCode before it.
+    try assertTrue(ai.isNVIDIAModel(entries[0].id),
+                   "NVIDIA's loose rule also matches OpenCode ids; order in the router matters")
+
+    let free = entries.filter(\.isFree)
+    try assertTrue(free.count >= 5, "several free models are offered (found \(free.count))")
+    for m in free {
+        try assertEq(m.blendedPrice ?? -1, 0.0, "\(m.id) is priced at zero")
+    }
+
+    let ids = Set(entries.map(\.id))
+    try assertTrue(ids.contains("opencode/deepseek-v4.1-flash-free"),
+                   "the free DeepSeek model is offered")
 }
 
 /// The built-in defaults must survive into the merged catalogue.
@@ -2707,6 +2752,7 @@ struct TestsMain {
         TestRunner.run("OpenRouter provider mapping", testOpenRouterProviderMapping)
         TestRunner.run("OpenRouter merged order and dedup", testOpenRouterMergedOrderAndDedup)
         TestRunner.run("OpenRouter builtins cover the defaults", testOpenRouterBuiltinsCoverDefaults)
+        TestRunner.run("OpenCode is its own gateway", testOpenCodeIsWiredAsItsOwnGateway)
         TestRunner.run("OpenRouter decodes live payload shape", testOpenRouterDecodesLivePayloadShape)
         TestRunner.run("OpenRouter decode tolerates missing architecture", testOpenRouterDecodeToleratesMissingArchitecture)
         TestRunner.run("No payment code in the source tree", testNoPaymentCodeInSourceTree)
