@@ -25,28 +25,3 @@ extension PanelResizeEdge {
         }
     }
 }
-
-/// The little diagonal-arrows chip at the panel's bottom-trailing corner.
-///
-/// This is only the affordance — the resizing itself is handled by an AppKit
-/// local event monitor, before any view sees the press (see
-/// `AppDelegate.installPanelResizeMonitor`). It is deliberately inert so it can
-/// never intercept the drag it advertises.
-struct ResizeGripHint: View {
-    var body: some View {
-        Image(systemName: "arrow.up.left.and.arrow.down.right")
-            .font(.system(size: 8, weight: .bold))
-            .foregroundColor(Design.Ink.tertiary)
-            .frame(width: 18, height: 18)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Design.Surface.controlFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(Design.Surface.hairline, lineWidth: 0.5)
-            )
-            .allowsHitTesting(false)
-            .help("Drag any edge or corner to resize")
-    }
-}

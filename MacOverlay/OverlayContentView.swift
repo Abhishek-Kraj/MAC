@@ -127,16 +127,12 @@ struct OverlayView: View {
         // gesture recognition runs, so a transparent overlay lost the press
         // (and the panel moved instead, because it is movable by background).
         // `AppDelegate.installPanelResizeMonitor` claims the border before any
-        // view sees it. This chip is only the affordance.
-        .overlay(alignment: .bottomTrailing) {
-            if vm.shellStage == .expanded {
-                ResizeGripHint()
-                    .opacity(chromeHovering ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.18), value: chromeHovering)
-                    .padding(.trailing, 2)
-                    .padding(.bottom, 2)
-            }
-        }
+        // view sees it, and the cursor over that border is what advertises it.
+        //
+        // A corner chip used to advertise it too. Removed: it was hover-gated,
+        // so it could not appear while the app was inactive — mid-interview,
+        // the one time the cursor is doing the work alone — and it drew over
+        // the trailing end of the input-bar row.
         .animation(Design.Motion.standard, value: vm.shellStage)
         .animation(Design.Motion.standard, value: vm.isScoringResume)
         .animation(Design.Motion.standard, value: vm.isGeneratingResume)
