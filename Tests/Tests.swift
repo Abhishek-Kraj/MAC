@@ -1723,6 +1723,35 @@ func testGapClassificationUsesRiskNotProse() throws {
     try assertEq(noOverlap.count, 0, "an unrelated area matches nothing")
 }
 
+/// The bar itself must offer a way out.
+///
+/// Quit was reachable from Settings, the overlay's "…" menu, the menu bar and
+/// the troubleshooting window — all of which require opening or finding
+/// something. The bar is the one thing always on screen, so the request was
+/// to put it there and stop making people hunt.
+func testTheBarOffersQuit() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let bar = try String(
+        contentsOf: root.appending(path: "MacOverlay/Views/Shell/InputBarView.swift"),
+        encoding: .utf8)
+
+    let buttons = bar.components(separatedBy: "private var surfaceButtons").dropFirst().first?
+        .components(separatedBy: "private func surfaceButton(").first ?? ""
+
+    try assertTrue(!buttons.isEmpty, "the surface button row exists")
+    try assertTrue(buttons.contains("NSApp.terminate(nil)"),
+                   "the surface button row quits the app")
+    try assertTrue(buttons.contains("\"power\""),
+                   "with a power icon")
+    try assertTrue(buttons.contains("divider"),
+                   "set apart from Profile by a divider so it is not struck by accident")
+
+    // It must live in the shared row, not inside one surface's own body.
+    try assertTrue(!bar.contains("profileTab") && !bar.contains("quitRow"),
+                   "and it is the bar's, not Settings'")
+}
+
 /// The Settings panel must end inside itself, and only say things once.
 ///
 /// Two defects reported from a screenshot: a sample sentence under the
@@ -2538,6 +2567,7 @@ struct TestsMain {
         TestRunner.run("App is inspectable and quittable", testAppCanBeInspectedAndQuitFromInsideIt)
         TestRunner.run("Settings has a working Quit", testSettingsHasAQuitThatWorks)
         TestRunner.run("Settings is not clipped", testSettingsPanelIsNotClippedAndKeepsNoSampleBlock)
+        TestRunner.run("The bar offers Quit", testTheBarOffersQuit)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)

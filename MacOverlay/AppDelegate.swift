@@ -107,6 +107,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.toggleInspector()
             }
         }
+
+        // `--args -snapshot [dir]` writes a picture of the app's own windows at
+        // launch, and `-surface <name>` (e.g. `-surface settings`) opens that
+        // surface first so a specific screen can be photographed. Together they
+        // are how the interface gets looked at from outside the process, which
+        // is otherwise impossible: the overlay is excluded from capture and the
+        // app has no windows macOS knows how to show.
+        if let snapIdx = CommandLine.arguments.firstIndex(of: "-snapshot") {
+            let next = snapIdx + 1
+            let dir = CommandLine.arguments.indices.contains(next)
+                && !CommandLine.arguments[next].hasPrefix("-")
+                ? URL(fileURLWithPath: CommandLine.arguments[next])
+                : nil
+
+            // `-surface none` expands the shell with no surface open — the
+            // bar-only row, which is where the surface buttons live.
+            var forceExpanded = false
+            var surface: OverlayViewModel.PrimarySurface?
+            if let surfIdx = CommandLine.arguments.firstIndex(of: "-surface"),
+               CommandLine.arguments.indices.contains(surfIdx + 1) {
+                let raw = CommandLine.arguments[surfIdx + 1]
+                if raw == "none" {
+                    forceExpanded = true
+                } else {
+                    surface = OverlayViewModel.PrimarySurface(rawValue: raw)
+                }
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self else { return }
+                // Open the surface AND resize the panel. Setting the stage
+                // alone is not enough at launch: the panel is created at the
+                // pill size (360×80) and expands through the stage-change
+                // callback, so assigning the stage here without animating
+                // left the settings surface drawn into an 80pt-tall window.
+                if surface != nil || forceExpanded {
+                    self.vm.shellStage = .expanded
+                    self.vm.primarySurface = surface
+                    self.animateShellFrame(stage: .expanded)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                    // Printed so a shell driving the app can find the files
+                    // without guessing the timestamp.
+                    for url in self.saveSnapshots(to: dir) {
+                        print("SNAPSHOT \(url.path)")
+                    }
+                }
+            }
+        }
         // No menu-bar status item: the icon next to the clock/battery is
         // visible to other people during screen shares (the menu bar IS
         // captured, unlike our capture-excluded panel) and defeats the
@@ -1136,6 +1185,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let root = InspectorRootView(
             onQuit: { NSApp.terminate(nil) },
+            onSnapshot: { [weak self] in
+                MainActor.assumeIsolated { self?.saveSnapshots(to: nil) ?? [] }
+            },
             onClose: { [weak w] in w?.orderOut(nil) })
         let host = NSHostingController(rootView: root)
         w.contentViewController = host
@@ -1146,6 +1198,75 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         w.setContentSize(size)
         return w
     }
+
+    // MARK: - Pictures of the app
+
+    /// Renders the app's own windows to PNGs and returns the paths written.
+    ///
+    /// `cacheDisplay(in:to:)` asks the views to draw themselves into a bitmap
+    /// rather than reading the screen, so this needs **no Screen Recording
+    /// permission**. That is the whole point. The overlay floats above every
+    /// window and hides itself from screen sharing, so it is not merely hard
+    /// to photograph — the capture APIs return a hole where it is. Anyone
+    /// reporting a layout bug then has nothing to show. Now the app can show
+    /// itself.
+    @discardableResult
+    @MainActor
+    func saveSnapshots(to directory: URL? = nil) -> [URL] {
+        let dir = directory ?? Self.snapshotDirectory
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        var views: [(String, NSView)] = []
+        if let v = overlayPanel?.contentView, v.bounds.width > 1, v.bounds.height > 1 {
+            views.append(("overlay", v))
+        }
+        if let w = inspector, w.isVisible,
+           let v = w.contentView, v.bounds.width > 1, v.bounds.height > 1 {
+            views.append(("inspector", v))
+        }
+
+        let stamp = Self.snapshotStamp()
+        var written: [URL] = []
+        for (name, view) in views {
+            // Let any pending layout land before drawing, or the picture
+            // shows the previous frame.
+            view.layoutSubtreeIfNeeded()
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:]) else { continue }
+            let url = dir.appendingPathComponent("thecloser-\(name)-\(stamp).png")
+            guard (try? png.write(to: url)) != nil else { continue }
+            written.append(url)
+        }
+        lastSnapshotURL = written.first
+        return written
+    }
+
+    /// Where snapshots go when no directory is given. Desktop, because the
+    /// next step is always dragging the file into a message.
+    private static var snapshotDirectory: URL {
+        FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+    }
+
+    private static func snapshotStamp() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd-HHmmss"
+        return f.string(from: Date())
+    }
+
+    /// Writes the pictures and selects them in Finder, so they can be dragged
+    /// straight into a message. Beeps if there was nothing to draw.
+    @objc func saveSnapshotsAndReveal() {
+        MainActor.assumeIsolated {
+            let urls = saveSnapshots(to: nil)
+            guard !urls.isEmpty else { NSSound.beep(); return }
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
+        }
+    }
+
+    /// The most recent snapshot path, for the troubleshooting window to show.
+    @MainActor private(set) var lastSnapshotURL: URL?
 
     func showOverlay() {
         overlayPanel.orderFrontRegardless()

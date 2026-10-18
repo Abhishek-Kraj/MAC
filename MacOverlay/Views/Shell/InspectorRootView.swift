@@ -12,7 +12,10 @@ import AppKit
 struct InspectorRootView: View {
 
     var onQuit: () -> Void
+    var onSnapshot: () -> [URL]
     var onClose: () -> Void
+
+    @State private var lastSaved: URL?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,9 +66,26 @@ struct InspectorRootView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Text("TheCloser")
-                .font(.system(size: 11)).foregroundColor(.secondary)
+            Button {
+                lastSaved = onSnapshot().first
+            } label: {
+                Label("Save a picture of the app", systemImage: "camera")
+            }
+            .buttonStyle(.borderedProminent)
+
+            if let lastSaved {
+                Text(lastSaved.lastPathComponent)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                    .textSelection(.enabled)
+            } else {
+                Text("Goes to your Desktop. No permission needed.")
+                    .font(.system(size: 10)).foregroundColor(.secondary)
+            }
+
             Spacer()
+
             Button("Close window", action: onClose)
                 .buttonStyle(.bordered)
         }

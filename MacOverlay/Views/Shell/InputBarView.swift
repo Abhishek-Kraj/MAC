@@ -399,6 +399,25 @@ struct InputBarView: View {
         }
         surfaceButton(.settings, icon: "person.crop.circle", label: "Profile",
                       attention: !vm.missingRequiredKeys.isEmpty)
+
+        // Quit, in the bar itself rather than only inside Settings or the
+        // overlay's "…" menu. The overlay floats above every window and hides
+        // itself from screen sharing, so getting out of it meant opening a
+        // surface first, or hunting for the menu bar icon. Set apart by a
+        // divider so it is not struck while reaching for Profile.
+        divider
+
+        Button {
+            NSApp.terminate(nil)
+        } label: {
+            SurfaceIcon(systemName: "power",
+                        tint: Design.Ink.secondary,
+                        active: false,
+                        attention: false)
+        }
+        .buttonStyle(.plain)
+        .help("Quit TheCloser")
+        .accessibilityLabel(Text("Quit TheCloser"))
     }
 
     private func surfaceButton(_ surface: OverlayViewModel.PrimarySurface,

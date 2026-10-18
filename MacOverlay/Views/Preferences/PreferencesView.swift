@@ -73,6 +73,11 @@ struct PreferencesView: View {
 
                 Spacer()
 
+                Rectangle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(height: 0.5)
+                    .padding(.horizontal, isSidebarCollapsed ? 8 : 12)
+
                 quitRow
                     .padding(.horizontal, 6)
                     .padding(.bottom, 10)
