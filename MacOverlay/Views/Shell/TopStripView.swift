@@ -425,6 +425,12 @@ struct TopStripView: View {
             }
 
             Button {
+                (NSApp.delegate as? AppDelegate)?.showPreferences()
+            } label: {
+                Label("Settings…", systemImage: "gearshape")
+            }
+
+            Button {
                 (NSApp.delegate as? AppDelegate)?.saveSnapshotsAndReveal()
             } label: {
                 Label("Save a picture of this window", systemImage: "camera")

@@ -38,6 +38,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         // Always reachable, including when the overlay is hidden — which is
         // exactly when you need a way out of it.
+        let settings = NSMenuItem(
+            title: "Settings…",
+            action: #selector(openPreferences), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+
         let troubleshoot = NSMenuItem(
             title: "Troubleshooting window…",
             action: #selector(openInspector), keyEquivalent: "")
@@ -65,6 +71,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func openInspector() {
         (NSApp.delegate as? AppDelegate)?.toggleInspector()
+    }
+
+    @objc private func openPreferences() {
+        (NSApp.delegate as? AppDelegate)?.showPreferences()
     }
 
     @objc private func toggleCallPrompt() { setCallPrompt(!isCallPromptOn()) }

@@ -1723,6 +1723,69 @@ func testGapClassificationUsesRiskNotProse() throws {
     try assertEq(noOverlap.count, 0, "an unrelated area matches nothing")
 }
 
+/// Settings must be its own window, not a surface of the overlay.
+///
+/// Everything Settings explains — keys, prep bank, gap analysis, résumé, a
+/// 471-model catalogue — does not fit in a 440pt panel without wrapping every
+/// subtitle onto three lines and pushing the rest below a fold. Opening it
+/// inside the overlay also discarded the setup you were in the middle of.
+func testSettingsIsItsOwnWindow() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    func read(_ p: String) throws -> String {
+        try String(contentsOf: root.appending(path: p), encoding: .utf8)
+    }
+
+    let appDelegate = try read("MacOverlay/AppDelegate.swift")
+    let bar = try read("MacOverlay/Views/Shell/InputBarView.swift")
+    let interview = try read("MacOverlay/Views/Surfaces/InterviewSurfaceView.swift")
+    let menu = try read("MacOverlay/MenuBarController.swift")
+
+    try assertTrue(appDelegate.contains("func showPreferences"),
+                   "AppDelegate can open the Settings window")
+    try assertTrue(appDelegate.contains("contentMinSize = NSSize(width: 720, height: 520)"),
+                   "it is a real, resizable window with a usable minimum")
+    // Sized after the controller is installed, or NSHostingController's
+    // fitting size wins and it opens at the minimum.
+    try assertTrue(appDelegate.contains("w.setContentSize(NSSize(width: 880, height: 700))"),
+                   "and opens at a size with room to read")
+
+    // Reachable without going through the overlay, which can be hidden.
+    try assertTrue(menu.contains("Settings\\u{2026}") || menu.contains("Settings…"),
+                   "the menu bar can open it")
+    try assertTrue(bar.contains("showPreferences"),
+                   "so can the bar")
+    try assertTrue(interview.contains("showPreferences"),
+                   "and the missing-keys warning on the setup form")
+
+    // Nothing may open Settings as a surface again.
+    try assertTrue(!bar.contains("surfaceButton(.settings"),
+                   "the bar no longer routes Profile into the panel")
+    try assertTrue(!interview.contains("primarySurface = .settings"),
+                   "and neither does the setup form")
+}
+
+/// Every Settings tab shares one frame.
+///
+/// Prompts used to be special-cased to zero outer padding because its list is
+/// built as a full-bleed surface (it is also the overlay's Prompts screen).
+/// In this window that made it the one tab running edge to edge while the
+/// others sat in an inset card.
+func testEverySettingsTabSharesOneFrame() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let prefs = try String(
+        contentsOf: root.appending(path: "MacOverlay/Views/Preferences/PreferencesView.swift"),
+        encoding: .utf8)
+
+    try assertTrue(!prefs.contains("tab == .prompts ? 0"),
+                   "no tab is special-cased out of the shared padding")
+    try assertTrue(prefs.contains(".padding(14)"),
+                   "they all get the same outer padding")
+    try assertTrue(prefs.contains("private var promptsTab"),
+                   "and Prompts supplies its own card to match the others")
+}
+
 /// The bar itself must offer a way out.
 ///
 /// Quit was reachable from Settings, the overlay's "…" menu, the menu bar and
@@ -1773,7 +1836,7 @@ func testSettingsPanelIsNotClippedAndKeepsNoSampleBlock() throws {
     try assertTrue(!markdown.contains("Let the key point\\n" ) && !markdown.contains("Lead with the"),
                    "and its constant no longer exists")
 
-    try assertTrue(prefs.contains(".padding(.bottom, tab == .prompts ? 0 : 20)"),
+    try assertTrue(prefs.contains(".padding(.bottom, 20)"),
                    "the scroll content has bottom padding so the last row is not flush")
 
     // The transcription row: the label must be given the leftover width
@@ -2568,6 +2631,8 @@ struct TestsMain {
         TestRunner.run("Settings has a working Quit", testSettingsHasAQuitThatWorks)
         TestRunner.run("Settings is not clipped", testSettingsPanelIsNotClippedAndKeepsNoSampleBlock)
         TestRunner.run("The bar offers Quit", testTheBarOffersQuit)
+        TestRunner.run("Settings is its own window", testSettingsIsItsOwnWindow)
+        TestRunner.run("Settings tabs share one frame", testEverySettingsTabSharesOneFrame)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)

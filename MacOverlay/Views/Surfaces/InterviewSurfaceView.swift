@@ -1021,7 +1021,7 @@ private struct MissingKeyWarning: View {
 
     var body: some View {
         Button {
-            vm.primarySurface = .settings
+            (NSApp.delegate as? AppDelegate)?.showPreferences()
         } label: {
             HStack(spacing: 7) {
                 Image(systemName: "exclamationmark.triangle.fill")

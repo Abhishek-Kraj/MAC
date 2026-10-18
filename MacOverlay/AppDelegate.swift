@@ -115,6 +115,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // is otherwise impossible: the overlay is excluded from capture and the
         // app has no windows macOS knows how to show.
         if let snapIdx = CommandLine.arguments.firstIndex(of: "-snapshot") {
+            // The bar's hover auto-collapse would undo every expansion, and
+            // there is no pointer when this is driven from a shell.
+            vm.debugSuppressAutoCollapse = true
             let next = snapIdx + 1
             let dir = CommandLine.arguments.indices.contains(next)
                 && !CommandLine.arguments[next].hasPrefix("-")
@@ -123,38 +126,69 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // `-surface none` expands the shell with no surface open — the
             // bar-only row, which is where the surface buttons live.
+            // `-surface settings` opens the Settings window instead, since
+            // settings are no longer a surface of this panel.
             var forceExpanded = false
+            var openSettingsWindow = false
             var surface: OverlayViewModel.PrimarySurface?
             if let surfIdx = CommandLine.arguments.firstIndex(of: "-surface"),
                CommandLine.arguments.indices.contains(surfIdx + 1) {
                 let raw = CommandLine.arguments[surfIdx + 1]
                 if raw == "none" {
                     forceExpanded = true
+                } else if raw == "settings" {
+                    openSettingsWindow = true
                 } else {
                     surface = OverlayViewModel.PrimarySurface(rawValue: raw)
                 }
             }
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                guard let self else { return }
-                // Open the surface AND resize the panel. Setting the stage
-                // alone is not enough at launch: the panel is created at the
-                // pill size (360×80) and expands through the stage-change
-                // callback, so assigning the stage here without animating
-                // left the settings surface drawn into an 80pt-tall window.
-                if surface != nil || forceExpanded {
-                    self.vm.shellStage = .expanded
-                    self.vm.primarySurface = surface
-                    self.animateShellFrame(stage: .expanded)
+            // Open the surface AND resize the panel. Setting the stage alone
+            // is not enough at launch: the panel is created at the pill size
+            // (360x80) and expands through the stage-change callback, so
+            // assigning the stage without animating left the surface drawn
+            // into an 80pt-tall window.
+            //
+            // Then re-asserted on a tick. InputBarView collapses itself back
+            // to the pill 350ms after the pointer is not over it, and driven
+            // from a shell there is no pointer at all — so a single
+            // programmatic expand is undone before anything can be drawn.
+            // The capture happens inside that 350ms window, right after a
+            // final assertion, so the stage it draws is the one asked for.
+            func openSurface() {
+                if openSettingsWindow { self.showPreferences() }
+                guard surface != nil || forceExpanded else { return }
+                self.vm.primarySurface = surface
+                self.vm.shellStage = .expanded
+                self.animateShellFrame(stage: .expanded)
+            }
+
+            func capture() {
+                // Printed so a shell driving the app can find the files
+                // without guessing the timestamp.
+                for url in self.saveSnapshots(to: dir) {
+                    print("SNAPSHOT \(url.path)")
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                    // Printed so a shell driving the app can find the files
-                    // without guessing the timestamp.
-                    for url in self.saveSnapshots(to: dir) {
-                        print("SNAPSHOT \(url.path)")
-                    }
+                if CommandLine.arguments.contains("-dumpviews") {
+                    let dump = self.viewGeometryDump().joined(separator: "\n") + "\n"
+                    let target = (dir ?? Self.snapshotDirectory)
+                        .appendingPathComponent("geometry.txt")
+                    try? dump.write(to: target, atomically: true, encoding: .utf8)
                 }
             }
+
+            var ticks = 8
+            func tick() {
+                openSurface()
+                ticks -= 1
+                guard ticks > 0 else {
+                    // Final assertion, then draw before the dwell fires.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { capture() }
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { tick() }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { tick() }
         }
         // No menu-bar status item: the icon next to the clock/battery is
         // visible to other people during screen shares (the menu bar IS
@@ -1050,6 +1084,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let minForStage = minimumPanelSize(for: stage)
+        if CommandLine.arguments.contains("-dumpviews") {
+            NSLog("TRACE animate stage=\(stage.rawValue) cur=\(cur) target=\(target) min=\(minForStage) hugging=\(responseHugging) surface=\(vm.primarySurface?.rawValue ?? "none")")
+        }
         panel.minSize = minForStage
         // A width the user dragged to under an older, smaller minimum (or
         // kept from the compact bar) must not survive into this stage.
@@ -1068,6 +1105,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if abs(cur.width - target.width) < 1,
            abs(cur.height - target.height) < 1,
            abs(cur.origin.y - newY) < 1 {
+            if CommandLine.arguments.contains("-dumpviews") {
+                NSLog("TRACE animate NOOP cur=\(cur) target=\(target)")
+            }
             return
         }
 
@@ -1099,6 +1139,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let type = NSWindow.desiredSharingType
         overlayPanel?.sharingType = type
         for window in NSApp.windows {
+            // The troubleshooting window exists to be photographed, so it is
+            // deliberately never excluded — including here, or toggling the
+            // privacy setting would quietly put it back out of reach.
+            guard !(window is InspectorWindow) else { continue }
             window.sharingType = type
         }
     }
@@ -1199,6 +1243,69 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return w
     }
 
+    // MARK: - Settings window
+
+    private var preferencesWindow: NSWindow?
+
+    /// Settings live in their own window, not inside the overlay panel.
+    ///
+    /// Everything the app has to explain — keys, the prep bank, gap analysis,
+    /// the résumé, a 465-model catalogue — does not fit in a 440pt panel
+    /// without wrapping every subtitle onto three lines and pushing half of it
+    /// below a fold. Opening it inside the overlay also threw away the setup
+    /// you were in the middle of. A normal resizable window has room for a
+    /// labelled sidebar and a column wide enough to read.
+    @objc func showPreferences() {
+        MainActor.assumeIsolated {
+            if let w = preferencesWindow {
+                w.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                return
+            }
+
+            let w = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 880, height: 700),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered, defer: false)
+            w.title = "Settings"
+            w.isReleasedWhenClosed = false
+            w.setFrameAutosaveName("TheCloserPreferences")
+            // The app is designed dark — every surface is built from white
+            // overlays on a dark ground — and the overlay never follows the
+            // system appearance. A standalone window would, so on a Mac in
+            // light mode this rendered white-on-white. Pin it to match.
+            w.appearance = NSAppearance(named: .darkAqua)
+            w.backgroundColor = NSColor(Design.Surface.shellFill)
+            w.contentViewController = NSHostingController(
+                rootView: PreferencesView()
+                    .environment(vm)
+                    // Self-contained ground. The hosting view is transparent,
+                    // so without this the window's own background shows
+                    // through and, in light mode, that is white — with the
+                    // darkAqua text drawn white on top of it.
+                    .background(Design.Surface.shellFill))
+            // Set explicitly after installing the controller: NSHostingController's
+            // fitting size wins over the initial content rect, so the window
+            // otherwise opens at `contentMinSize`.
+            w.contentMinSize = NSSize(width: 720, height: 520)
+            w.setContentSize(NSSize(width: 880, height: 700))
+            // Holds API keys and the résumé, so it follows the same
+            // hide-from-screen-sharing rule as the overlay.
+            w.sharingType = NSWindow.desiredSharingType
+            if w.frame.origin == .zero { w.center() }
+
+            preferencesWindow = w
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    /// True while the Settings window is on screen. The bar's Profile button
+    /// uses this to show that the window it opens is already open.
+    @MainActor var isPreferencesVisible: Bool {
+        preferencesWindow?.isVisible ?? false
+    }
+
     // MARK: - Pictures of the app
 
     /// Renders the app's own windows to PNGs and returns the paths written.
@@ -1223,6 +1330,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let w = inspector, w.isVisible,
            let v = w.contentView, v.bounds.width > 1, v.bounds.height > 1 {
             views.append(("inspector", v))
+        }
+        if let w = preferencesWindow, w.isVisible,
+           let v = w.contentView, v.bounds.width > 1, v.bounds.height > 1 {
+            views.append(("settings", v))
         }
 
         let stamp = Self.snapshotStamp()
@@ -1267,6 +1378,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The most recent snapshot path, for the troubleshooting window to show.
     @MainActor private(set) var lastSnapshotURL: URL?
+
+    /// Prints the panel's geometry and its view tree, to stdout.
+    ///
+    /// A debug aid for alignment problems: a picture shows that something is
+    /// off, these numbers say by how much and in which coordinate space —
+    /// which is the difference between guessing at padding and fixing it.
+    @MainActor
+    func viewGeometryDump() -> [String] {
+        guard let panel = overlayPanel, let content = panel.contentView else {
+            return ["GEOM no panel"]
+        }
+        var out: [String] = []
+        out.append("stage=\(vm.shellStage.rawValue) surface=\(vm.primarySurface?.rawValue ?? "none")")
+        out.append("visibleFrame=\(NSScreen.main?.visibleFrame.debugDescription ?? "?")")
+        out.append("panel.frame=\(panel.frame)")
+        out.append("content.frame=\(content.frame) bounds=\(content.bounds)")
+        out.append("panel.minSize=\(panel.minSize) scale=\(panel.backingScaleFactor)")
+        out.append("lastFullSize=\(lastFullSize)")
+
+        func walk(_ v: NSView, _ depth: Int) {
+            guard depth <= 4 else { return }
+            let indent = String(repeating: "  ", count: depth)
+            out.append("\(indent)\(String(describing: type(of: v))) frame=\(v.frame)")
+            for sub in v.subviews { walk(sub, depth + 1) }
+        }
+        walk(content, 1)
+        return out
+    }
 
     func showOverlay() {
         overlayPanel.orderFrontRegardless()

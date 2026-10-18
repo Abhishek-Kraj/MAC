@@ -926,6 +926,13 @@ final class OverlayViewModel {
     }
     @ObservationIgnored var onPillPopupChange: ((Bool) -> Void)?
 
+    /// Set only when the app is being driven headlessly (see AppDelegate's
+    /// `-snapshot`). The bar collapses itself back to the pill 350ms after
+    /// the pointer leaves it, which is right for a person and makes a
+    /// scripted expansion impossible — with no pointer, every programmatic
+    /// expand is undone before it can be photographed. This turns that off.
+    @ObservationIgnored var debugSuppressAutoCollapse = false
+
     // MARK: - Call detection
 
     /// Name of the call app that just started using the microphone

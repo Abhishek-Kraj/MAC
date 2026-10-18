@@ -7,15 +7,29 @@ struct PreferencesView: View {
     @Environment(OverlayViewModel.self) private var vm
     @State private var tab: Tab = .general
     @State private var showNewWorkspaceSheet = false
-    @State private var isSidebarCollapsed = true
+    @State private var isSidebarCollapsed = false
+
+    /// Diagnostic hook: `--args -settings-tab <name>` opens that tab at
+    /// launch, so each one can be photographed in turn. Used to compare the
+    /// tabs against each other for consistency; harmless otherwise.
+    init() {
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "-settings-tab"),
+           args.indices.contains(i + 1),
+           let match = Tab.allCases.first(where: {
+               $0.rawValue.lowercased() == args[i + 1].lowercased()
+           }) {
+            _tab = State(initialValue: match)
+        }
+    }
+
     // Model catalogue filters (AI tab). The OpenRouter catalogue runs to
     // several hundred entries, so this list needs narrowing controls or it
     // is unusable.
     @State private var customModelDraft = ""
     @AppStorage(KeywordStyle.defaultsKey) private var keywordStyle = KeywordStyle.standard
 
-    enum Tab: String, CaseIterable, Identifiable {
-        case general    = "General"
+    enum Tab: String, CaseIterable, Identifiable {        case general    = "General"
         case panel      = "Panel"
         case profile    = "Profile"
         case ai         = "AI"
@@ -56,7 +70,11 @@ struct PreferencesView: View {
         }
     }
 
-    private var sidebarWidth: CGFloat { isSidebarCollapsed ? 52 : 124 }
+    // Wide enough for the tab names to sit beside their icons. This view now
+    // lives in a window rather than a 440pt panel, so the labels are the
+    // default: an icon-only rail was the reason half of Settings could not be
+    // found.
+    private var sidebarWidth: CGFloat { isSidebarCollapsed ? 52 : 172 }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -104,21 +122,25 @@ struct PreferencesView: View {
                         case .profile:    profileTab
                         case .ai:         aiTab
                         case .quickAsk:   quickAskTab
-                        case .prompts:    promptsTab
-                        case .memory:     memoryTab
+                        case .prompts:    promptsTab                        case .memory:     memoryTab
                         case .workspaces: workspacesTab
                         case .peer:       peerTab
                         case .shortcuts:  shortcutsTab
                         }
                     }
-                    // Prompt library has its own internal padding, so don't
-                    // double-pad it. Other tabs need the outer padding.
-                    .padding(tab == .prompts ? 0 : 14)
+                    // Same padding on every tab, including Prompts. It used to
+                    // be special-cased to zero because its list is built as a
+                    // full-bleed surface (it is also the overlay's Prompts
+                    // screen) — but in this window that made it the one tab
+                    // running edge to edge while all the others sat in an
+                    // inset card, which is what "not uniform across the tabs"
+                    // was. `promptsTab` now supplies its own card.
+                    .padding(14)
                     // Extra room under the last control. At 14 the final row
                     // (Onboarding's button) sat flush against the panel's
                     // bottom edge, which reads as clipped rather than ended.
-                    .padding(.bottom, tab == .prompts ? 0 : 20)
-                    .frame(maxWidth: 520, alignment: .topLeading)
+                    .padding(.bottom, 20)
+                    .frame(maxWidth: 640, alignment: .topLeading)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .hiddenScrollGutter()
@@ -134,7 +156,7 @@ struct PreferencesView: View {
     private var sidebarHeader: some View {
         HStack(spacing: 8) {
             if !isSidebarCollapsed {
-                Text("Preferences")
+                Text("Settings")
                     .font(.system(size: 13, weight: .semibold))
                     .tracking(-0.2)
                     .foregroundColor(.primary)
@@ -244,9 +266,20 @@ struct PreferencesView: View {
 
     @ViewBuilder
     private var promptsTab: some View {
+        // The library is built as a full-bleed surface — it is also the
+        // overlay's Prompts screen, with its own header row and divider.
+        // Now that every tab shares the same outer padding, that header
+        // would sit flush against the rail, so this tab supplies the same
+        // card treatment the others get from `section`.
         PromptLibraryView()
+            .clipShape(RoundedRectangle(cornerRadius: Design.Radius.md, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: Design.Radius.md, style: .continuous)
+                    .fill(Color.white.opacity(0.04)))
+            .overlay(
+                RoundedRectangle(cornerRadius: Design.Radius.md, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
     }
-
     /// Panel customisation. Currently scoped to the bottom input bar.
     @ViewBuilder
     private var panelTab: some View {

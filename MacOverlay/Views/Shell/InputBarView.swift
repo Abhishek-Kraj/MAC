@@ -63,6 +63,12 @@ struct InputBarView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             barRow
+                // The bar spans the panel, not its own buttons. Without
+                // this the capsule sized to its content — 225pt inside a
+                // 440pt panel — so expanding left a stub hanging off the
+                // bottom-left corner with empty space beside it, which is
+                // what "the expansion is not aligned" was.
+                .frame(maxWidth: .infinity)
                 // Drag handle behind the row — this is the only chrome on
                 // screen in `.pill`, so without it the collapsed overlay
                 // can't be moved by mouse at all. In front of the capsule
@@ -148,6 +154,7 @@ struct InputBarView: View {
     /// user re-enters or engages before the dwell elapses, the task is
     /// cancelled and the bar stays open.
     private func scheduleAutoCollapse() {
+        guard !vm.debugSuppressAutoCollapse else { return }
         autoCollapseTask?.cancel()
         autoCollapseTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(350))
@@ -397,8 +404,7 @@ struct InputBarView: View {
         if FeatureFlags.browserEnabled {
             surfaceButton(.browser, icon: "globe", label: "Browser")
         }
-        surfaceButton(.settings, icon: "person.crop.circle", label: "Profile",
-                      attention: !vm.missingRequiredKeys.isEmpty)
+        settingsButton
 
         // Quit, in the bar itself rather than only inside Settings or the
         // overlay's "…" menu. The overlay floats above every window and hides
@@ -418,6 +424,27 @@ struct InputBarView: View {
         .buttonStyle(.plain)
         .help("Quit TheCloser")
         .accessibilityLabel(Text("Quit TheCloser"))
+    }
+
+    /// Opens the Settings window.
+    ///
+    /// Settings are not a surface of this panel — they are their own window
+    /// (see `AppDelegate.showPreferences`). So this does not set
+    /// `primarySurface` and never highlights as "current": it brings a window
+    /// forward, and the window is where that state lives.
+    private var settingsButton: some View {
+        let attention = !vm.missingRequiredKeys.isEmpty
+        return Button {
+            (NSApp.delegate as? AppDelegate)?.showPreferences()
+        } label: {
+            SurfaceIcon(systemName: "gearshape.fill",
+                        tint: attention ? Design.Accent.amber : Design.Ink.secondary,
+                        active: false,
+                        attention: attention)
+        }
+        .buttonStyle(.plain)
+        .help(attention ? "Add your API keys in Settings" : "Settings")
+        .accessibilityLabel(Text("Settings"))
     }
 
     private func surfaceButton(_ surface: OverlayViewModel.PrimarySurface,
