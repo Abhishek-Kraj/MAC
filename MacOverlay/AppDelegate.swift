@@ -154,6 +154,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     forceExpanded = true
                 } else if raw == "settings" {
                     openSettingsWindow = true
+                } else if raw == "regularCall" {
+                    // The Interview surface's other tab. It only switches by
+                    // clicking the mode bar, so without this the Regular call
+                    // setup form cannot be photographed at all. `-fresh` alone
+                    // is not enough: it starts a plain session, which the
+                    // regular-call tab treats as a live call and renders as
+                    // the chat.
+                    vm.interviewSurfaceMode = .regularCall
+                    vm.forceInterviewSetup = true
+                    surface = .interview
                 } else {
                     surface = OverlayViewModel.PrimarySurface(rawValue: raw)
                 }
