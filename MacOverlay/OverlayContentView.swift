@@ -16,8 +16,10 @@ struct OverlayView: View {
 
     /// Chrome (session title row, input bar) reveals on hover and melts
     /// away otherwise — matching the reference UI where only the content
-    /// is visible until the cursor enters the panel.
-    @State private var chromeHovering = false
+    /// is visible until the cursor enters the panel. The state lives on
+    /// the view model (`isPointerInPanel`) so the composer, several
+    /// layers down, can observe the same signal for its hover-preview
+    /// auto-collapse.
 
     /// The input bar is the whole UI in pill stage, and when it's opened
     /// with no surface, so it never hides then: fading it would leave
@@ -27,7 +29,7 @@ struct OverlayView: View {
     private var barVisible: Bool {
         vm.shellStage == .pill
             || vm.primarySurface == nil
-            || chromeHovering
+            || vm.isPointerInPanel
             || !vm.manualInput.isEmpty
     }
 
@@ -94,7 +96,7 @@ struct OverlayView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .onHover { chromeHovering = $0 }
+        .onHover { vm.isPointerInPanel = $0 }
         // Floating popup that hovers above the brand pill when the shell
         // is collapsed. Resume score / generated-resume / quick-ask
         // results render here so the user never loses status just
@@ -291,9 +293,9 @@ struct OverlayView: View {
     /// Fade `view` in only while the cursor is over the panel.
     private func revealOnHover(_ view: some View) -> some View {
         view
-            .opacity(chromeHovering ? 1 : 0)
-            .allowsHitTesting(chromeHovering)
-            .animation(.easeInOut(duration: 0.18), value: chromeHovering)
+            .opacity(vm.isPointerInPanel ? 1 : 0)
+            .allowsHitTesting(vm.isPointerInPanel)
+            .animation(.easeInOut(duration: 0.18), value: vm.isPointerInPanel)
     }
 
     @ViewBuilder

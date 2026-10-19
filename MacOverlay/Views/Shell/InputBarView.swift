@@ -133,11 +133,23 @@ struct InputBarView: View {
         // Re-entering cancels. Applies to every non-pill stage so that
         // a hover-induced expansion never gets stranded open just
         // because some unrelated state transition flipped the stage.
-        .onHover { hovering in
-            if hovering {
+        //
+        // The signal is the WHOLE-PANEL hover, not this view's own
+        // region. Watching just the bar meant moving the cursor up to
+        // read the answer counted as "left", so the shell collapsed
+        // mid-interview — and since collapsing lands the pill under the
+        // cursor, hovering it re-opened the panel, which collapsed again
+        // one dwell later: the close/open flap. The panel is one surface;
+        // the pointer is either on it or it isn't.
+        //
+        // A live interview or call never auto-collapses at all — the
+        // user committed when they started it, and assistance vanishing
+        // mid-question is always wrong.
+        .onChange(of: vm.isPointerInPanel) { _, inside in
+            if inside {
                 autoCollapseTask?.cancel()
                 autoCollapseTask = nil
-            } else if vm.shellStage != .pill && !engaged {
+            } else if vm.shellStage != .pill && !engaged && !vm.isInterviewSession {
                 scheduleAutoCollapse()
             }
         }
@@ -185,21 +197,24 @@ struct InputBarView: View {
     }
 
     /// Schedule a collapse back to `.pill` after a short dwell. If the
-    /// user re-enters or engages before the dwell elapses, the task is
-    /// cancelled and the bar stays open.
+    /// user re-enters, engages, or a live session is running, the task
+    /// is cancelled (or never starts) and the bar stays open.
     private func scheduleAutoCollapse() {
-        guard !vm.debugSuppressAutoCollapse else { return }
+        guard !vm.debugSuppressAutoCollapse, !vm.isInterviewSession else { return }
         autoCollapseTask?.cancel()
         autoCollapseTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(350))
-            // The flag is re-checked here as well as on the way in: the
-            // snapshot harness sets it, but a hover-exit can already have been
-            // scheduled by the time it does, and that one collapse is enough to
-            // fight every programmatic expansion afterwards.
+            // The flags are re-checked here as well as on the way in: the
+            // snapshot harness sets the debug one, but a hover-exit can
+            // already have been scheduled by the time it does, and that one
+            // collapse is enough to fight every programmatic expansion
+            // afterwards. The live-session check is re-read for the same
+            // reason — Start can be clicked inside the dwell.
             guard !Task.isCancelled,
                   !vm.debugSuppressAutoCollapse,
                   vm.shellStage != .pill,
-                  !engaged else { return }
+                  !engaged,
+                  !vm.isInterviewSession else { return }
             withAnimation(Design.Motion.spring) {
                 vm.shellStage = .pill
             }

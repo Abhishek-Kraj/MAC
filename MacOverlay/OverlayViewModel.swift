@@ -1010,6 +1010,15 @@ final class OverlayViewModel {
     /// expand is undone before it can be photographed. This turns that off.
     @ObservationIgnored var debugSuppressAutoCollapse = false
 
+    /// True while the pointer is anywhere over the panel — the stage
+    /// stack's hover, not any one row's. The composer's hover-preview
+    /// auto-collapse listens to this so that "the mouse left" means the
+    /// whole panel: moving up from the bar to read the answer is still
+    /// inside, and a window resize can't fire a phantom exit the way a
+    /// subregion's tracking area did — which is what collapsed the shell
+    /// mid-interview and flapped pill↔panel as the pointer re-entered.
+    var isPointerInPanel = false
+
     // MARK: - Call detection
 
     /// Name of the call app that just started using the microphone
