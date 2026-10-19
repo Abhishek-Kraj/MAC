@@ -56,7 +56,7 @@ final class AIController {
     // MARK: - Prompt resolution
 
     /// Active-prompt preset > mode default, plus the keyword style's
-    /// formatting rule. Substitutes {NAME}/{ROLE}/{COMPANY}.
+    /// formatting rule. Fills {NAME}; lines with other placeholders are dropped.
     func resolveActivePrompt() -> String {
         guard let vm else { return "" }
         var raw = vm.promptStore.activePreset(for: vm.sessionMode)?.content
@@ -64,8 +64,7 @@ final class AIController {
         if let rule = KeywordStyle.current.promptRule(for: raw) {
             raw += "\n\n" + rule
         }
-        return raw
-            .replacingOccurrences(of: "{NAME}",    with: vm.userProfile.name.isEmpty        ? "the user"       : vm.userProfile.name)
+        return PromptPreset.resolvingPlaceholders(raw, name: vm.userProfile.name)
     }
 
     // MARK: - Streaming

@@ -420,6 +420,23 @@ func testIncompleteSentinelDetection() throws {
     try assertFalse(TranscriptFilter.isIncompleteSentinel("Sure — here's the answer ⏳"))
 }
 
+func testPromptPlaceholdersResolveOrDrop() throws {
+    let prompt = """
+    Be brief.
+    Name: {NAME}
+    Now: {CURRENT_ROLE} at {CURRENT_COMPANY}
+    User context: {NAME} is a {ROLE} at {COMPANY}.
+    Reply as JSON like {"answer": "..."} when asked.
+    """
+    try assertEq(PromptPreset.resolvingPlaceholders(prompt, name: "Asha"), """
+    Be brief.
+    Name: Asha
+    Reply as JSON like {"answer": "..."} when asked.
+    """)
+    try assertEq(PromptPreset.resolvingPlaceholders("Help {NAME} now.", name: ""),
+                 "Help the user now.")
+}
+
 func testTranscriptCleanupKeepsDottedAndNumericTokens() throws {
     // Spacing fixes a mark the recogniser detached; it must not split a
     // token that has a mark inside it.
@@ -3374,6 +3391,7 @@ struct TestsMain {
         TestRunner.run("Incomplete-question sentinel", testIncompleteSentinelDetection)
         TestRunner.run("Transcript cleanup", testTranscriptCleanupRemovesSpeechNoise)
         TestRunner.run("Transcript cleanup keeps dotted and numeric tokens", testTranscriptCleanupKeepsDottedAndNumericTokens)
+        TestRunner.run("Prompt placeholders resolve or drop", testPromptPlaceholdersResolveOrDrop)
         TestRunner.run("TranscriptFilter response gate triage", testTranscriptFilterWarrantsResponse)
         TestRunner.run("TranscriptFilter normalized change detection", testTranscriptFilterNormalized)
         TestRunner.run("ChatTurn replayText composition", testChatTurnReplayText)

@@ -291,7 +291,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | ID | Issue | Evidence | V |
 |---|---|---|---|
 | B7 ✅ | Start is blocked for Apple on-device (and Type mode) without an ElevenLabs/xAI key | VM:2927 | R |
-| B8 | Placeholders sent raw: `{ROLE}` `{COMPANY}` (+ preset `{TARGET_ROLE}` …); only `{NAME}` replaced | AIController.swift:68, SessionMode.swift:49/60/71 | R |
+| B8 ✅ | Placeholders sent raw: `{ROLE}` `{COMPANY}` (+ preset `{TARGET_ROLE}` …); only `{NAME}` replaced | AIController.swift:68, SessionMode.swift:49/60/71 | R |
 | B9 | Answer depth ignored once a seeded or custom preset exists (always) | SessionMode.swift:40, PromptStore seeded():206-212 | C |
 | B10 ✅ | Default audio source is Mic, so the user's own speech triggers answers (HANDOFF §5 says split capture) | VM:54-55 | R |
 | B11 | Post-call stale THEM caption; it also hides every post-End status ("Writing…", "Summary failed") | VM endCapture, ChatSurfaceView:128-149 | C (seen in snapshot) |
@@ -346,6 +346,7 @@ key (`missingTranscriptionKey`); Automatic still asks for one — open question.
 Harness ran all 32 preference/key combinations.
 B15: only detached marks are re-spaced; a dot glued inside a token is never split or capitalised after. Pinned by testTranscriptCleanupKeepsDottedAndNumericTokens.
 B10: fresh installs default to You + Them (`AudioSource.saved`); a saved choice wins. Pinned by testAudioSourceDefaultsToSplitCapture.
+B8: `PromptPreset.resolvingPlaceholders` fills {NAME} and drops lines with any other unfilled placeholder; built-in "User context: {ROLE} at {COMPANY}" lines removed. Checked on real presets (Interview drops 3 template lines, Meeting/Call 1). Pinned by testPromptPlaceholdersResolveOrDrop.
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

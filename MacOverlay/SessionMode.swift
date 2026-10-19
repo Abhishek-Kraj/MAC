@@ -45,8 +45,6 @@ enum SessionMode: String, CaseIterable, Codable {
             user's real projects, employers, and stack, never invented ones.
             - If the transcript is a statement rather than a question, reply with one line the \
             user could naturally say next.
-
-            User context: {NAME} is a {ROLE} at {COMPANY}. Pitch answers at their level.
             """
         case .meeting:
             return """
@@ -56,8 +54,6 @@ enum SessionMode: String, CaseIterable, Codable {
             3. When asked what to say next, suggest clarifying or probing questions relevant to the discussion.
             4. Flag any decisions made or commitments given.
             5. Keep responses short — the user is in a live meeting. Max 5 bullets.
-
-            User context: {NAME} is a {ROLE} at {COMPANY}.
             """
         case .call:
             return """
@@ -67,8 +63,6 @@ enum SessionMode: String, CaseIterable, Codable {
             3. When asked to rephrase, make the user's intended response clearer and more natural.
             4. Flag any commitments or follow-up items mentioned.
             5. Keep all responses brief — max 3 bullet points or 2 sentences.
-
-            User context: {NAME} is a {ROLE} at {COMPANY}.
             """
         }
     }

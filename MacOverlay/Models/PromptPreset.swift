@@ -22,6 +22,17 @@ struct PromptPreset: Identifiable, Codable, Hashable {
         }
     }
 
+    /// Fills `{NAME}` and drops every line still holding a placeholder the
+    /// app has no value for (`{ROLE}`, `{TARGET_COMPANY}`, …): sent raw, the
+    /// model reads the user's role as literally "{ROLE}".
+    static func resolvingPlaceholders(_ prompt: String, name: String) -> String {
+        prompt
+            .replacingOccurrences(of: "{NAME}", with: name.isEmpty ? "the user" : name)
+            .components(separatedBy: "\n")
+            .filter { $0.range(of: "\\{[A-Z][A-Z_]*\\}", options: .regularExpression) == nil }
+            .joined(separator: "\n")
+    }
+
     let id: UUID
     var name: String
     var content: String
