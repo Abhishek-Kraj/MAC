@@ -201,6 +201,21 @@ final class SessionStore {
         activeSession = s
     }
 
+    /// Remove a whole exchange — the user turn and the assistant turn after
+    /// it — by the assistant turn's id. Used when the model returned the
+    /// incomplete-question sentinel: the pair was never a real Q&A, and
+    /// leaving it in would show it in the deck and replay it as context.
+    func removeExchange(assistantTurnID: UUID) {
+        var s = activeSession
+        guard let idx = s.turns.firstIndex(where: { $0.id == assistantTurnID }) else { return }
+        s.turns.remove(at: idx)
+        if idx > 0, s.turns[idx - 1].role == .user {
+            s.turns.remove(at: idx - 1)
+        }
+        s.updatedAt = Date()
+        activeSession = s
+    }
+
     /// Context to replay on the next AI request, respecting both memory toggles.
     /// Order: recent cross-session pairs first, then current-session pairs last,
     /// so the LLM weights the current thread highest.

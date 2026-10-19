@@ -200,4 +200,16 @@ enum TranscriptFilter {
         let realCharCount = realWords.reduce(0) { $0 + $1.count }
         return realCharCount >= 2
     }
+
+    /// The interview prompt answers a sentence that was cut off with a
+    /// single hourglass — the model's way of saying "that was not a
+    /// question yet". Exactly that emoji (optionally with its variation
+    /// selector, U+FE0F) and nothing else counts; a real answer that
+    /// merely contains an hourglass must survive untouched.
+    static func isIncompleteSentinel(_ raw: String) -> Bool {
+        let meaningful = raw.unicodeScalars.filter {
+            !CharacterSet.whitespacesAndNewlines.contains($0) && $0.value != 0xFE0F
+        }
+        return meaningful.count == 1 && meaningful.first?.value == 0x23F3
+    }
 }

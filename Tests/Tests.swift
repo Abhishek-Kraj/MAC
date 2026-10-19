@@ -391,6 +391,20 @@ func testTranscriptFilterSeemsComplete() throws {
     try assertTrue(TranscriptFilter.seemsComplete("Tell me about your last project"))
 }
 
+func testIncompleteSentinelDetection() throws {
+    // The interview prompt answers a cut-off sentence with the ⏳ emoji.
+    try assertTrue(TranscriptFilter.isIncompleteSentinel("⏳"))
+    try assertTrue(TranscriptFilter.isIncompleteSentinel(" ⏳\n"))
+    try assertTrue(TranscriptFilter.isIncompleteSentinel("⏳\u{FE0F}"))
+    // Anything else — including a real answer that happens to contain an
+    // hourglass — must not be mistaken for the sentinel.
+    try assertFalse(TranscriptFilter.isIncompleteSentinel(""))
+    try assertFalse(TranscriptFilter.isIncompleteSentinel("   "))
+    try assertFalse(TranscriptFilter.isIncompleteSentinel("hourglass"))
+    try assertFalse(TranscriptFilter.isIncompleteSentinel("⏳ Waiting for the rest"))
+    try assertFalse(TranscriptFilter.isIncompleteSentinel("Sure — here's the answer ⏳"))
+}
+
 @MainActor
 func testTranscriptFilterWarrantsResponse() throws {
     func isYes(_ s: String) -> Bool {
@@ -3262,6 +3276,7 @@ struct TestsMain {
         TestRunner.run("NoteEntry codable round-trip", testNoteEntryRoundTrip)
         TestRunner.run("TranscriptFilter meaningful speech", testTranscriptFilterMeaningful)
         TestRunner.run("TranscriptFilter question completeness", testTranscriptFilterSeemsComplete)
+        TestRunner.run("Incomplete-question sentinel", testIncompleteSentinelDetection)
         TestRunner.run("TranscriptFilter response gate triage", testTranscriptFilterWarrantsResponse)
         TestRunner.run("TranscriptFilter normalized change detection", testTranscriptFilterNormalized)
         TestRunner.run("ChatTurn replayText composition", testChatTurnReplayText)

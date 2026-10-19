@@ -390,6 +390,24 @@ final class OverlayViewModel {
     /// transcript updates. When OFF, the user hits Send manually. Only
     /// shown / honored in `.interview` setup; Regular call has no such
     /// toggle today.
+    /// A question fragment the model refused with the ⏳ sentinel — the
+    /// speaker paused mid-sentence. Held in front of the next live send so
+    /// the continuation is answered as one complete question instead of
+    /// each half getting its own reply.
+    private(set) var heldQuestionFragment: String?
+
+    /// The ⏳ sentinel came back: that transcript was a fragment, not a
+    /// question. Pull the exchange out of the session — the deck must not
+    /// show it and later requests must not replay it — and hold the text
+    /// for the continuation.
+    func dropIncompleteExchange(assistantTurnID: UUID, userText: String) {
+        sessionStore.removeExchange(assistantTurnID: assistantTurnID)
+        let fragment = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fragment.isEmpty else { return }
+        // Three pauses inside one sentence must not lose its start.
+        heldQuestionFragment = heldQuestionFragment.map { $0 + " " + fragment } ?? fragment
+    }
+
     var interviewAutoGenerate: Bool = true {
         didSet { InterviewSetupStore.setAutoGenerate(interviewAutoGenerate) }
     }
@@ -1879,7 +1897,16 @@ final class OverlayViewModel {
         // without this a manual Send followed by the grace-window firing
         // would double-send the same transcript.
         pendingAutoSendTask?.cancel()
-        let baseText   = showManualInput && !manualInput.isEmpty ? manualInput : transcription
+        var baseText   = showManualInput && !manualInput.isEmpty ? manualInput : transcription
+        // A fragment the model flagged as cut off (the ⏳ sentinel) rides
+        // in front of the speaker's continuation, so a mid-sentence pause
+        // doesn't cost the start of the question. Live transcripts only —
+        // a typed draft is entirely the user's own text.
+        if !showManualInput || manualInput.isEmpty,
+           let held = heldQuestionFragment, !held.isEmpty {
+            baseText = baseText.isEmpty ? held : held + " " + baseText
+            heldQuestionFragment = nil
+        }
         let prefix     = pendingQuickAction.map { $0.promptPrefix } ?? ""
         let userText   = prefix + baseText
 
@@ -2526,6 +2553,8 @@ final class OverlayViewModel {
                          stayInPrimarySurface: Bool = false) {
         // Closing the current session — stop any answers still streaming into it.
         cancelStreaming()
+        // A held half-question belongs to the session that heard it.
+        heldQuestionFragment = nil
         // Before closing the current session, ask the AI to give it a nicer title.
         let closingID = sessionStore.activeSessionID
         let closing = sessionStore.activeSession

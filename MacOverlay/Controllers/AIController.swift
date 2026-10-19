@@ -187,19 +187,31 @@ final class AIController {
                                                           outputTokens: outTok)
                     }
                 }
-                // Final flush so the trailing tokens land even if they
-                // arrived inside the last 33ms window.
-                vm.sessionStore.setStreamingContent(accumulated, turnID: assistantTurnID)
-                mirrorIfCurrent(accumulated)
+                if vm.isInterviewSession,
+                   TranscriptFilter.isIncompleteSentinel(accumulated) {
+                    // The interview prompt answers a cut-off sentence with
+                    // the ⏳ sentinel — "not a question yet". Drop the
+                    // exchange it created and hold the fragment so the
+                    // speaker's continuation is sent as one whole
+                    // question. Nothing on screen, no note, no title.
+                    vm.dropIncompleteExchange(assistantTurnID: assistantTurnID,
+                                              userText: userText)
+                    mirrorIfCurrent("")
+                } else {
+                    // Final flush so the trailing tokens land even if they
+                    // arrived inside the last 33ms window.
+                    vm.sessionStore.setStreamingContent(accumulated, turnID: assistantTurnID)
+                    mirrorIfCurrent(accumulated)
 
-                if wasFirstExchange {
-                    let s = vm.sessionStore.activeSession
-                    self.regenerateTitle(for: s, sessionID: s.id)
-                }
+                    if wasFirstExchange {
+                        let s = vm.sessionStore.activeSession
+                        self.regenerateTitle(for: s, sessionID: s.id)
+                    }
 
-                if !accumulated.isEmpty {
-                    vm.notesManager.add(content: accumulated, source: .ai, mode: vm.sessionMode)
-                    vm.sessionNotes = vm.notesManager.entries
+                    if !accumulated.isEmpty {
+                        vm.notesManager.add(content: accumulated, source: .ai, mode: vm.sessionMode)
+                        vm.sessionNotes = vm.notesManager.entries
+                    }
                 }
             } catch is CancellationError {
                 // User hit Stop, or the cap evicted this answer. Keep whatever
