@@ -266,3 +266,73 @@ on this nonactivating app were unreliable in CUA even for unchanged buttons;
 AX button actions worked. The brand gesture was preserved rather than inferring
 a product regression from that automation behavior. Keep using the app's own
 snapshot/event harness and inspect the rendered images.
+
+---
+
+## 11. Bug sweep queue — 2026-10-19 (branch `bugsweep`)
+
+Source: four read-only wiring audits (shell/window, live session, surfaces/data,
+settings/config) plus a feature inventory. **R** = re-checked against code or
+on-disk data by the orchestrator; **C** = agent traced in code; **S** =
+suspected, needs a runtime check. One fix at a time, snapshot proof +
+`./test.sh` per fix. Invariants: screen-share hidden, BYOK, no Pro.
+
+### P0 — data loss, security, core promise
+| ID | Issue | Evidence | V |
+|---|---|---|---|
+| B1 | History hides every session from earlier launches: the default workspace is never saved, so each launch gets a new UUID (88 sessions, 79 workspace IDs) | WorkspaceStore.swift:19-29, HistoryPanelView:56/150 | R |
+| B2 | A live call keeps recording into a different session after ⌘N, History open, or Delete Session; ⌘N monitor swallows the key unconditionally | AppDelegate.swift:720-731, VM continueSession / startNewSession, SessionStore.delete | R/C |
+| B3 | API keys stored plaintext in the UserDefaults plist, no Keychain | VM:590-640 (e.g. :623) | R |
+| B4 | In-app browser grants mic/camera to any origin; no camera usage string | WebPanelView.swift:184-192 | R |
+| B5 | Screen-share hiding not proven for sheets, NSOpen/SavePanel, popovers, menus; inspector is capturable by design | AppDelegate swizzle :2210-2241 | S |
+| B6 | Any JSON decode error loads an empty store; the next write overwrites sessions.json (no backup) | JSONStore.swift:40-47, SessionStore init | S |
+
+### P1 — core flows broken
+| ID | Issue | Evidence | V |
+|---|---|---|---|
+| B7 | Start is blocked for Apple on-device (and Type mode) without an ElevenLabs/xAI key | VM:2927 | R |
+| B8 | Placeholders sent raw: `{ROLE}` `{COMPANY}` (+ preset `{TARGET_ROLE}` …); only `{NAME}` replaced | AIController.swift:68, SessionMode.swift:49/60/71 | R |
+| B9 | Answer depth ignored once a seeded or custom preset exists (always) | SessionMode.swift:40, PromptStore seeded():206-212 | C |
+| B10 | Default audio source is Mic, so the user's own speech triggers answers (HANDOFF §5 says split capture) | VM:54-55 | R |
+| B11 | Post-call stale THEM caption; it also hides every post-End status ("Writing…", "Summary failed") | VM endCapture, ChatSurfaceView:128-149 | C (seen in snapshot) |
+| B12 | The summary lands up to 90s later and overrides whatever surface the user is on, even a new session | VM:2613-2614 | C |
+| B13 | The summary can't be reopened once left, and is lost on quit; "Saved to Session notes" points to in-memory notes with no UI | NotesManager.swift, CSV:1514, NotesPanelView unreferenced | R |
+| B14 | A ⏳ on the first exchange holds the attached JD/résumé blob as the question fragment | AIController.swift:197-198, VM:1992-1996 | C |
+| B15 | TranscriptCleanup splits `Node.js`, `3.5`, `10:30`, `1,000` | TranscriptCleanup.swift:88-94 | R |
+| B16 | Setup leaks: pendingAttachments duplicate across Start/End/Start; interviewResumeSessionID never cleared; a resumed session overrides sessionMode and the prompt pick | VM:1836/1858-1874/2670-2671, :368 | C |
+| B17 | No text field outside a live session: ⌘N and starter cards lead to a chat with nothing to type into | InputBarView:270-288, CSV:1011 | C (matches §10 snapshot) |
+| B18 | Empty-session litter: 65 of 88 sessions have 0 turns; History lists them | SessionStore.startNewSession:304-314 | R |
+| B19 | "Continue call/interview" starts the mic at once, contrary to its tooltip; it shows for plain chats too | CSV:1229/1244 | C |
+
+### P2 — misaligned UX
+| ID | Issue | Evidence | V |
+|---|---|---|---|
+| B20 | Pill drifts down ~(height−64)pt on each chat/live open-close (expand top-pinned, collapse bottom-pinned); origin persisted | AppDelegate:1519-1521 | S |
+| B21 | Reset panel size always targets 440×800 | AppDelegate:1379-1384 | C |
+| B22 | Model-visibility toggles ignored by the overlay picker; each catalogue fetch re-hides user picks | ModelFilterStore:71, OpenRouterCatalog:524-540 | C |
+| B23 | ⋯ "Model:" popover inside a Menu likely can't present | TopStripView:241 | S |
+| B24 | Header title edit applies to the active session on any surface; commit locks auto-title even when unchanged | TopStripView:40-44/499-505, SessionStore:437 | C |
+| B25 | Replay welcome tour from pill/bar-only renders clipped; first-run completion hook never fires | PreferencesView:354, OCV:27-36 | C |
+| B26 | Missing-key banner says "open API keys" but lands on General | showPreferences, PreferencesView:8 | C |
+| B27 | Hover auto-collapse counts only bar clicks as engagement; a hover-opened form collapses mid-typing | InputBarView:33-39/159/163 | C |
+| B28 | Brand hover dwell not cancelled by press/drag; expands mid-drag | InputBarView:388-408 | S |
+| B29 | OpenCode-only users: gate, titles, prep and embeddings are hard-wired to the OpenRouter key | VM:2287, AIController:340, EmbeddingService | C |
+| B30 | ⌘⏎/⌘⇧⏎ and menu-bar-icon hiding are tied to isRecording, not the session (pause/text-only) | AppDelegate:403-406/2143 | C |
+| B31 | ⌃⇧-arrow resize hotkeys grabbed globally even when hidden; hotkey move unclamped | HotkeyManager:82-85, AppDelegate:892 | C/S |
+| B32 | Detached browser: closing its window doesn't re-show it; window level set in wrong order (ends at 3) | BrowserWindow.swift:51-53/119-125 | C |
+| B33 | Pause sends the pending transcript ignoring auto-generate and the gate | VM:1802-1806 | C |
+| B34 | Screen Recording notice never clears until relaunch | AppDelegate:2127/2131 | C |
+| B35 | Summary: interviews use the meeting-minutes prompt; YOU speech excluded; title follows the tab, not the session | MinutesGenerator, VM:2543 | C |
+| B36 | Export/copy status invisible off the chat surface | CSV:143-149 | C |
+| B37 | Regenerate on an older bubble retries the last request | AIController:287-298 | S |
+
+### P3 — cleanup (ask before deleting)
+Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,
+TranscriptionPanelView, AIResponsePanelView, ModePickerView,
+WorkspaceSwitcherView; `.prompts`/`.calendar` surfaces; `pillAnchor` (written,
+never read); `.captureScreenshot` observer; Pro token relay in
+TranscriptionManager; direct-provider branches and keys with no UI;
+`showMinutesSheet`; stale comments (AppDelegate:382/672, README grip,
+"We handle everything"). Peer server (flag off) has open-LAN HTTP, a 6-digit
+code with no rate limit, and JS injection via `code`. Fix it before ever
+enabling the flag.
