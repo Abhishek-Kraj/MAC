@@ -74,10 +74,11 @@ struct TopStripView: View {
         }
     }
 
-    /// Close the whole shell back to the collapsed brand pill — the
-    /// reference UI's top-left ✕. The brand pill stays available to
-    /// reopen, so this is a soft close, not a quit. Esc triggers it too,
-    /// except while the title is being edited (Esc cancels the edit then).
+    /// The reference UI's top-left ✕: closes the surface (`closeSurface` —
+    /// the summary returns to its conversation, anything else collapses to
+    /// the brand pill). Esc always collapses the whole shell, so it has its
+    /// own hidden button, except while the title is being edited (Esc
+    /// cancels the edit then).
     @ViewBuilder
     private var closeButton: some View {
         let button = Button {
@@ -85,8 +86,7 @@ struct TopStripView: View {
             // in InputBarView for the rationale (spring overshoot vs the
             // AppKit resize was visibly bouncing the bar).
             withAnimation(Design.Motion.expand) {
-                vm.primarySurface = nil
-                vm.shellStage = .pill
+                vm.closeSurface()
             }
         } label: {
             Image(systemName: "xmark")
@@ -97,12 +97,23 @@ struct TopStripView: View {
                 .overlay(Circle().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
-        .help("Close (Esc)")
+        .help(vm.primarySurface == .summary ? "Back to conversation" : "Close (Esc)")
 
         if editingTitle {
             button
         } else {
-            button.keyboardShortcut(.cancelAction)
+            button.background {
+                Button {
+                    withAnimation(Design.Motion.expand) {
+                        vm.collapseShell()
+                    }
+                } label: { EmptyView() }
+                .keyboardShortcut(.cancelAction)
+                .buttonStyle(.plain)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+            }
         }
     }
 

@@ -348,7 +348,8 @@ struct InputBarView: View {
     /// Brand logo lives at the leading edge in every stage, so SwiftUI
     /// keeps the same view identity across stage changes — no re-render,
     /// no jump. Click toggles between `.pill` and `.expanded`. Hovering
-    /// while collapsed expands to a bar-only `.expanded` (no surface).
+    /// while collapsed expands too; both reopen the last surface
+    /// (`expandShell`), not a bare bar.
     private var brandLogoButton: some View {
         Button {
             // A press that turned into a drag moved the panel; it must not
@@ -360,7 +361,7 @@ struct InputBarView: View {
             cancelBrandHoverDwell()
             withAnimation(Design.Motion.expand) {
                 if vm.shellStage == .pill {
-                    vm.shellStage = .expanded
+                    vm.expandShell()
                 } else {
                     vm.shellStage = .pill
                 }
@@ -401,7 +402,7 @@ struct InputBarView: View {
             try? await Task.sleep(for: brandHoverDwell)
             guard !Task.isCancelled, vm.shellStage == .pill else { return }
             withAnimation(Design.Motion.expand) {
-                vm.shellStage = .expanded
+                vm.expandShell()
             }
         }
     }

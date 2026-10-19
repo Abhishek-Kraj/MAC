@@ -896,12 +896,45 @@ final class OverlayViewModel {
     /// it's active toggles back to nil.
     var primarySurface: PrimarySurface? = nil {
         didSet {
+            if let primarySurface { lastPrimarySurface = primarySurface }
             if oldValue != primarySurface {
                 onPrimarySurfaceChange?(primarySurface)
             }
         }
     }
     @ObservationIgnored var onPrimarySurfaceChange: ((PrimarySurface?) -> Void)?
+    /// The last surface shown this run. Collapsing clears `primarySurface`,
+    /// so reopening from the pill restores this instead of a bare bar.
+    @ObservationIgnored private var lastPrimarySurface: PrimarySurface?
+
+    /// Pill → expanded from the brand (hover or click). Brings back the
+    /// last surface, or the conversation when the session has one — never
+    /// an empty bar over a session with content. Surface first, so the
+    /// panel resizes once, straight to its full size.
+    func expandShell() {
+        if primarySurface == nil {
+            primarySurface = lastPrimarySurface
+                ?? (sessionStore.activeSession.turns.isEmpty ? nil : .chat)
+        }
+        shellStage = .expanded
+    }
+
+    /// The header ✕: closes what's showing. The summary was generated from
+    /// the conversation, so it goes back there like "← Conversation" does;
+    /// every other surface collapses the shell as before.
+    func closeSurface() {
+        if primarySurface == .summary {
+            primarySurface = .chat
+        } else {
+            collapseShell()
+        }
+    }
+
+    /// The whole shell back to the brand pill (Esc). A soft close, not a quit.
+    func collapseShell() {
+        primarySurface = nil
+        shellStage = .pill
+    }
     /// Which corner of the NSPanel the pill is anchored to, based on where
     /// the panel sits relative to the screen. When the pill is near the
     /// right edge, the shell flips so panels appear to its left; when near
