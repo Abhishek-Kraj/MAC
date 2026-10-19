@@ -405,6 +405,45 @@ func testIncompleteSentinelDetection() throws {
     try assertFalse(TranscriptFilter.isIncompleteSentinel("Sure — here's the answer ⏳"))
 }
 
+func testTranscriptCleanupRemovesSpeechNoise() throws {
+    // Fillers go, as standalone words only — never inside a real word.
+    try assertEq(TranscriptCleanup.clean("um so tell me about the role"),
+                 "So tell me about the role")
+    try assertEq(TranscriptCleanup.clean("Well , um, I think , uh , we shipped"),
+                 "Well, I think, we shipped")
+    try assertEq(TranscriptCleanup.clean("The Summit plan worked"),
+                 "The Summit plan worked")
+    // Stutters fold; deliberate doubles survive.
+    try assertEq(TranscriptCleanup.clean("we we we decided to ship"),
+                 "We decided to ship")
+    try assertEq(TranscriptCleanup.clean("it was very very good"),
+                 "It was very very good")
+    // Whitespace and punctuation spacing.
+    try assertEq(TranscriptCleanup.clean("  what   did\n\nyou  do ? "),
+                 "What did you do?")
+    try assertEq(TranscriptCleanup.clean("hello .how are you"),
+                 "Hello. How are you")
+    // Sentence starts are capitalized.
+    try assertEq(TranscriptCleanup.clean("we built it. it shipped last friday"),
+                 "We built it. It shipped last friday")
+    // Empty and whitespace-only stay empty — a stripped-to-nothing turn must
+    // not turn into a spurious send.
+    try assertEq(TranscriptCleanup.clean(""), "")
+    try assertEq(TranscriptCleanup.clean("   "), "")
+    try assertEq(TranscriptCleanup.clean("um uh"), "")
+    // The Interview prompt's contract: a half-sentence must stay a
+    // half-sentence. Cleanup may not stamp a full stop on it, because the
+    // trailing comma / no-terminal-mark is what says "still talking".
+    try assertEq(TranscriptCleanup.clean("so what happened after that ,"),
+                 "So what happened after that,")
+    try assertFalse(TranscriptCleanup.clean("so what happened after that ,")
+                    .hasSuffix("."))
+    // Non-Latin scripts pass through — the interviewer switching to Hindi
+    // must not be mangled by the capitalization pass.
+    try assertEq(TranscriptCleanup.clean("तो जी वो लोग"),
+                 "तो जी वो लोग")
+}
+
 @MainActor
 func testTranscriptFilterWarrantsResponse() throws {
     func isYes(_ s: String) -> Bool {
@@ -3277,6 +3316,7 @@ struct TestsMain {
         TestRunner.run("TranscriptFilter meaningful speech", testTranscriptFilterMeaningful)
         TestRunner.run("TranscriptFilter question completeness", testTranscriptFilterSeemsComplete)
         TestRunner.run("Incomplete-question sentinel", testIncompleteSentinelDetection)
+        TestRunner.run("Transcript cleanup", testTranscriptCleanupRemovesSpeechNoise)
         TestRunner.run("TranscriptFilter response gate triage", testTranscriptFilterWarrantsResponse)
         TestRunner.run("TranscriptFilter normalized change detection", testTranscriptFilterNormalized)
         TestRunner.run("ChatTurn replayText composition", testChatTurnReplayText)

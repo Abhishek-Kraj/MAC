@@ -1916,6 +1916,14 @@ final class OverlayViewModel {
             baseText = baseText.isEmpty ? held : held + " " + baseText
             heldQuestionFragment = nil
         }
+        // Polish once, here — where live speech becomes a turn. This one
+        // cleaned string is what the model is asked about and what is stored
+        // on the turn, so the model and the history can never disagree about
+        // what was said. Typed text is the user's own words and passes
+        // through untouched.
+        if !showManualInput || manualInput.isEmpty {
+            baseText = TranscriptCleanup.clean(baseText)
+        }
         let prefix     = pendingQuickAction.map { $0.promptPrefix } ?? ""
         let userText   = prefix + baseText
 
