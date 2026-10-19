@@ -596,8 +596,8 @@ class TranscriptionManager: NSObject, @unchecked Sendable {
         } catch {
             throw TranscriptionError.permissionDenied(
                 "System audio error: \((error as NSError).localizedDescription). " +
-                "Open System Settings → Privacy & Security → Screen Recording → enable TheCloser," +
-                "then QUIT and relaunch the app."
+                "Open System Settings → Privacy & Security → Screen Recording → enable \(AppChannel.displayName)," +
+                " then QUIT and relaunch the app."
             )
         }
         guard let display = content.displays.first else { throw TranscriptionError.noDisplay }

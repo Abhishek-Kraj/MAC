@@ -109,6 +109,14 @@ struct PrepPanelView: View {
                 _ = PrepBank.shared.renameBank(from: PrepBank.placeholderBankID, to: role)
             }
         }
+        .onAppear {
+            // Snapshot harness: `-prepsheet` opens the setup sheet so its
+            // layout can be photographed — the sheet is otherwise only
+            // reachable by clicking, which a shell cannot do.
+            if ProcessInfo.processInfo.arguments.contains("-prepsheet") {
+                showSetup = true
+            }
+        }
         .sheet(isPresented: $showSetup) {
             PrepSetupView(onDone: { showSetup = false },
                           onViewBank: { showSetup = false; showBank = true })
@@ -247,7 +255,7 @@ struct PrepPanelView: View {
         // CV that was never the problem. The reason belongs here, on the card
         // you are looking at — not in a sheet that closed itself.
         if case .failed(let why) = generator.stage { return "Preparation failed" }
-        if let blocker = generator.guidance { return blocker }
+        if let blocker = generator.guidance(context: vm.interviewContext) { return blocker }
         return "No questions prepared yet"
     }
 
@@ -256,7 +264,7 @@ struct PrepPanelView: View {
         if isReady { return "Answers appear instantly when a question matches." }
         if questionCount > 0 { return "Open review to finish matching them." }
         if case .failed(let why) = generator.stage { return why }
-        if let blocker = generator.guidance {
+        if let blocker = generator.guidance(context: vm.interviewContext) {
             return "Your CV and context are already saved — only this is missing."
         }
         return "Do this before you start. Takes a minute or two."
@@ -471,74 +479,13 @@ struct PrepSetupView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 16) {
                 header
-
-                HStack(spacing: 5) {
-                    Text("Role")
-                        .font(.system(size: 11, weight: .medium))
-                    if generator.roleSource == .detected {
-                        // Says where it came from, so it can be checked rather
-                        // than trusted.
-                        Label("from your job description", systemImage: "sparkles")
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                }
-                TextField("reading from your job description…", text: $generator.roleName)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
-                    .disabled(generator.isDetectingRole)
-                    .onChange(of: generator.roleName) { _, _ in
-                        // Once it is edited by hand it is the user's name, and
-                        // detection stops second-guessing them.
-                        if !generator.isDetectingRole { generator.markRoleTyped() }
-                    }
-                    .help("The bank is filed under this, so name the role, not the posting.")
-
-                posting
-
-                HStack(spacing: 8) {
-                    Button {
-                        generator.start(context: vm.interviewContext,
-                                        resume: vm.interviewResumeText)
-                        // Deliberately does NOT close. The progress and any
-                        // failure are reported in this sheet; closing it here
-                        // hid both, which is how a failed run came to look
-                        // like nothing had ever been attempted.
-                    } label: {
-                        if generator.isRunning {
-                            HStack(spacing: 5) {
-                                ProgressView().controlSize(.small)
-                                Text(generator.stage == .researching
-                                     ? "Researching…" : "Matching…")
-                            }
-                            .font(.system(size: 12))
-                        } else {
-                            Text(PrepBank.shared.hasBank(forRole: roleKey)
-                                 ? "Add more questions" : "Prepare questions")
-                                .font(.system(size: 12))
-                        }
-                    }
-                    .buttonStyle(.primaryCompact)
-                    .disabled(!generator.canGenerate)
-
-                    Stepper("\(generator.questionCount) questions",
-                            value: $generator.questionCount, in: 10...50, step: 5)
-                        .font(.system(size: 11))
-                        .fixedSize()
-
-                    Spacer()
-                    Button("Done") { onDone() }
-                        .buttonStyle(.secondaryCompact)
-                }
-
+                sourcesSection
+                generateSection
                 gapSection
-
                 Divider().padding(.vertical, 2)
                 importSection
-                status
             }
             .padding(18)
         }
@@ -563,11 +510,18 @@ struct PrepSetupView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Interview prep").font(.system(size: 15, weight: .semibold))
-            Text("Build a bank of likely questions with answers you can say out loud.")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Interview prep").font(.system(size: 15, weight: .semibold))
+                Text("Build a bank of likely questions with answers you can say out loud.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            Spacer(minLength: 0)
+            // The sheet's one exit, on the title row — it used to sit beside
+            // the stepper at the bottom, an odd place to look for "done".
+            Button("Done") { onDone() }
+                .buttonStyle(.secondaryCompact)
         }
     }
 
@@ -576,33 +530,170 @@ struct PrepSetupView: View {
     }
 
     /// Everything prep will read, with a tick per source, so it is visible
-    /// rather than assumed. The point is that you do not retype any of it.
+    /// rather than assumed. The point is that you do not retype any of it:
+    /// Role, Posting and Résumé each get one aligned row, the role field
+    /// sits under its own row, and the posting editor appears only when
+    /// neither the form's Context nor a paste has one — labelled and with
+    /// a placeholder, because an unlabelled empty box reads as broken.
     @ViewBuilder
-    private var posting: some View {
+    private var sourcesSection: some View {
         let context = vm.interviewContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasContext = context.count > 40
+        let own = generator.jobDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasOwn = own.count > 40
         let hasCV = vm.interviewResumeText.count > 80
-        let hasOwn = !generator.jobDescription.isEmpty
 
-        VStack(alignment: .leading, spacing: 6) {
-            sourceRow(hasOwn ? "Posting" : "Context", ok: hasOwn || hasContext,
-                      detail: hasOwn ? "pasted here"
-                        : hasContext ? "\(context.count) characters"
-                        : "empty — add the JD under Context")
-            sourceRow("Résumé",
-                      ok: hasCV,
-                      failed: vm.interviewResumeError != nil,
-                      detail: hasCV
-                        ? "\(vm.interviewResumeText.count) characters from \(vm.interviewResumeFileURL?.lastPathComponent ?? "file")"
-                        : (vm.interviewResumeError.map { "attached but unreadable — \($0)" }
-                           ?? "none attached — answers stay general"))
-            if !hasOwn {
-                TextEditor(text: $generator.jobDescription)
-                    .font(.system(size: 11))
-                    .frame(minHeight: 110)
-                    .overlay(RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5))
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("doc.text.magnifyingglass", "What prep will read")
+            VStack(alignment: .leading, spacing: 7) {
+                sourceRow("Role", ok: roleKey.count > 2,
+                          detail: roleKey.isEmpty
+                            ? (generator.isDetectingRole
+                               ? "reading from your job description…"
+                               : "named by your job description — it is being read from there")
+                            : (generator.roleSource == .detected
+                               ? "read from your job description"
+                               : "typed by you"))
+                TextField("reading from your job description…", text: $generator.roleName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+                    .disabled(generator.isDetectingRole)
+                    .onChange(of: generator.roleName) { _, _ in
+                        // Once it is edited by hand it is the user's name, and
+                        // detection stops second-guessing them.
+                        if !generator.isDetectingRole { generator.markRoleTyped() }
+                    }
+                    .help("The bank is filed under this, so name the role, not the posting.")
+
+                sourceRow("Posting", ok: hasOwn || hasContext,
+                          detail: hasOwn ? "\(own.count) characters · pasted here"
+                            : hasContext ? "\(context.count) characters · from Context"
+                            : "none yet — paste it below, or add it under Context in the form")
+                if !hasOwn, !hasContext {
+                    postingEditor
+                }
+
+                sourceRow("Résumé",
+                          ok: hasCV,
+                          failed: vm.interviewResumeError != nil,
+                          detail: hasCV
+                            ? "\(vm.interviewResumeText.count) characters from \(vm.interviewResumeFileURL?.lastPathComponent ?? "file")"
+                            : (vm.interviewResumeError.map { "attached but unreadable — \($0)" }
+                               ?? "none attached — answers stay general"))
             }
+            .padding(.leading, 17)
+        }
+    }
+
+    /// The one place the user may need to type: no posting exists anywhere
+    /// else yet. Sits directly under the Posting row, labelled and phrased
+    /// like every other input in the sheet.
+    private var postingEditor: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Job description")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(Design.Ink.secondary)
+            TextEditor(text: $generator.jobDescription)
+                .scrollContentBackground(.hidden)
+                .font(.system(size: 11))
+                .padding(6)
+                .frame(height: 96)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Design.Surface.inputFill))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+                .overlay(alignment: .topLeading) {
+                    if generator.jobDescription.isEmpty {
+                        Text("Paste the job posting, or at least the responsibilities.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 11).padding(.vertical, 12)
+                            .allowsHitTesting(false)
+                    }
+                }
+        }
+    }
+
+    /// One visual grammar for every section: a small icon, a 12pt medium
+    /// title, and the section's own action aligned right on the same row.
+    /// Section bodies indent to the title's text so the whole sheet shares
+    /// a single left rail instead of drifting a few points per block.
+    private func sectionHeader(_ icon: String, _ title: String,
+                               @ViewBuilder action: () -> some View = { EmptyView() }) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundColor(Design.Ink.secondary)
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+            Spacer(minLength: 0)
+            action()
+        }
+    }
+
+    /// The run itself: button, count, and — directly under the button, not
+    /// at the foot of the sheet — whatever is blocking it or what it made.
+    /// A blocker far from its button reads as a dead control.
+    @ViewBuilder
+    private var generateSection: some View {
+        let context = vm.interviewContext
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("wand.and.sparkles", "Questions")
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Button {
+                        generator.start(context: vm.interviewContext,
+                                        resume: vm.interviewResumeText)
+                        // Deliberately does NOT close. The progress and any
+                        // failure are reported in this sheet; closing it here
+                        // hid both, which is how a failed run came to look
+                        // like nothing had ever been attempted.
+                    } label: {
+                        if generator.isRunning {
+                            HStack(spacing: 5) {
+                                ProgressView().controlSize(.small)
+                                Text(generator.stage == .researching
+                                     ? "Researching…" : "Matching…")
+                            }
+                            .font(.system(size: 12))
+                        } else {
+                            Text(PrepBank.shared.hasBank(forRole: roleKey)
+                                 ? "Add more questions" : "Prepare questions")
+                                .font(.system(size: 12))
+                        }
+                    }
+                    .buttonStyle(.primaryCompact)
+                    .disabled(!generator.canGenerate(context: context))
+
+                    Stepper("\(generator.questionCount) questions",
+                            value: $generator.questionCount, in: 10...50, step: 5)
+                        .font(.system(size: 11))
+                        .fixedSize()
+                }
+
+                if let guidance = generator.guidance(context: context) {
+                    Text(guidance)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+
+                switch generator.stage {
+                case .done(let count):
+                    HStack(spacing: 6) {
+                        Label("Prepared \(count) questions.", systemImage: "checkmark.seal.fill")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.green)
+                        Button("View them") { onDone(); onViewBank() }
+                            .buttonStyle(.secondaryCompact)
+                    }
+                case .failed(let why):
+                    Label(why, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.orange)
+                default:
+                    EmptyView()
+                }
+            }
+            .padding(.leading, 17)
         }
     }
 
@@ -614,7 +705,12 @@ struct PrepSetupView: View {
                 .font(.system(size: 11))
                 .foregroundColor(ok ? .green
                              : (failed ? .orange : .secondary.opacity(0.6)))
-            Text(label).font(.system(size: 11, weight: .medium))
+            // Fixed label column: the three rows share one left edge and one
+            // detail edge, so the eye can scan them instead of re-finding
+            // where each detail starts.
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 58, alignment: .leading)
             Text(detail)
                 .font(.system(size: 10))
                 .foregroundColor(failed ? .orange : .secondary)
@@ -633,13 +729,7 @@ struct PrepSetupView: View {
     @ViewBuilder
     private var gapSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "scope")
-                    .font(.system(size: 11))
-                    .foregroundColor(Design.Ink.secondary)
-                Text("Coverage gaps")
-                    .font(.system(size: 12, weight: .medium))
-                Spacer()
+            sectionHeader("scope", "Coverage gaps") {
                 if gapsLoading {
                     ProgressView().controlSize(.mini)
                 } else {
@@ -648,38 +738,40 @@ struct PrepSetupView: View {
                         .disabled(gapsLoading)
                 }
             }
-
-            if let report = gapReport {
-                if report.gaps.isEmpty {
-                    Text("Could not read the posting's capability areas. Try again.")
-                        .font(.system(size: 10)).foregroundColor(.orange)
-                } else {
-                    Text(report.needsWork.isEmpty
-                         ? "Every capability area in the posting has a prepared question."
-                         : "\(report.needsWork.count) of \(report.gaps.count) areas need more.")
-                        .font(.system(size: 10)).foregroundColor(.secondary)
-                    ForEach(report.needsWork.prefix(8)) { g in
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(g.line)
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(g.risk >= 3 ? .orange : .primary)
-                            Text(g.gap)
-                                .font(.system(size: 9))
-                                .foregroundColor(.secondary)
-                                .lineLimit(3)
-                                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 8) {
+                if let report = gapReport {
+                    if report.gaps.isEmpty {
+                        Text("Could not read the posting's capability areas. Try again.")
+                            .font(.system(size: 10)).foregroundColor(.orange)
+                    } else {
+                        Text(report.needsWork.isEmpty
+                             ? "Every capability area in the posting has a prepared question."
+                             : "\(report.needsWork.count) of \(report.gaps.count) areas need more.")
+                            .font(.system(size: 10)).foregroundColor(.secondary)
+                        ForEach(report.needsWork.prefix(8)) { g in
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(g.line)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(g.risk >= 3 ? .orange : .primary)
+                                Text(g.gap)
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(3)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if report.solid.isEmpty == false {
+                            Text("Covered: \(report.solid.count) areas")
+                                .font(.system(size: 9)).foregroundColor(.secondary)
+                        }
                     }
-                    if report.solid.isEmpty == false {
-                        Text("Covered: \(report.solid.count) areas")
-                            .font(.system(size: 9)).foregroundColor(.secondary)
-                    }
+                } else {
+                    Text("Checks which capability areas this posting tests, against what you have prepared.")
+                        .font(.system(size: 10)).foregroundColor(.secondary)
                 }
-            } else {
-                Text("Checks which capability areas this posting tests, against what you have prepared.")
-                    .font(.system(size: 10)).foregroundColor(.secondary)
             }
+            .padding(.leading, 17)
         }
     }
 
@@ -716,55 +808,52 @@ struct PrepSetupView: View {
     @ViewBuilder
     private var importSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "square.and.arrow.down")
-                    .font(.system(size: 11))
-                    .foregroundColor(Design.Ink.secondary)
-                Text("Bring your own questions")
-                    .font(.system(size: 12, weight: .medium))
-                Spacer()
+            sectionHeader("square.and.arrow.down", "Bring your own questions") {
                 Button("Choose file…") { pickImportFile() }
                     .buttonStyle(.secondaryCompact)
             }
 
-            TextEditor(text: $pastedQuestions)
-                .scrollContentBackground(.hidden)
-                .font(.system(size: 11))
-                .padding(6)
-                .frame(height: 74)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Design.Surface.inputFill))
-                .overlay(RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
-                .overlay(alignment: .topLeading) {
-                    if pastedQuestions.isEmpty {
-                        Text("Paste questions and answers here — Q: … / A: … is the easiest.")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 11).padding(.vertical, 12)
-                            .allowsHitTesting(false)
+            VStack(alignment: .leading, spacing: 8) {
+                TextEditor(text: $pastedQuestions)
+                    .scrollContentBackground(.hidden)
+                    .font(.system(size: 11))
+                    .padding(6)
+                    .frame(height: 74)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Design.Surface.inputFill))
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+                    .overlay(alignment: .topLeading) {
+                        if pastedQuestions.isEmpty {
+                            Text("Paste questions and answers here — Q: … / A: … is the easiest.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 11).padding(.vertical, 12)
+                                .allowsHitTesting(false)
+                        }
                     }
+
+                if let adoptedNote {
+                    Label(adoptedNote, systemImage: "folder.badge.gearshape")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
                 }
 
-            if let adoptedNote {
-                Label(adoptedNote, systemImage: "folder.badge.gearshape")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
+                if let message = importMessage {
+                    Text(message)
+                        .font(.system(size: 10))
+                        .foregroundColor(importSucceeded ? .green : .orange)
+                }
 
-            if let message = importMessage {
-                Text(message)
-                    .font(.system(size: 10))
-                    .foregroundColor(importSucceeded ? .green : .orange)
+                HStack(spacing: 8) {
+                    Button("Add pasted") { importPasted() }
+                        .buttonStyle(.primaryCompact)
+                        .disabled(pastedQuestions.trimmingCharacters(
+                            in: .whitespacesAndNewlines).isEmpty || isImporting)
+                    if isImporting { ProgressView().controlSize(.mini) }
+                    Spacer(minLength: 0)
+                }
             }
-
-            HStack(spacing: 8) {
-                Button("Add pasted") { importPasted() }
-                    .buttonStyle(.primaryCompact)
-                    .disabled(pastedQuestions.trimmingCharacters(
-                        in: .whitespacesAndNewlines).isEmpty || isImporting)
-                Spacer()
-                if isImporting { ProgressView().controlSize(.mini) }
-            }
+            .padding(.leading, 17)
         }
     }
 
@@ -853,30 +942,6 @@ struct PrepSetupView: View {
         case .labelled:   return "Q:/A: text"
         case .markdown:   return "markdown"
         case .transcript: return "transcript"
-        }
-    }
-
-    @ViewBuilder
-    private var status: some View {
-        if let guidance = generator.guidance {
-            Text(guidance).font(.system(size: 10)).foregroundColor(.secondary)
-        }
-        switch generator.stage {
-        case .done(let count):
-            HStack(spacing: 6) {
-                Label("Prepared \(count) questions.", systemImage: "checkmark.seal.fill")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.green)
-                Spacer()
-                Button("View them") { onDone(); onViewBank() }
-                    .buttonStyle(.secondaryCompact)
-            }
-        case .failed(let why):
-            Label(why, systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 11))
-                .foregroundColor(.orange)
-        default:
-            EmptyView()
         }
     }
 }

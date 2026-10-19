@@ -20,6 +20,16 @@ enum AppChannel: String, CaseIterable {
     /// Dev and Beta turn on features that haven't graduated to production.
     var showsPreviewFeatures: Bool { self != .production }
 
+    /// The name this build shows in System Settings' Privacy lists. Each
+    /// channel is its own row ("TheCloser" vs "TheCloser Dev"), so
+    /// permission errors must name the row the user will actually find —
+    /// telling a dev-channel user to enable "TheCloser" sends them to the
+    /// wrong toggle.
+    static var displayName: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? "TheCloser"
+    }
+
     /// Label shown on the brand pill so side-by-side builds are easy to tell
     /// apart. Production shows none.
     var badge: String? {

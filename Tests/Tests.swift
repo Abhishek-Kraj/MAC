@@ -2703,11 +2703,11 @@ func testPreparationFailureIsDistinguishableFromNeverStarting() throws {
     g.jobDescription = "Fabric CoE role posting with plenty of detail here."
     try assertTrue(g.stage == .idle, "starts idle")
     try assertFalse(g.stage.isFailure, "idle is not a failure")
-    try assertFalse(g.canGenerate, "cannot generate without a role")
+    try assertFalse(g.canGenerate(context: ""), "cannot generate without a role")
 
     g.roleName = "Fabric Platform Lead"
-    try assertTrue(g.canGenerate, "role plus posting is enough")
-    try assertEq(g.guidance, nil, "and there is then nothing to tell the user")
+    try assertTrue(g.canGenerate(context: ""), "role plus posting is enough")
+    try assertEq(g.guidance(context: ""), nil, "and there is then nothing to tell the user")
 
     // Failed: distinguishable, with the reason recoverable.
     try assertEq(PrepGenerator.Stage.failed("HTTP 429 rate limited").failureReason,
@@ -2716,8 +2716,37 @@ func testPreparationFailureIsDistinguishableFromNeverStarting() throws {
     try assertFalse(PrepGenerator.Stage.done(count: 40).isFailure, "success is not")
 
     // The two never-asked questions must not read the same.
-    try assertTrue(g.guidance != nil || !g.stage.isFailure,
+    try assertTrue(g.guidance(context: "") != nil || !g.stage.isFailure,
                    "a run that never started never claims to have failed")
+}
+
+/// The job description living under Context is the posting. The sheet's own
+/// editor wins only when something substantial was pasted there — before
+/// this, a filled Context still left Prepare questions disabled, which read
+/// as a dead button.
+@MainActor
+func testContextCountsAsThePosting() throws {
+    let g = PrepGenerator()
+    g.roleName = "Fabric Platform Lead"
+    let context = String(repeating: "Lead the Fabric rollout across entities. ", count: 40)
+
+    // Nothing pasted: Context stands in, and the button is live.
+    try assertEq(g.effectivePosting(context: context),
+                 context.trimmingCharacters(in: .whitespacesAndNewlines),
+                 "context is the posting")
+    try assertTrue(g.canGenerate(context: context), "context alone unlocks the button")
+    try assertEq(g.guidance(context: context), nil, "and nothing is left to tell the user")
+
+    // Both missing: blocked, with guidance rather than silence.
+    try assertFalse(g.canGenerate(context: ""), "no posting anywhere means no run")
+    try assertTrue(g.guidance(context: "") != nil, "and the blocker is stated")
+
+    // A substantial paste wins over Context.
+    let pasted = String(repeating: "A different posting pasted into the sheet. ", count: 30)
+    g.jobDescription = pasted
+    try assertEq(g.effectivePosting(context: context),
+                 pasted.trimmingCharacters(in: .whitespacesAndNewlines),
+                 "the paste wins")
 }
 
 /// The prompt must reach the model as written. A scripted edit collapsed the
@@ -3291,6 +3320,7 @@ struct TestsMain {
         TestRunner.run("Split capture plan puts the call first", testSplitCapturePlan)
         TestRunner.run("Transcript merges speech among questions", testTranscriptTimelineMergesSpeechAmongQuestions)
         TestRunner.run("Speech beyond the attributed part", testSpeechBeyondAttribute)
+        TestRunner.run("Context counts as the posting", testContextCountsAsThePosting)
 
         print("\n──────────────────────────────")
         print("  Passed: \(TestRunner.passed)")

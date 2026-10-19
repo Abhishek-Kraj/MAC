@@ -80,13 +80,24 @@ cp "$SRC_DIR/Info.plist" "$PLIST"
 # `com.apple.developer.applesignin` capability is encoded into the bundle
 # signature — required for the SignInWithAppleButton to even render.
 #
-# Ad-hoc signing (the `-` identity) is fine for local development, but
-# Sign in with Apple will not actually return a credential against an
-# ad-hoc-signed bundle. To ship to real customers, rebuild with a
-# Developer ID Application identity that's been provisioned for the
-# `tech.thecloser.mac` bundle ID with the Sign in with Apple
-# capability enabled in Apple Developer's Identifiers panel.
-SIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+# Signing identity for local builds matters for MORE than Gatekeeper:
+# macOS TCC (Screen Recording, Microphone) keys its grants to the binary.
+# An ad-hoc signed app changes identity on every rebuild, so every grant
+# made in System Settings silently stops applying the next time the app
+# is rebuilt — the toggle stays green while capture is refused. A stable
+# identity (a self-signed "TheCloser Dev Signing" cert, or a Developer ID)
+# keeps the grant across builds. Dev channel preferences, in order:
+# CODESIGN_IDENTITY env var → the local dev cert when present → ad-hoc.
+#
+# Developer ID Application is what ships to real customers: it's
+# provisioned for the `tech.thecloser.mac` bundle ID with the Sign in
+# with Apple capability enabled in Apple Developer's Identifiers panel.
+SIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
+if [[ -z "$SIGN_IDENTITY" && "$CHANNEL" == "dev" ]] \
+   && security find-identity -v -p codesigning 2>/dev/null | grep -q "TheCloser Dev Signing"; then
+    SIGN_IDENTITY="TheCloser Dev Signing"
+fi
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
     # Ad-hoc: fine for local builds. No Hardened Runtime: with an ad-hoc
     # signature it can stop the app launching (launchd POSIX 163).
@@ -94,6 +105,15 @@ if [[ "$SIGN_IDENTITY" == "-" ]]; then
     codesign -f -s - \
         --entitlements "$SRC_DIR/MacOverlay.entitlements" \
         "$APP_DIR" 2>/dev/null || true
+elif [[ "$SIGN_IDENTITY" == "TheCloser Dev Signing" ]]; then
+    # Local dev cert: a stable identity so TCC grants survive rebuilds.
+    # No Hardened Runtime or timestamp — those are release concerns, and
+    # both add failure modes (launchd, network) a dev loop must not have.
+    echo "🔏 Signing with the local dev identity (stable across rebuilds)..."
+    codesign -f -s "$SIGN_IDENTITY" \
+        --entitlements "$SRC_DIR/MacOverlay.entitlements" \
+        "$APP_DIR"
+    codesign --verify --strict "$APP_DIR"
 else
     # Developer ID: Hardened Runtime and a secure timestamp, which Apple
     # requires to notarize. Release.entitlements lets the Hardened Runtime

@@ -86,10 +86,28 @@ final class PrepGenerator {
     /// otherwise, and only one of them is worth retrying.
     var stageFailed: Bool { stage.isFailure }
 
-    var canGenerate: Bool {
+    /// The posting a run would actually read: the sheet's own editor when
+    /// something substantial was pasted there, otherwise the Context
+    /// already captured on the interview form. The JD usually lives under
+    /// Context; asking for it a second time made a fillable button look
+    /// dead — which is exactly how it read on screen.
+    func effectivePosting(context: String) -> String {
+        let own = jobDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if own.count > 40 { return own }
+        let fromContext = context.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fromContext.isEmpty ? own : fromContext
+    }
+
+    /// Whether a run can start, judged against the posting the run would
+    /// actually read (`effectivePosting(context:)`).
+    func canGenerate(context: String) -> Bool {
+        isGeneratable(posting: effectivePosting(context: context))
+    }
+
+    private func isGeneratable(posting: String) -> Bool {
         !isRunning
             && roleName.trimmingCharacters(in: .whitespacesAndNewlines).count > 2
-            && jobDescription.trimmingCharacters(in: .whitespacesAndNewlines).count > 40
+            && posting.count > 40
     }
 
     /// True while the role is being worked out from the posting.
@@ -108,14 +126,14 @@ final class PrepGenerator {
     /// Why the button is disabled, shown under it rather than left as a dead
     /// control. Role is auto-derived, so this should never be the thing you
     /// are asked to do by hand.
-    var guidance: String? {
+    func guidance(context: String) -> String? {
         guard !isRunning else { return nil }
         if roleName.trimmingCharacters(in: .whitespacesAndNewlines).count <= 2 {
             return isDetectingRole
                 ? "Working out the role from your job description…"
                 : "Your job description names the role — it is being read from there."
         }
-        if jobDescription.trimmingCharacters(in: .whitespacesAndNewlines).count <= 40 {
+        if effectivePosting(context: context).count <= 40 {
             return "Paste the job description, or at least the responsibilities."
         }
         return nil
@@ -298,15 +316,24 @@ final class PrepGenerator {
             roleName = fallback
             roleSource = .detected
         }
-        jobDescription = jobDescription.isEmpty ? context : jobDescription
-        guard canGenerate else { return }
+        // The run reads what `effectivePosting(context:)` names — a
+        // substantial paste wins, otherwise Context stands in — and the
+        // guard below checks that same posting, so the button state and
+        // the run can never disagree.
+        let own = jobDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if own.count <= 40 {
+            let fromContext = context.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !fromContext.isEmpty { jobDescription = fromContext }
+        }
+        guard canGenerate(context: context) else { return }
         resumeText = resume
         run?.cancel()
         run = Task { await generate() }
     }
 
     private func generate() async {
-        guard canGenerate else { return }
+        guard isGeneratable(posting: jobDescription
+            .trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
         let role = roleName.trimmingCharacters(in: .whitespacesAndNewlines)
         stage = .researching
 

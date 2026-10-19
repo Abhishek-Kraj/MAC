@@ -1649,6 +1649,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
            let v = w.contentView, v.bounds.width > 1, v.bounds.height > 1 {
             views.append(("settings", v))
         }
+        // Sheets (prep setup, minutes, editors) are separate attached
+        // windows, so the panel's contentView never contains them — without
+        // this they cannot be photographed at all.
+        if let sheet = overlayPanel?.attachedSheet,
+           let v = sheet.contentView, v.bounds.width > 1, v.bounds.height > 1 {
+            // Sheet windows are vibrant and inherit their look from whatever
+            // is behind them, which a detached bitmap draw doesn't have —
+            // force the app's dark aqua so the picture matches the screen.
+            sheet.appearance = NSAppearance(named: .darkAqua)
+            views.append(("sheet", v))
+        }
 
         let stamp = Self.snapshotStamp()
         var written: [URL] = []
