@@ -1688,14 +1688,42 @@ final class OverlayViewModel {
     }
 
     func stopInterviewSession() {
+        // Ending a live session is the one moment the user is guaranteed to be
+        // looking at the panel, and the transcript is complete — so this is
+        // where the summary gets written. It used to require: stop, expand the
+        // full-transcript drop-down, and find a 9pt "Minutes" chip — which is
+        // why the AI pass read as "not there".
+        //
+        // Fire-and-forget: `generateMinutes` presents the sheet itself when
+        // the model answers. Recorded sessions only — a text chat has nothing
+        // to summarise, and an empty transcript returns early with a status.
+        let shouldSummarise = isInterviewSession && !isInterviewTextOnly
+
         isInterviewSession  = false
         isInterviewPaused   = false
         isInterviewTextOnly = false
         interviewRunningSince   = nil
         interviewElapsedSeconds = 0
-        // Stop any answers still generating — ending the interview means stop.
+        // Stop any answers still generating — ending the session means stop.
         cancelStreaming()
         endCapture()
+
+        if shouldSummarise {
+            // A beat later, so the panel has finished collapsing into its
+            // post-session layout before the sheet is presented over it.
+            Task { @MainActor [weak self] in
+                await Task.yield()
+                self?.generateMinutes()
+            }
+        }
+    }
+
+    /// True while this is a live Regular call rather than an interview.
+    /// Drives the wording of every live-session control — "End call" is what
+    /// the user is doing on that tab, and "End session" in the ⋯ menu was one
+    /// more reason the tab read as a copy of the Interview screen.
+    var isRegularCallSession: Bool {
+        isInterviewSession && sessionMode == .call
     }
 
     /// Pause an active interview: stop audio capture but keep the session
@@ -2453,6 +2481,20 @@ final class OverlayViewModel {
     var minutesText: String?
     var showMinutesSheet = false
 
+    /// What to call the summary. Derived from the session tab rather than
+    /// `isRegularCallSession`, because the sheet opens *after* the live
+    /// session has ended and that flag is already false by then — the
+    /// summary for a call was reading "Meeting minutes", which is the third
+    /// place the tab stopped sounding like a call.
+    var minutesTitle: String {
+        switch interviewSurfaceMode.sessionKind {
+        case .regularCall: return "Call summary"
+        case .interview:   return "Interview summary"
+        case .normal:      return "Summary"
+        case .quickAsk:    return "Summary"
+        }
+    }
+
     /// One-shot: the session transcript → the model → a note.
     ///
     /// Non-streaming on purpose — minutes are read when the call is over, not
@@ -2470,6 +2512,10 @@ final class OverlayViewModel {
         }
 
         isGeneratingMinutes = true
+        // Ending a session and seeing nothing happen for the few seconds the
+        // model takes reads as "it didn't work". This row is the difference
+        // between a pause and a bug.
+        statusMessage = "Writing \(minutesTitle.lowercased())…"
         let title  = session.displayTitle
         let model  = selectedModel
         // Captured now, like the title regenerator: the request outlives the
@@ -2501,15 +2547,16 @@ final class OverlayViewModel {
                 )
                 let minutes = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !minutes.isEmpty else {
-                    statusMessage = "The model returned no minutes — try again"
+                    statusMessage = "The model returned no summary — try again"
                     return
                 }
                 minutesText = minutes
                 showMinutesSheet = true
+                statusMessage = ""
                 notesManager.add(content: minutes, source: .ai, mode: sessionMode)
                 sessionNotes = notesManager.entries
             } catch {
-                statusMessage = "Minutes failed: \(error.localizedDescription)"
+                statusMessage = "Summary failed: \(error.localizedDescription)"
             }
         }
     }

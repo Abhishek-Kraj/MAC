@@ -167,6 +167,10 @@ struct TopStripView: View {
         }
     }
 
+    /// "Pause call" on the call tab, "Pause interview" on the interview tab.
+    private var pauseVerb: String { vm.isRegularCallSession ? "Pause call" : "Pause interview" }
+    private var resumeVerb: String { vm.isRegularCallSession ? "Resume call" : "Resume interview" }
+
     private var sessionMenu: some View {
         Menu {
             // Live-session controls first — pause/resume and End moved
@@ -181,15 +185,22 @@ struct TopStripView: View {
                             vm.pauseInterviewSession()
                         }
                     } label: {
-                        Label(vm.isInterviewPaused ? "Resume interview" : "Pause interview",
+                        Label(vm.isInterviewPaused ? resumeVerb : pauseVerb,
                               systemImage: vm.isInterviewPaused ? "play.fill" : "pause.fill")
                     }
                 }
                 Button(role: .destructive) {
                     vm.stopInterviewSession()
                 } label: {
-                    Label("End session", systemImage: "stop.circle")
+                    // "End call" on the call tab, "End interview" on the
+                    // interview tab. The user should never have to translate
+                    // the app's terminology back into what they were doing.
+                    Label(vm.isRegularCallSession ? "End call" : "End interview",
+                          systemImage: "stop.circle")
                 }
+                .help(vm.isRegularCallSession
+                      ? "Stop recording and write the call summary"
+                      : "Stop the session and write the summary")
                 Divider()
             }
 

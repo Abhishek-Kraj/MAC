@@ -500,8 +500,16 @@ private struct RegularCallSetupForm: View {
     }
 
     private var header: some View {
-        Text("Set up a call")
-            .font(.system(size: 18, weight: .semibold))
+        // The old header was "Set up a call", which described the tab rather
+        // than the outcome. It says what the panel will do for you — which is
+        // the thing the user is actually deciding when they open this form.
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Live call assistant")
+                .font(.system(size: 18, weight: .semibold))
+            Text("Records the call, transcribes it live, and answers as they talk.")
+                .font(.system(size: 11))
+                .foregroundColor(Design.Ink.secondary)
+        }
     }
 
     private var languagePicker: some View {
@@ -535,20 +543,21 @@ private struct RegularCallSetupForm: View {
         vm.regularCallAsCall ? .call : .general
     }
 
-    /// Call vs Chat segmented control. Call = live mic + transcription
-    /// (same engine as Interview, just with a different system prompt).
-    /// Chat = text-only, the user types in the bar.
+    /// Record vs Type. The old labels were "Call (live)" / "Chat (text)",
+    /// which restated the tab the user was already on — the question this
+    /// control actually answers is whether the microphone records or they
+    /// type, so that is what it now says.
     private var modeToggleRow: some View {
         @Bindable var vm = vm
-        return SetupSection(title: "Mode") {
+        return SetupSection(title: "Input") {
             HStack(spacing: 6) {
-                SetupChipButton(title: "Call (live)",
-                            icon: "phone.fill",
+                SetupChipButton(title: "Record",
+                            icon: "waveform",
                             selected: vm.regularCallAsCall) {
                     vm.regularCallAsCall = true
                 }
-                SetupChipButton(title: "Chat (text)",
-                            icon: "bubble.left.and.bubble.right.fill",
+                SetupChipButton(title: "Type",
+                            icon: "keyboard",
                             selected: !vm.regularCallAsCall) {
                     vm.regularCallAsCall = false
                 }
@@ -573,9 +582,9 @@ private struct RegularCallSetupForm: View {
                 vm.beginRegularCallFromSetup()
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: vm.regularCallAsCall ? "phone.fill" : "paperplane.fill")
+                    Image(systemName: vm.regularCallAsCall ? "waveform" : "paperplane.fill")
                         .font(.system(size: 11, weight: .bold))
-                    Text(vm.regularCallAsCall ? "Start call" : "Start chat")
+                    Text(vm.regularCallAsCall ? "Start recording" : "Start typing")
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .foregroundColor(Design.Ink.inverse)

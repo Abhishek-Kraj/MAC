@@ -1312,7 +1312,10 @@ private struct MinutesSheet: View {
                 Image(systemName: "list.clipboard")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(Design.Accent.brand)
-                Text("Meeting minutes")
+                // "Call summary" reads correctly on the Regular call tab;
+                // "Meeting minutes" only ever did on the chat side. Same
+                // artifact, named for what the user just did.
+                Text(vm.minutesTitle)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(Design.Ink.primary)
                 Spacer()
