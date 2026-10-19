@@ -281,7 +281,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | ID | Issue | Evidence | V |
 |---|---|---|---|
 | B1 ✅ | History hides every session from earlier launches: the default workspace is never saved, so each launch gets a new UUID (88 sessions, 79 workspace IDs) | WorkspaceStore.swift:19-29, HistoryPanelView:56/150 | R |
-| B2 | A live call keeps recording into a different session after ⌘N, History open, or Delete Session; ⌘N monitor swallows the key unconditionally | AppDelegate.swift:720-731, VM continueSession / startNewSession, SessionStore.delete | R/C |
+| B2 ✅ | A live call keeps recording into a different session after ⌘N, History open, or Delete Session; ⌘N monitor swallows the key unconditionally | AppDelegate.swift:720-731, VM continueSession / startNewSession, SessionStore.delete | R/C |
 | B3 | API keys stored plaintext in the UserDefaults plist, no Keychain | VM:590-640 (e.g. :623) | R |
 | B4 | In-app browser grants mic/camera to any origin; no camera usage string | WebPanelView.swift:184-192 | R |
 | B5 | Screen-share hiding not proven for sheets, NSOpen/SavePanel, popovers, menus; inspector is capturable by design | AppDelegate swizzle :2210-2241 | S |
@@ -336,6 +336,11 @@ stays denied. B10 follows HANDOFF §5 (split capture default).
 Fixed log: B1 — WorkspaceStore persists its seed; orphaned workspace ids are
 migrated at launch. Verified over two relaunches: 1 workspace, 88/88 sessions
 on it, History Interview 24 / Regular call 64 (was 0).
+B2: startNewSession/continueSession refuse while a session is live; ⌘N, the
+pencil and ⋯ New Session share `requestNewSession()`; ⌘N monitor is exact ⌘N
+in the overlay only; Delete Session and History rows disabled while live.
+Harness-verified: live requestNewSession/continueSession/⌘N keep the active
+session; ⌘⇧N ignored; idle ⌘N opens a new chat.
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

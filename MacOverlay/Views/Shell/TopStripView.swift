@@ -147,13 +147,8 @@ struct TopStripView: View {
 
     private var composeButton: some View {
         Button {
-            if vm.primarySurface == .interview {
-                vm.requestNewInterviewSession()
-            } else {
-                vm.startNewSession()
-                withAnimation(Design.Motion.spring) {
-                    vm.primarySurface = .chat
-                }
+            withAnimation(Design.Motion.spring) {
+                vm.requestNewSession()
             }
         } label: {
             Image(systemName: "square.and.pencil")
@@ -165,6 +160,8 @@ struct TopStripView: View {
         }
         .buttonStyle(.plain)
         .keyboardShortcut("n", modifiers: .command)
+        // Off the Interview surface a new chat can't start under a live session.
+        .disabled(vm.isInterviewSession && vm.primarySurface != .interview)
         .help(vm.primarySurface == .interview ? "New interview setup" : "New chat (⌘N)")
     }
 
@@ -247,13 +244,8 @@ struct TopStripView: View {
                 // Context-aware new session: on the Interview surface,
                 // flip back to the setup form rather than minting a new
                 // chat session right away. Elsewhere, behaves like before.
-                if vm.primarySurface == .interview {
-                    vm.requestNewInterviewSession()
-                } else {
-                    vm.startNewSession()
-                    withAnimation(Design.Motion.spring) {
-                        vm.primarySurface = .chat
-                    }
+                withAnimation(Design.Motion.spring) {
+                    vm.requestNewSession()
                 }
             } label: {
                 // No `.keyboardShortcut` here. `composeButton` in this same
@@ -434,6 +426,8 @@ struct TopStripView: View {
             } label: {
                 Label("Delete Session", systemImage: "trash")
             }
+            // Deleting the session a recording is writing into.
+            .disabled(vm.isInterviewSession)
 
             Divider()
 

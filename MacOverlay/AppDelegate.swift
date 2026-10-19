@@ -721,15 +721,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Handle ⌘N for new session while the overlay is key. Return
             // nil to consume the event so it doesn't propagate to text
             // fields.
+            // Exactly ⌘N, and only in the overlay — not ⌘⇧N, not Settings.
             if let self,
-               event.modifierFlags.contains(.command),
-               let chars = event.charactersIgnoringModifiers {
-                if chars == "n" {
-                    Task { @MainActor [weak self] in
-                        self?.vm.startNewSession()
-                    }
-                    return nil
+               event.window === self.overlayPanel,
+               event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+               event.charactersIgnoringModifiers == "n" {
+                Task { @MainActor [weak self] in
+                    self?.vm.requestNewSession()
                 }
+                return nil
             }
             self?.handleKey(event)
             return event

@@ -2663,6 +2663,9 @@ final class OverlayViewModel {
     }
 
     func continueSession(id: UUID, stayInPrimarySurface: Bool = false) {
+        // A live recording writes into the active session; switching away
+        // would file the rest of the call under another one.
+        guard !isInterviewSession else { return }
         // Leaving the current session — don't let its answers keep streaming
         // into a session that's no longer in front.
         cancelStreaming()
@@ -2682,6 +2685,8 @@ final class OverlayViewModel {
 
     func startNewSession(kind: ChatSession.Kind = .normal,
                          stayInPrimarySurface: Bool = false) {
+        // Same as `continueSession`: never swap sessions under a live one.
+        guard !isInterviewSession else { return }
         // Closing the current session — stop any answers still streaming into it.
         cancelStreaming()
         // A held half-question belongs to the session that heard it.
@@ -2750,6 +2755,17 @@ final class OverlayViewModel {
     /// renders (otherwise `interviewSurfaceShowsChat` keeps returning
     /// true). Doesn't create a session yet — the real session is created
     /// when the user hits Start in the form.
+    /// ⌘N, the header pencil and ⋯ New Session. On the Interview surface it
+    /// goes back to the setup form, ending a live session first; elsewhere
+    /// it opens a fresh chat (refused while a session is live).
+    func requestNewSession() {
+        if primarySurface == .interview {
+            requestNewInterviewSession()
+        } else {
+            startNewSession()
+        }
+    }
+
     func requestNewInterviewSession() {
         if isInterviewSession { stopInterviewSession() }
         forceInterviewSetup = true

@@ -297,6 +297,10 @@ struct HistoryPanelView: View {
                                onOpen:  { openSession(s) },
                                onPin:   { vm.sessionStore.togglePin(id: s.id) },
                                onDelete: { vm.sessionStore.delete(id: s.id) })
+                        // A live recording writes into the active session;
+                        // opening or deleting rows would move it elsewhere.
+                        .disabled(vm.isInterviewSession)
+                        .opacity(vm.isInterviewSession ? 0.5 : 1)
                 }
             }
         }
