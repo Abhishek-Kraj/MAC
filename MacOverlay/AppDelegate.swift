@@ -124,6 +124,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // `--args -probescreen [file]` asks for Screen Recording at launch —
+        // even when the once-per-install guard in
+        // prewarmScreenRecordingIfNeeded has already fired — and writes the
+        // outcome to `file`. macOS only lists an app in the Privacy pane
+        // after the app itself has asked, so a `tccutil reset` leaves the app
+        // invisible there until it asks again; this flag does the asking and
+        // lets a shell read the answer back without anyone watching a screen.
+        if let probeIdx = CommandLine.arguments.firstIndex(of: "-probescreen") {
+            let next = probeIdx + 1
+            let out = CommandLine.arguments.indices.contains(next)
+                && !CommandLine.arguments[next].hasPrefix("-")
+                ? URL(fileURLWithPath: CommandLine.arguments[next])
+                : URL(fileURLWithPath: NSTemporaryDirectory())
+                    .appendingPathComponent("thecloser-screen-probe.txt")
+            Task { @MainActor in
+                let grantedBefore = CGPreflightScreenCaptureAccess()
+                if !grantedBefore { _ = CGRequestScreenCaptureAccess() }
+                var content = "ok"
+                do { _ = try await SCShareableContent.current }
+                catch { content = "error: \((error as NSError).localizedDescription)" }
+                let grantedAfter = CGPreflightScreenCaptureAccess()
+                self.vm.needsScreenRecordingPermission = !grantedAfter
+                let report = [
+                    "granted-before: \(grantedBefore)",
+                    "shareable-content: \(content)",
+                    "granted-after: \(grantedAfter)",
+                ].joined(separator: "\n")
+                try? report.write(to: out, atomically: true, encoding: .utf8)
+                NSLog("[ScreenProbe] %@", report.replacingOccurrences(of: "\n", with: " | "))
+            }
+        }
+
         // `--args -snapshot [dir]` writes a picture of the app's own windows at
         // launch, and `-surface <name>` (e.g. `-surface settings`) opens that
         // surface first so a specific screen can be photographed. Together they
