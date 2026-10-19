@@ -35,7 +35,6 @@ struct PreferencesView: View {
     @AppStorage("bar.fontSize") private var barFontSize = 13.0
 
     enum Tab: String, CaseIterable, Identifiable {        case general    = "General"
-        case profile    = "Profile"
         case ai         = "AI"
         case quickAsk   = "Quick Ask"
         case prompts    = "Prompts"
@@ -47,7 +46,6 @@ struct PreferencesView: View {
         var icon: String {
             switch self {
             case .general:    return "gearshape.fill"
-            case .profile:    return "person.crop.circle.fill"
             case .ai:         return "sparkles"
             case .quickAsk:   return "bolt.fill"
             case .prompts:    return "text.bubble.fill"
@@ -62,12 +60,6 @@ struct PreferencesView: View {
         /// flipping the corresponding FeatureFlag is a one-line change.
         @MainActor var isVisible: Bool {
             switch self {
-            // Profile is the only place name / role / company can be set, and
-            // the mode system prompts substitute them into every answer
-            // ("User context: {NAME} is a {ROLE} at {COMPANY}. Pitch answers
-            // at their level."). Hidden, that line always read "the user is a
-            // professional at their company" and the feature was unreachable.
-            case .profile:    return true
             case .memory:     return true
             case .workspaces: return FeatureFlags.workspacesEnabled
             case .peer:       return FeatureFlags.peerControlEnabled
@@ -125,7 +117,6 @@ struct PreferencesView: View {
                     Group {
                         switch tab {
                         case .general:    generalTab
-                        case .profile:    profileTab
                         case .ai:         aiTab
                         case .quickAsk:   quickAskTab
                         case .prompts:    promptsTab                        case .memory:     memoryTab
@@ -478,17 +469,6 @@ struct PreferencesView: View {
         for url in panel.urls {
             let text = (try? ResumeImporter.importFile(url: url)) ?? ""
             vm.appendQuickAskFile(name: url.lastPathComponent, extractedText: text)
-        }
-    }
-
-    @ViewBuilder
-    private var profileTab: some View {
-        @Bindable var vm = vm
-        section(title: "About you",
-                subtitle: "Personalises interview and meeting responses. All optional.") {
-            field("Name",    placeholder: "Alex",                text: $vm.userProfile.name)
-            field("Role",    placeholder: "Software Engineer",   text: $vm.userProfile.currentRole)
-            field("Company", placeholder: "Acme",                text: $vm.userProfile.company)
         }
     }
 
@@ -1087,17 +1067,6 @@ struct PreferencesView: View {
                 .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
         }
         .padding(.bottom, 14)
-    }
-
-    private func field(_ label: String, placeholder: String, text: Binding<String>) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .frame(width: 70, alignment: .leading)
-            TextField(placeholder, text: text)
-                .textFieldStyle(.roundedBorder)
-        }
     }
 
     private func sliderRow(_ label: String, value: Binding<Double>,

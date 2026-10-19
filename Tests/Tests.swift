@@ -3009,6 +3009,76 @@ func testGrokKeepsLockedChunksIfTheFinalOmitsThem() throws {
     try assertEq(GrokTranscription.Utterance.stitch(locked: ["Okay."], final: ""), "Okay.")
 }
 
+// MARK: - Meeting minutes
+
+func testMinutesUseOnlyWhatWasSaid() throws {
+    let turns = [
+        ChatTurn(role: .user, content: "  Let's ship the beta on Friday.  "),
+        ChatTurn(role: .assistant, content: "Suggestion: mention the deadline."),
+        ChatTurn(role: .system, content: "system instructions"),
+        ChatTurn(role: .user, content: "   "),
+        ChatTurn(role: .user, content: "Ram will send the deck tomorrow."),
+    ]
+    let transcript = MinutesGenerator.transcript(from: turns)
+    try assertTrue(transcript.contains("ship the beta on Friday"), "said text is kept")
+    try assertTrue(transcript.contains("Ram will send the deck tomorrow"), "every spoken turn is kept")
+    try assertFalse(transcript.contains("Suggestion"),
+                    "the copilot's own answers are not something anyone said")
+    try assertFalse(transcript.contains("system instructions"), "system turns are excluded")
+    try assertFalse(transcript.contains("\n\n\n"), "blank turns leave no blank paragraphs")
+}
+
+func testMinutesTruncateLongTranscriptsFromTheFront() throws {
+    let short = "Alice: hello."
+    try assertEq(MinutesGenerator.truncated(short), short, "short transcripts pass through untouched")
+
+    let long = "START" + String(repeating: "x", count: MinutesGenerator.maxTranscriptChars) + "END"
+    let cut = MinutesGenerator.truncated(long)
+    try assertTrue(cut.hasPrefix(MinutesGenerator.marker), "the omission is stated, not silent")
+    try assertTrue(cut.hasSuffix("END"), "the end of the call is what is kept")
+    try assertFalse(cut.contains("START"), "the front is what is dropped")
+    try assertEq(cut.count, MinutesGenerator.marker.count + 2 + MinutesGenerator.maxTranscriptChars)
+}
+
+func testMinutesPromptLocksTheStructure() throws {
+    let p = MinutesGenerator.systemPrompt
+    for heading in ["## Summary", "## Participants", "## Decisions", "## Action items", "## Open questions"] {
+        try assertTrue(p.contains(heading), "the model is told the heading: \(heading)")
+    }
+    try assertTrue(p.contains("unassigned"), "an unknown owner has a stated answer")
+    try assertTrue(p.contains("no date"), "so does an unknown date")
+    try assertTrue(p.lowercased().contains("never invent"), "and guessing names is forbidden")
+    try assertTrue(p.contains("None noted"), "empty sections must say so instead of vanishing")
+}
+
+func testMinutesRequestCarriesTheSessionTitle() throws {
+    let turns = [ChatTurn(role: .user, content: "Hello there.")]
+    let prompt = MinutesGenerator.userPrompt(turns: turns, sessionTitle: "Weekly sync")
+    try assertTrue(prompt.contains("Weekly sync"), "the title rides along")
+    try assertTrue(prompt.contains("Hello there."), "and so does the transcript")
+}
+
+// MARK: - Candidate name from résumé
+
+func testNameFromResumeIsExtractedNotGuessed() throws {
+    // The model's reply shakes out to a plain name — or to nothing.
+    try assertEq(try PrepGenerator.cleanName("  \"Alex Chen\"  ").unwrap("cleans quotes"), "Alex Chen")
+    try assertEq(try PrepGenerator.cleanName("Alex Chen.").unwrap("cleans trailing dot"), "Alex Chen")
+    try assertTrue(PrepGenerator.cleanName("NONE") == nil, "an explicit refusal is no name")
+    try assertTrue(PrepGenerator.cleanName("   ") == nil, "so is an empty reply")
+    try assertTrue(PrepGenerator.cleanName(String(repeating: "x", count: 80)) == nil,
+                   "a sentence is not a name")
+
+    // The prompt carries the CV, names the single output, and is capped —
+    // a résumé is not a payload.
+    let prompt = PrepGenerator.namePrompt(cv: "Curriculum Vitae\nAlex Chen\nalex@example.com")
+    try assertTrue(prompt.contains("Alex Chen"), "the CV rides along")
+    try assertTrue(prompt.contains("ONLY"), "one value back")
+    try assertTrue(prompt.contains("NONE"), "the refusal path is named")
+    let capped = PrepGenerator.namePrompt(cv: String(repeating: "y", count: 5_000))
+    try assertTrue(capped.count < 3_000, "the prompt is capped")
+}
+
 extension Optional {
     func unwrap(_ note: String, file: String = #file, line: Int = #line) throws -> Wrapped {
         guard let self else { throw TestFailure(message: "unexpected nil: \(note)", file: file, line: line) }
@@ -3143,6 +3213,11 @@ struct TestsMain {
         TestRunner.run("Grok stream URL", testGrokStreamURL)
         TestRunner.run("Grok stitches an utterance from its chunks", testGrokStitchesAnUtterance)
         TestRunner.run("Grok keeps locked chunks the final leaves out", testGrokKeepsLockedChunksIfTheFinalOmitsThem)
+        TestRunner.run("Minutes use only what was said", testMinutesUseOnlyWhatWasSaid)
+        TestRunner.run("Minutes truncate long transcripts from the front", testMinutesTruncateLongTranscriptsFromTheFront)
+        TestRunner.run("Minutes prompt locks the structure", testMinutesPromptLocksTheStructure)
+        TestRunner.run("Minutes request carries the session title", testMinutesRequestCarriesTheSessionTitle)
+        TestRunner.run("Name from a resume is extracted, not guessed", testNameFromResumeIsExtractedNotGuessed)
 
         print("\n──────────────────────────────")
         print("  Passed: \(TestRunner.passed)")

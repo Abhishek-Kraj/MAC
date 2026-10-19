@@ -51,8 +51,7 @@ class ReminderManager {
         // Personalise based on keywords in the event title
         let lower = title.lowercased()
         if lower.contains("interview") {
-            let role = profile.currentRole.isEmpty ? "the role" : profile.currentRole
-            return "\(title) starts in \(timeStr). You're interviewing for \(role) — take a breath, you've got this. Open TheCloser to get real-time coaching."
+            return "\(title) starts in \(timeStr). Take a breath — you've got this. Open TheCloser to get real-time coaching."
         } else if lower.contains("standup") || lower.contains("stand-up") || lower.contains("sync") {
             return "\(title) in \(timeStr). Open TheCloser to capture action items and decisions in real time."
         } else if lower.contains("call") || lower.contains("meeting") || lower.contains("review") {

@@ -308,7 +308,8 @@ struct PromptPickerRow: View {
                 .menuStyle(.button)
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
-                .fixedSize()
+                // No fixedSize: a long preset name must truncate in place,
+                // not push "Create new" off the row.
 
                 Button(action: onCreate) {
                     HStack(spacing: 4) {

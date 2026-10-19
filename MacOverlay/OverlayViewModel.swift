@@ -1689,6 +1689,7 @@ final class OverlayViewModel {
                 switch result {
                 case .success(let text):
                     self.interviewResumeText = text
+                    self.autofillNameFromResume(text, url: url)
                 case .failure(let error):
                     // Report it. A resume that cannot be read must not look
                     // like a resume that was never attached.
@@ -1699,6 +1700,26 @@ final class OverlayViewModel {
                 }
                 self.isPreparingResume = false
             }
+        }
+    }
+
+    /// One tiny extra request when a résumé is imported: fills "Your name"
+    /// from the CV, which `{NAME}` then substitutes into prompts. Only runs
+    /// while the field is still empty, only for the file still selected, and
+    /// it never overwrites something the user typed — a wrong guess would
+    /// otherwise ride into every prompt.
+    private func autofillNameFromResume(_ text: String, url: URL) {
+        guard userProfile.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let key = openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            guard let name = await PrepGenerator.askName(key: key, resume: text) else { return }
+            guard let self,
+                  self.interviewResumeFileURL == url,
+                  self.userProfile.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { return }
+            self.userProfile.name = name
+            self.statusMessage = "✓ Name from résumé: \(name)"
         }
     }
 
@@ -2256,6 +2277,76 @@ final class OverlayViewModel {
     func clearNotes() {
         notesManager.clear()
         sessionNotes = []
+    }
+
+    // MARK: - Meeting minutes
+
+    /// In-flight flag for the Minutes chip — a second click while the model
+    /// is working would just start the same request twice.
+    var isGeneratingMinutes = false
+    /// The generated minutes, shown in a sheet. Nil until one has run.
+    var minutesText: String?
+    var showMinutesSheet = false
+
+    /// One-shot: the session transcript → the model → a note.
+    ///
+    /// Non-streaming on purpose — minutes are read when the call is over, not
+    /// while someone is talking, so there is nothing to race. The result is
+    /// saved to Session notes automatically (same as every AI answer already
+    /// is) and shown in a sheet with a copy button; the notes panel owns
+    /// export.
+    func generateMinutes() {
+        guard !isGeneratingMinutes else { return }
+        let session = sessionStore.activeSession
+        let turns = session.turns
+        guard turns.contains(where: { $0.role == .user }) else {
+            statusMessage = "Nothing in the transcript yet"
+            return
+        }
+
+        isGeneratingMinutes = true
+        let title  = session.displayTitle
+        let model  = selectedModel
+        // Captured now, like the title regenerator: the request outlives the
+        // click, and keys are read back off the VM's own properties.
+        let keys = (
+            anthropic: apiKey, openAI: openAIApiKey, moonshot: moonshotAPIKey,
+            grok: grokAPIKey, deepSeek: deepSeekAPIKey, nvidia: nvidiaAPIKey,
+            openRouter: openRouterAPIKey, openCode: openCodeAPIKey
+        )
+
+        Task { @MainActor in
+            defer { isGeneratingMinutes = false }
+            do {
+                let raw = try await AIManager.shared.sendMessage(
+                    MinutesGenerator.userPrompt(turns: turns, sessionTitle: title),
+                    apiKey: keys.anthropic,
+                    openAIApiKey: keys.openAI,
+                    moonshotAPIKey: keys.moonshot,
+                    grokAPIKey: keys.grok,
+                    deepSeekAPIKey: keys.deepSeek,
+                    nvidiaAPIKey: keys.nvidia,
+                    openRouterAPIKey: keys.openRouter,
+                    openCodeAPIKey: keys.openCode,
+                    model: model,
+                    screenshot: nil,
+                    systemPrompt: MinutesGenerator.systemPrompt,
+                    maxTokens: 2000,
+                    timeoutInterval: 90
+                )
+                let minutes = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !minutes.isEmpty else {
+                    statusMessage = "The model returned no minutes — try again"
+                    return
+                }
+                minutesText = minutes
+                showMinutesSheet = true
+                notesManager.add(content: minutes, source: .ai, mode: sessionMode)
+                sessionNotes = notesManager.entries
+            } catch {
+                statusMessage = "Minutes failed: \(error.localizedDescription)"
+            }
+        }
     }
 
     // MARK: - Session actions (wired to UI)

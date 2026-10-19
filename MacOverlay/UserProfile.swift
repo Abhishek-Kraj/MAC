@@ -1,9 +1,11 @@
 import Foundation
 
 struct UserProfile: Codable {
-    var name:        String = ""
-    var currentRole: String = ""
-    var company:     String = ""
+    /// Used for `{NAME}` substitution in prompts and the calendar-reminder
+    /// greeting. Role and company were removable: nothing in the user's
+    /// prompts consumed `{ROLE}`/`{COMPANY}`, so they were fields whose only
+    /// effect was to fill other unused fields.
+    var name: String = ""
 }
 
 class UserProfileManager {

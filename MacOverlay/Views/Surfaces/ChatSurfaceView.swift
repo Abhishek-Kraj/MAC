@@ -24,6 +24,7 @@ struct ChatSurfaceView: View {
     @State private var historyContentHeight: CGFloat = 0
 
     var body: some View {
+        @Bindable var vm = vm
         let session = vm.sessionStore.activeSession
         VStack(spacing: 0) {
             content(session: session)
@@ -35,6 +36,9 @@ struct ChatSurfaceView: View {
             }
             .onDrop(of: [.fileURL, .image], isTargeted: $isDropTargeted) { providers in
                 handleDrop(providers: providers)
+            }
+            .sheet(isPresented: $vm.showMinutesSheet) {
+                MinutesSheet()
             }
     }
 
@@ -636,6 +640,7 @@ struct ChatSurfaceView: View {
                     TranscriptCopyAllButton(
                         segments: questions.map(\.content) + (live.isEmpty ? [] : [live])
                     )
+                    GenerateMinutesButton()
                 }
             }
             ScrollViewReader { proxy in
@@ -1199,6 +1204,110 @@ private struct TranscriptCopyAllButton: View {
         }
         .buttonStyle(.plain)
         .help("Copy the full transcript")
+    }
+}
+
+/// Turns this session's transcript into meeting minutes. Sits beside Copy all
+/// because it is the same kind of action — something done to the transcript —
+/// and the transcript panel is exactly where the user opens it from.
+private struct GenerateMinutesButton: View {
+    @Environment(OverlayViewModel.self) private var vm
+
+    var body: some View {
+        Button {
+            vm.generateMinutes()
+        } label: {
+            HStack(spacing: 3) {
+                if vm.isGeneratingMinutes {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                        .frame(width: 10, height: 10)
+                } else {
+                    Image(systemName: "list.clipboard")
+                        .font(.system(size: 8, weight: .semibold))
+                }
+                Text(vm.isGeneratingMinutes ? "Writing…" : "Minutes")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundColor(Design.Ink.secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Design.Surface.controlFill))
+            .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .disabled(vm.isGeneratingMinutes)
+        .help("Write meeting minutes from this transcript — saved to Session notes")
+    }
+}
+
+/// The generated minutes: markdown, selectable, with a copy button. The note
+/// itself is already in Session notes (export from the notes panel); this
+/// sheet is for reading and copying the text right away.
+private struct MinutesSheet: View {
+    @Environment(OverlayViewModel.self) private var vm
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "list.clipboard")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Design.Accent.brand)
+                Text("Meeting minutes")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Design.Ink.primary)
+                Spacer()
+                Text("Saved to Session notes")
+                    .font(.system(size: 10))
+                    .foregroundColor(Design.Ink.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            Rectangle().fill(Design.Surface.hairline).frame(height: 0.5)
+
+            ScrollView {
+                MarkdownResponseView(text: vm.minutesText ?? "", baseSize: 12)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            }
+            .hiddenScrollGutter()
+
+            Rectangle().fill(Design.Surface.hairline).frame(height: 0.5)
+
+            HStack {
+                Button {
+                    let text = vm.minutesText ?? ""
+                    guard !text.isEmpty else { return }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    withAnimation(Design.Motion.fast) { copied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        withAnimation(Design.Motion.fast) { copied = false }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(copied ? "Copied" : "Copy")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(copied ? Design.Accent.green : Design.Ink.primary)
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Button("Close") { vm.showMinutesSheet = false }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .frame(width: 540, height: 480)
     }
 }
 

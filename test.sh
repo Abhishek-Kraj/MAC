@@ -49,6 +49,7 @@ SOURCES=(
     "$SRC_DIR/Stores/PrepBank.swift"
     "$SRC_DIR/Stores/PrepBankBackup.swift"
     "$SRC_DIR/Stores/PrepGenerator.swift"
+    "$SRC_DIR/Stores/MinutesGenerator.swift"
     "$SRC_DIR/Stores/PreparedAnswerLookup.swift"
     "$SRC_DIR/Stores/EmbeddingService.swift"
     "$SRC_DIR/Views/Shared/Design.swift"

@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Named custom prompts. Select one to use. Add/edit/delete. The active prompt
-/// overrides the session mode's default system prompt.
+/// Named custom prompts. Select one to use. Add/edit/delete. Each session
+/// mode (interview · call/general) keeps its own active prompt via
+/// `PromptStore.activeConversationIDs`; picks made here follow the mode this
+/// view is open on.
 struct PromptLibraryView: View {
     @Environment(OverlayViewModel.self) private var vm
     @State private var editingID: UUID? = nil

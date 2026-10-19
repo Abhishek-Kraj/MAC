@@ -66,8 +66,6 @@ final class AIController {
         }
         return raw
             .replacingOccurrences(of: "{NAME}",    with: vm.userProfile.name.isEmpty        ? "the user"       : vm.userProfile.name)
-            .replacingOccurrences(of: "{ROLE}",    with: vm.userProfile.currentRole.isEmpty ? "a professional" : vm.userProfile.currentRole)
-            .replacingOccurrences(of: "{COMPANY}", with: vm.userProfile.company.isEmpty     ? "their company"  : vm.userProfile.company)
     }
 
     // MARK: - Streaming

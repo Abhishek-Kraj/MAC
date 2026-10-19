@@ -114,6 +114,7 @@ private struct InterviewSetupForm: View {
                     languagePicker
                     resumePicker
                     contextEditor
+                    nameRow
                     // Directly under the inputs it consumes. The order now
                     // reads as a sequence: add a resume, add context, then
                     // prepare.
@@ -338,6 +339,25 @@ private struct InterviewSetupForm: View {
             text: $vm.interviewContext,
             files: $vm.interviewContextFiles
         )
+    }
+
+    /// The name substituted for `{NAME}` in prompts — and the greeting name on
+    /// calendar reminders. It lived in Settings → Profile beside Role and
+    /// Company, neither of which any prompt asked for; the one field that does
+    /// something moved here, next to the context it personalises.
+    private var nameRow: some View {
+        @Bindable var vm = vm
+        return SetupSection(title: "Your name", optional: true) {
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Alex", text: $vm.userProfile.name)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+                    .frame(width: 220)
+                Text("Fills {NAME} in your prompts, and greets you on calendar reminders.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Design.Ink.secondary)
+            }
+        }
     }
 
     /// The prompt the interview runs. Resolved for `.interview`, so the call tab

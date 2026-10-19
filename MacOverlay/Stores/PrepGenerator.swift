@@ -230,6 +230,61 @@ final class PrepGenerator {
         return (cleaned.isEmpty || cleaned.uppercased() == "NONE") ? nil : cleaned
     }
 
+    // MARK: - Candidate name
+
+    /// The candidate's own name off a freshly imported résumé, so "Your name"
+    /// — which `{NAME}` substitutes from — fills itself. Same model and same
+    /// request shape as the role detector: a trivial extraction with one
+    /// right answer, on the cheapest non-reasoning model.
+    nonisolated static func namePrompt(cv: String) -> String {
+        """
+        Candidate's résumé (first lines):
+        \(String(cv.prefix(1500)))
+
+        Reply with ONLY the candidate's own full name, at most four words, no
+        quotes, no explanation. If the résumé does not state a name, reply NONE.
+        """
+    }
+
+    /// Guards against the model returning a sentence: a name is short, and
+    /// anything longer gets dropped rather than pasted into every prompt.
+    nonisolated static func cleanName(_ raw: String) -> String? {
+        let cleaned = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'`*."))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty,
+              cleaned.uppercased() != "NONE",
+              cleaned.count <= 60 else { return nil }
+        return cleaned
+    }
+
+    /// Nil on any failure — the name field simply stays as it was.
+    nonisolated static func askName(key: String, resume: String) async -> String? {
+        let body: [String: Any] = [
+            "model": roleModel,
+            "temperature": 0,
+            "messages": [["role": "user", "content": namePrompt(cv: resume)]],
+            "max_tokens": 32,
+        ]
+        var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, response) = try? await URLSession.shared.data(for: request) else {
+            return nil
+        }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        let content = (json["choices"] as? [[String: Any]])?
+            .first?["message"] as? [String: Any]
+        let raw = (content?["content"] as? String) ?? ""
+        return cleanName(raw)
+    }
+
     // MARK: - Generate
 
     /// Starts a run and returns immediately. Use this from a button: the work
