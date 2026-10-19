@@ -69,11 +69,20 @@ enum ModelTier: String, CaseIterable, Identifiable {
 /// The two ids the app reaches for when nothing better is chosen. They live
 /// here rather than on `OverlayViewModel` so the guarantee "these are always
 /// selectable" is testable without dragging in the AppKit-heavy view model.
+///
+/// Both are deliberately flash-class: the default answer model runs on
+/// every question of an interview, and the utility model runs the response
+/// gate on the critical path before an answer starts. A frontier model as
+/// the fallback default meant a fresh install quietly burned frontier
+/// prices per question — these are cents-per-thousand-questions instead.
+/// Both ids are also in `OpenRouterCatalog.builtins`, so they stay
+/// selectable before the first catalogue fetch and pass
+/// `testOpenRouterBuiltinsCoverDefaults`.
 enum OpenRouterDefaults {
-    static let defaultModel = "openrouter/anthropic/claude-sonnet-5"
-    /// Small fast model for background jobs (the response gate, session
+    static let defaultModel = "openrouter/google/gemini-3.8-flash"
+    /// Cheapest fast model for background jobs (the response gate, session
     /// titles). Reached through OpenRouter like everything else.
-    static let utilityModel = "openrouter/anthropic/claude-haiku-4.5"
+    static let utilityModel = "openrouter/google/gemini-3.5-flash-lite"
 }
 
 extension OpenRouterModel {
