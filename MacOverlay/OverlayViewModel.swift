@@ -2931,20 +2931,37 @@ final class OverlayViewModel {
     /// never started.
     var hasModelAccess: Bool { !keyForSelectedModel.key.isEmpty }
 
-    /// Keys still to add before starting an interview: the key for the model
-    /// the user picked, and one for transcription (ElevenLabs or xAI, when one
-    /// of those is picked).
+    /// Keys still to add before starting: the key for the model the user
+    /// picked, and one for transcription when the session will need one.
     var missingRequiredKeys: [String] {
         func empty(_ key: String) -> Bool { key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         var missing: [String] = []
         let model = keyForSelectedModel
         if empty(model.key) { missing.append(model.provider) }
-        switch transcriptionPreference {
-        case .grok:        if empty(grokAPIKey) { missing.append("xAI") }
-        case .elevenLabs:  if empty(elevenLabsAPIKey) { missing.append("ElevenLabs") }
-        case .auto, .apple: if empty(elevenLabsAPIKey) && empty(grokAPIKey) { missing.append("ElevenLabs") }
+        let typing = interviewSurfaceMode == .regularCall && !regularCallAsCall
+        if let key = Self.missingTranscriptionKey(for: transcriptionPreference,
+                                                  transcribes: !typing,
+                                                  hasElevenLabs: !empty(elevenLabsAPIKey),
+                                                  hasGrok: !empty(grokAPIKey)) {
+            missing.append(key)
         }
         return missing
+    }
+
+    /// The transcription key a session still needs, if any. Apple runs on
+    /// this Mac and a typed Regular call doesn't transcribe, so neither needs
+    /// one; Automatic still asks for a cloud key, as v1 did.
+    static func missingTranscriptionKey(for preference: TranscriptionPreference,
+                                        transcribes: Bool,
+                                        hasElevenLabs: Bool,
+                                        hasGrok: Bool) -> String? {
+        guard transcribes else { return nil }
+        switch preference {
+        case .grok:       return hasGrok ? nil : "xAI"
+        case .elevenLabs: return hasElevenLabs ? nil : "ElevenLabs"
+        case .auto:       return hasElevenLabs || hasGrok ? nil : "ElevenLabs"
+        case .apple:      return nil
+        }
     }
 
 }

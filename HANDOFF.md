@@ -290,7 +290,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 ### P1 — core flows broken
 | ID | Issue | Evidence | V |
 |---|---|---|---|
-| B7 | Start is blocked for Apple on-device (and Type mode) without an ElevenLabs/xAI key | VM:2927 | R |
+| B7 ✅ | Start is blocked for Apple on-device (and Type mode) without an ElevenLabs/xAI key | VM:2927 | R |
 | B8 | Placeholders sent raw: `{ROLE}` `{COMPANY}` (+ preset `{TARGET_ROLE}` …); only `{NAME}` replaced | AIController.swift:68, SessionMode.swift:49/60/71 | R |
 | B9 | Answer depth ignored once a seeded or custom preset exists (always) | SessionMode.swift:40, PromptStore seeded():206-212 | C |
 | B10 | Default audio source is Mic, so the user's own speech triggers answers (HANDOFF §5 says split capture) | VM:54-55 | R |
@@ -341,6 +341,9 @@ pencil and ⋯ New Session share `requestNewSession()`; ⌘N monitor is exact �
 in the overlay only; Delete Session and History rows disabled while live.
 Harness-verified: live requestNewSession/continueSession/⌘N keep the active
 session; ⌘⇧N ignored; idle ⌘N opens a new chat.
+B7: Apple on-device and a typed Regular call no longer need a transcription
+key (`missingTranscriptionKey`); Automatic still asks for one — open question.
+Harness ran all 32 preference/key combinations.
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,
