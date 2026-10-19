@@ -159,6 +159,27 @@ func testJSONStoreRoundTrip() throws {
     try? FileManager.default.removeItem(at: JSONStore.url(for: filename))
 }
 
+func testJSONStoreKeepsUndecodableFile() throws {
+    // A file that exists but won't decode (a newer build's format, a torn
+    // write) must survive: callers treat nil as "nothing saved" and their
+    // next save would replace it.
+    let filename = "test-\(UUID().uuidString).json"
+    let url = JSONStore.url(for: filename)
+    let bytes = Data("[{\"name\": 1}]".utf8)
+    try bytes.write(to: url)
+    try assertTrue(JSONStore.load([PromptPreset].self, from: filename) == nil, "expected nil")
+    try assertFalse(FileManager.default.fileExists(atPath: url.path), "original still in place")
+    let stem = url.deletingPathExtension().lastPathComponent
+    let kept = try FileManager.default.contentsOfDirectory(at: url.deletingLastPathComponent(),
+                                                          includingPropertiesForKeys: nil)
+        .filter { $0.lastPathComponent.hasPrefix(stem + ".corrupt-") }
+    try assertEq(kept.count, 1)
+    try assertEq(try Data(contentsOf: kept[0]), bytes)
+    // A missing file is just "nothing saved": no side file.
+    try assertTrue(JSONStore.load([PromptPreset].self, from: "absent-\(UUID().uuidString).json") == nil, "expected nil")
+    kept.forEach { try? FileManager.default.removeItem(at: $0) }
+}
+
 @MainActor
 func testAIManagerModelRouting() throws {
     let ai = AIManager.shared
@@ -3369,6 +3390,7 @@ struct TestsMain {
         TestRunner.run("model: ResumePreset codable", testResumePreset)
         TestRunner.run("model: Workspace codable", testWorkspace)
         TestRunner.run("JSONStore round-trip on disk", testJSONStoreRoundTrip)
+        TestRunner.run("JSONStore keeps an undecodable file", testJSONStoreKeepsUndecodableFile)
         TestRunner.run("AIManager routes OpenAI models", testAIManagerModelRouting)
         TestRunner.run("ResumeScore parses raw format", testResumeScoreParser)
         TestRunner.run("ResumeScore verdict colors + copy", testResumeScoreVerdictColors)

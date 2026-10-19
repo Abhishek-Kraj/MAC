@@ -39,7 +39,21 @@ enum JSONStore {
               let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(T.self, from: data)
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            // Callers treat nil as "nothing saved", and their next save
+            // replaces the file — so one that won't decode (a newer build's
+            // format, a torn write) was lost outright. Keep it beside the store.
+            let stamp = ISO8601DateFormatter().string(from: Date())
+                .replacingOccurrences(of: ":", with: "-")
+            let aside = url.deletingPathExtension()
+                .appendingPathExtension("corrupt-\(stamp).json")
+            try? FileManager.default.moveItem(at: url, to: aside)
+            NSLog("[JSONStore] %@ could not be decoded (%@); kept as %@",
+                  filename, "\(error)", aside.lastPathComponent)
+            return nil
+        }
     }
 
     /// Asynchronous save: encoding and atomic write happen on a background

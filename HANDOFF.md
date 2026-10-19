@@ -285,7 +285,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | B3 ✅ (signed builds) | API keys stored plaintext in the UserDefaults plist, no Keychain | VM:590-640 (e.g. :623) | R |
 | B4 ✅ | In-app browser grants mic/camera to any origin; no camera usage string | WebPanelView.swift:184-192 | R |
 | B5 | Screen-share hiding not proven for sheets, NSOpen/SavePanel, popovers, menus; inspector is capturable by design | AppDelegate swizzle :2210-2241 | S |
-| B6 | Any JSON decode error loads an empty store; the next write overwrites sessions.json (no backup) | JSONStore.swift:40-47, SessionStore init | S |
+| B6 ✅ | Any JSON decode error loads an empty store; the next write overwrites sessions.json (no backup) | JSONStore.swift:40-47, SessionStore init | S |
 
 ### P1 — core flows broken
 | ID | Issue | Evidence | V |
@@ -349,6 +349,7 @@ B10: fresh installs default to You + Them (`AudioSource.saved`); a saved choice 
 B8: `PromptPreset.resolvingPlaceholders` fills {NAME} and drops lines with any other unfilled placeholder; built-in "User context: {ROLE} at {COMPANY}" lines removed. Checked on real presets (Interview drops 3 template lines, Meeting/Call 1). Pinned by testPromptPlaceholdersResolveOrDrop.
 B3: keys live in the login Keychain (`SecretStore`, service = bundle id, not synced, cached); launch migrates plist copies, removing each only after read-back matches. Verified over two launches: plist keys gone, Keychain items present and equal to the originals, no prompt, keys load. Correction (user decision): Keychain only when the build has an Apple Team ID (`SecretStore.usesKeychain`). A self-signed dev build's Keychain identity is its binary hash, so every rebuild asked for the login password; dev builds keep keys in the plist as before. The two dev keys were restored to the plist (stale Keychain copies left in place). B7b (user decision): Automatic with no cloud key starts on Apple; the gear stays amber (`lacksCloudTranscriptionKey`).
 B4: browser mic requests get WebKit's per-site prompt; camera and camera+mic are denied (`WebPanelView.Coordinator.mediaDecision`).
+B6: confirmed worse than suspected: the launch migration saved the empty store at once. `JSONStore.load` now moves an undecodable file to `<name>.corrupt-<time>.json` (all stores). Pinned by testJSONStoreKeepsUndecodableFile; not reproduced on real data.
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,
