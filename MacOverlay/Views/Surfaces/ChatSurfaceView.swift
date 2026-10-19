@@ -512,17 +512,33 @@ struct ChatSurfaceView: View {
                     }
                     // During an interview the transcript stays on ONE line
                     // and scrolls — head truncation keeps the newest words
-                    // visible — so it never pushes the answer around.
-                    Text(placeholderOrTranscription)
-                        .font(.system(size: 12 * vm.textScale))
-                        .foregroundStyle(vm.transcription.isEmpty
-                                         ? AnyShapeStyle(Design.Ink.tertiary)
-                                         : AnyShapeStyle(Design.Ink.primary))
-                        .lineLimit(vm.isInterviewSession ? 1 : 4)
-                        .truncationMode(vm.isInterviewSession ? .head : .tail)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
+                    // visible — so it never pushes the answer around. In a
+                    // "You + Them" session the call and the mic are
+                    // transcribed separately, so each gets its own labelled
+                    // line and the transcript reads as a conversation —
+                    // with the call lane owning the answers, per the
+                    // capture plan.
+                    if vm.isSplitCapture {
+                        VStack(alignment: .leading, spacing: 2) {
+                            laneLine("THEM", vm.transcription, primary: true)
+                            if !vm.liveYourSpeech.isEmpty {
+                                laneLine("YOU", vm.liveYourSpeech, primary: false)
+                            }
+                        }
                         .animation(.easeInOut(duration: 0.12), value: vm.transcription)
+                        .animation(.easeInOut(duration: 0.12), value: vm.liveYourSpeech)
+                    } else {
+                        Text(placeholderOrTranscription)
+                            .font(.system(size: 12 * vm.textScale))
+                            .foregroundStyle(vm.transcription.isEmpty
+                                             ? AnyShapeStyle(Design.Ink.tertiary)
+                                             : AnyShapeStyle(Design.Ink.primary))
+                            .lineLimit(vm.isInterviewSession ? 1 : 4)
+                            .truncationMode(vm.isInterviewSession ? .head : .tail)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                            .animation(.easeInOut(duration: 0.12), value: vm.transcription)
+                    }
                     Spacer(minLength: 6)
                     if !vm.transcription.isEmpty {
                         TranscriptCopyButton()
@@ -623,36 +639,49 @@ struct ChatSurfaceView: View {
               : "Show the full transcript — previous questions, each with a copy button")
     }
 
-    /// The expanded transcript: every previous question in order, each
-    /// with its own copy button, the live partial pinned last, and a
-    /// Copy-all chip in the header. Height hugs the rows up to a cap,
-    /// then scrolls — pinned to the newest entry.
+    /// The expanded transcript: every question and every stretch of the
+    /// user's own speech in time order, each with its own copy button, the
+    /// live partials pinned last, and a Copy-all chip in the header. Height
+    /// hugs the rows up to a cap, then scrolls — pinned to the newest entry.
     private var transcriptHistoryPanel: some View {
-        let questions = previousQuestions
-        let live = vm.transcription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rows = TranscriptTimeline.rows(questions: previousQuestions,
+                                           spoken: vm.mySpeechSegments)
+        let liveThem = vm.transcription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let liveYou  = (vm.isSplitCapture ? vm.liveYourSpeech : "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let copyRows: [(label: String, text: String)] = {
+            var out = rows.map { (label: $0.label, text: $0.text) }
+            if !liveThem.isEmpty { out.append((label: "LIVE", text: liveThem)) }
+            if !liveYou.isEmpty  { out.append((label: "YOU",  text: liveYou)) }
+            return out
+        }()
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text("Full transcript")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Design.Ink.tertiary)
                 Spacer(minLength: 0)
-                if !questions.isEmpty || !live.isEmpty {
-                    TranscriptCopyAllButton(
-                        segments: questions.map(\.content) + (live.isEmpty ? [] : [live])
-                    )
+                if !copyRows.isEmpty {
+                    TranscriptCopyAllButton(rows: copyRows)
                     GenerateMinutesButton()
                 }
             }
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 7) {
-                        ForEach(Array(questions.enumerated()), id: \.element.id) { i, turn in
-                            transcriptHistoryRow(label: "Q\(i + 1)",
-                                                 text: turn.content,
-                                                 isLive: false)
+                        ForEach(rows) { row in
+                            transcriptHistoryRow(label: row.label,
+                                                 text: row.text,
+                                                 isLive: false,
+                                                 isQuestion: row.isQuestion)
                         }
-                        if !live.isEmpty {
-                            transcriptHistoryRow(label: "LIVE", text: live, isLive: true)
+                        if !liveThem.isEmpty {
+                            transcriptHistoryRow(label: "LIVE", text: liveThem,
+                                                 isLive: true, isQuestion: true)
+                        }
+                        if !liveYou.isEmpty {
+                            transcriptHistoryRow(label: "YOU", text: liveYou,
+                                                 isLive: true, isQuestion: false)
                         }
                         Color.clear.frame(height: 1).id("transcript-bottom")
                     }
@@ -665,10 +694,13 @@ struct ChatSurfaceView: View {
                 .onPreferenceChange(HistoryHeightKey.self) { historyContentHeight = $0 }
                 .frame(height: min(max(historyContentHeight, 22), Self.historyMaxHeight))
                 .onAppear { proxy.scrollTo("transcript-bottom", anchor: .bottom) }
-                .onChange(of: questions.count) { _, _ in
+                .onChange(of: rows.count) { _, _ in
                     proxy.scrollTo("transcript-bottom", anchor: .bottom)
                 }
-                .onChange(of: live) { _, _ in
+                .onChange(of: liveThem) { _, _ in
+                    proxy.scrollTo("transcript-bottom", anchor: .bottom)
+                }
+                .onChange(of: liveYou) { _, _ in
                     proxy.scrollTo("transcript-bottom", anchor: .bottom)
                 }
             }
@@ -679,18 +711,23 @@ struct ChatSurfaceView: View {
     /// Cap on the transcript drop-down before it scrolls.
     private static let historyMaxHeight: CGFloat = 220
 
-    private func transcriptHistoryRow(label: String, text: String, isLive: Bool) -> some View {
+    private func transcriptHistoryRow(label: String,
+                                      text: String,
+                                      isLive: Bool,
+                                      isQuestion: Bool) -> some View {
         HStack(alignment: .top, spacing: 7) {
             Text(label)
                 .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                 .foregroundStyle(isLive
-                                 ? AnyShapeStyle(Design.Accent.red)
+                                 ? (isQuestion
+                                    ? AnyShapeStyle(Design.Accent.red)
+                                    : AnyShapeStyle(Design.Accent.brand))
                                  : AnyShapeStyle(Design.Ink.tertiary))
                 .frame(width: 28, alignment: .leading)
                 .padding(.top, 3)
             Text(text)
                 .font(.system(size: 11.5))
-                .foregroundColor(isLive ? Design.Ink.secondary : Design.Ink.primary)
+                .foregroundColor(isQuestion ? Design.Ink.primary : Design.Ink.secondary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -721,6 +758,32 @@ struct ChatSurfaceView: View {
         if vm.isInterviewSession     { return "Listening… speak anytime." }
         if vm.isRecording            { return "Listening…" }
         return "—"
+    }
+
+    /// One labelled line of the split transcript. The call lane ("THEM")
+    /// owns the questions and renders in the brand accent; the mic lane
+    /// ("YOU") is context and renders quieter.
+    private func laneLine(_ label: String, _ text: String, primary: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(label)
+                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(primary
+                                 ? AnyShapeStyle(Design.Accent.brand)
+                                 : AnyShapeStyle(Design.Ink.tertiary))
+                .frame(width: 34, alignment: .leading)
+            Text(text.isEmpty && primary ? "Listening…" : text)
+                .font(.system(size: 12 * vm.textScale))
+                .foregroundStyle(text.isEmpty && primary
+                                 ? AnyShapeStyle(Design.Ink.tertiary)
+                                 : (primary
+                                    ? AnyShapeStyle(Design.Ink.primary)
+                                    : AnyShapeStyle(Design.Ink.secondary)))
+                .lineLimit(vm.isInterviewSession ? 1 : 3)
+                .truncationMode(vm.isInterviewSession ? .head : .tail)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
     }
 
     // MARK: - Empty state (mode-aware starter cards)
@@ -1174,13 +1237,13 @@ private struct HistoryRowCopyButton: View {
 /// "Copy all" chip in the transcript-history header — joins every
 /// question (plus the live partial) into one numbered block.
 private struct TranscriptCopyAllButton: View {
-    let segments: [String]
+    let rows: [(label: String, text: String)]
     @State private var copied = false
 
     var body: some View {
         Button {
-            let joined = segments.enumerated()
-                .map { "Q\($0.offset + 1): \($0.element)" }
+            let joined = rows
+                .map { "\($0.label): \($0.text)" }
                 .joined(separator: "\n\n")
             guard !joined.isEmpty else { return }
             NSPasteboard.general.clearContents()

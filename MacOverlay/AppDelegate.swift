@@ -182,6 +182,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // The capture happens inside that 350ms window, right after a
             // final assertion, so the stage it draws is the one asked for.
             var didFresh = false
+            var didSeed  = false
             func openSurface() {
                 if openSettingsWindow { self.showPreferences() }
                 guard surface != nil || forceExpanded else { return }
@@ -195,6 +196,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if CommandLine.arguments.contains("-fresh"), !didFresh {
                     didFresh = true
                     self.vm.startNewSession()
+                }
+                // `-seedtranscript` puts a fixed You + Them exchange in the
+                // strip and transcript panel so the split layout can be
+                // photographed without a live call (and its permissions).
+                // Once only, like -fresh.
+                if CommandLine.arguments.contains("-seedtranscript"), !didSeed {
+                    didSeed = true
+                    self.vm.audioSource        = .both
+                    self.vm.isInterviewSession = true
+                    self.vm.showLiveTranscript = true
+                    self.vm.transcription      = "Walk me through how you set the Fabric capacity plan across the entities."
+                    self.vm.mySpeech           = "We started with a single F64 and tracked CU consumption per entity."
+                    self.vm.mySpeechSegments = [
+                        SpokenSegment(text: "I led the platform rollout for four legal entities.",
+                                      at: Date(timeIntervalSinceNow: -120)),
+                        SpokenSegment(text: "We only split capacity once throttling showed up in the metrics app.",
+                                      at: Date(timeIntervalSinceNow: -40)),
+                    ]
                 }
                 self.vm.primarySurface = surface
                 self.vm.shellStage = .expanded

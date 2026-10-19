@@ -51,9 +51,13 @@ final class OverlayViewModel {
     }
 
     // MARK: - Audio / transcription
-    var audioSource: AudioSource = .microphone {
+    var audioSource: AudioSource = AudioSource(
+        rawValue: UserDefaults.standard.integer(forKey: "audioSource")) ?? .microphone {
         didSet {
             guard oldValue != audioSource else { return }
+            // The choice must survive launches: an interview tool that
+            // forgets "You + Them" between calls would hear only the user.
+            UserDefaults.standard.set(audioSource.rawValue, forKey: "audioSource")
             NSLog("[OverlayViewModel] audioSource changed: %@ -> %@",
                   oldValue.label, audioSource.label)
             // Mid-session switch: restart the engine on the new source so
@@ -101,6 +105,44 @@ final class OverlayViewModel {
             scheduleBroadcast()
         }
     }
+    /// Live text from the user's own mic during a "You + Them" session.
+    /// Display and coaching input only — `transcription` (the call lane) is
+    /// the one source the question pipeline reads, so nothing the user says
+    /// can ever trigger an answer.
+    var mySpeech = ""
+    /// Your speech between two questions, one segment each. Shown as YOU
+    /// rows in the transcript panel and (next) judged by the coach.
+    var mySpeechSegments: [SpokenSegment] = []
+    /// True while a "You + Them" session runs both lanes. Drives the
+    /// strip's labelled transcript and the panel's YOU rows.
+    var isSplitCapture: Bool { audioSource == .both }
+    /// The part of `mySpeech` already attributed to a recorded segment.
+    /// Apple's recognizer keeps growing one string per task and revises
+    /// punctuation retroactively, so segments are cut by comparing words,
+    /// not by clearing the string.
+    @ObservationIgnored private var mySpeechAttributed = ""
+
+    /// What the user has said since the last question — the strip's YOU
+    /// line, and what the next recorded segment will contain.
+    var liveYourSpeech: String {
+        TranscriptTimeline.speechBeyond(mySpeech, attributed: mySpeechAttributed)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Your mic speech since the last question becomes one segment, stamped
+    /// and cleared from view. Called when a question is sent and when
+    /// capture ends.
+    private func recordSpokenAnswerSegment() {
+        let newPart = liveYourSpeech.trimmingCharacters(in: .whitespacesAndNewlines)
+        mySpeechAttributed = mySpeech.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newPart.isEmpty else { return }
+        mySpeechSegments.append(SpokenSegment(text: newPart, at: Date()))
+        // An hours-long call must not accumulate forever.
+        if mySpeechSegments.count > 200 {
+            mySpeechSegments.removeFirst(mySpeechSegments.count - 200)
+        }
+    }
+
     /// Normalized form of the last partial that cancelled the pending
     /// auto-send. Engines re-emit text with revised punctuation/casing
     /// after the speaker stops — only a SUBSTANTIVE change (new words)
@@ -1049,6 +1091,12 @@ final class OverlayViewModel {
 
     @ObservationIgnored let transcriptionManager = TranscriptionManager()
     @ObservationIgnored let appleTranscriber    = AppleTranscriber()
+    /// The second lane of a "You + Them" session — the user's own mic.
+    /// Always the on-device recognizer, even when the question lane runs on
+    /// a cloud engine: the interviewer's words are what need the paid
+    /// minutes, and your own voice is display-and-coaching input where the
+    /// free, local recognizer is enough.
+    @ObservationIgnored let micLaneTranscriber  = AppleTranscriber()
 
     /// Which transcription engine is being used right now. Switches live with
     /// whether the user has configured an ElevenLabs key.
@@ -1087,7 +1135,9 @@ final class OverlayViewModel {
         statusMessage = "\(goneName) is no longer offered by OpenRouter — switched to \(replacement.name)."
     }
 
-    /// Start transcription using whichever backend is active.
+    /// Start transcription using whichever backend is active (the question
+    /// lane — the call's audio in a split session, the only chosen feed
+    /// otherwise).
     private func startTranscriber(source: AudioSource) async throws {
         transcriptionManager.tokenProvider = nil
         transcriptionManager.grokAPIKey = grokAPIKey
@@ -1101,6 +1151,14 @@ final class OverlayViewModel {
         case .apple:
             try await appleTranscriber.start(source: source)
         }
+    }
+
+    /// The mic lane of a "You + Them" session. Deliberately not routed
+    /// through the cloud engines: the interviewer's words deserve the paid
+    /// minutes, and the user's own voice — display and coaching input — is
+    /// served well enough by the free, on-device recognizer.
+    private func startMicLane(source: AudioSource) async throws {
+        try await micLaneTranscriber.start(source: source)
     }
 
 
@@ -1117,10 +1175,13 @@ final class OverlayViewModel {
         return false
     }
 
-    /// Stop whichever backend happens to be running.
+    /// Stop whichever backends happen to be running. A split session runs
+    /// two lanes by design; what must never happen is two engines on the
+    /// same feed, and every start path tears these down first.
     private func stopTranscriber() {
         if transcriptionManager.isRunning { transcriptionManager.stop() }
         if appleTranscriber.isRunning    { appleTranscriber.stop() }
+        if micLaneTranscriber.isRunning  { micLaneTranscriber.stop() }
     }
     @ObservationIgnored private let quickRecorder   = QuickRecorder.shared
     @ObservationIgnored let notesManager            = NotesManager.shared
@@ -1396,6 +1457,26 @@ final class OverlayViewModel {
         transcriptionManager.onSilence = silenceHandler
         appleTranscriber.onSilence    = silenceHandler
 
+        // ---- The mic lane of a "You + Them" session ------------------
+        // The user's own voice: display and coaching input only. No
+        // onSilence wiring and no auto-send — the call lane
+        // (`transcription`) is the single text the question pipeline
+        // reads, and prepared-answer lookup only ever sees it. Nothing the
+        // user says can trigger an answer as though they had asked.
+        micLaneTranscriber.onUpdate = { [weak self] text in
+            Task { @MainActor [weak self] in
+                guard let self, self.isInChosenLanguage(text, final: false) else { return }
+                self.mySpeech = text
+            }
+        }
+        micLaneTranscriber.onCaptureInterrupted = interruptionHandler
+        micLaneTranscriber.onError = { message in
+            // The question lane keeps the interview running; a mic-lane
+            // failure shows as an empty YOU line and is logged for
+            // diagnosis, not surfaced as a session error.
+            NSLog("[MicLane] %@", message)
+        }
+
     }
 
 
@@ -1440,9 +1521,10 @@ final class OverlayViewModel {
     private enum CaptureStartResult { case started, superseded, failed }
 
     /// Start capture on the current `audioSource`. Always tears down any
-    /// running engine first so two engines can never overlap. If another
-    /// transition happens while the engine is starting, this start loses:
-    /// the engine is shut straight back down and `.superseded` is returned
+    /// running engines first so no feed is ever captured twice; a split run
+    /// starts exactly two lanes, one per feed, by design. If another
+    /// transition happens while an engine is starting, this start loses:
+    /// the engines are shut straight back down and `.superseded` is returned
     /// so callers don't mutate session state that the newer transition owns.
     @discardableResult
     private func beginCapture(statusWhileStarting: String = "Starting…") async -> CaptureStartResult {
@@ -1451,8 +1533,34 @@ final class OverlayViewModel {
         stopTranscriber()
         isRecording   = false
         statusMessage = statusWhileStarting
+        // A "You + Them" session runs two engines — one per feed — so the
+        // transcript knows who said what and only the call's audio can
+        // trigger answers. Single-source modes run one engine, as before.
+        let plan = audioSource.capturePlan
+        // A fresh start means a fresh recognizer task on the mic lane;
+        // whatever it displayed belongs to the previous task. (Recorded
+        // segments stay — only the in-flight line resets.)
+        mySpeech = ""
+        mySpeechAttributed = ""
         do {
-            try await startTranscriber(source: audioSource)
+            try await startTranscriber(source: plan.primary)
+            guard epoch == captureEpoch else {
+                stopTranscriber()
+                return .superseded
+            }
+            if let secondary = plan.secondary {
+                do {
+                    try await startMicLane(source: secondary)
+                } catch {
+                    // The interview still runs — the question lane is what
+                    // matters. Your own words just won't be labelled.
+                    guard epoch == captureEpoch else {
+                        stopTranscriber()
+                        return .superseded
+                    }
+                    NSLog("[Capture] mic lane failed to start: %@", error.localizedDescription)
+                }
+            }
             guard epoch == captureEpoch else {
                 stopTranscriber()
                 return .superseded
@@ -1479,6 +1587,11 @@ final class OverlayViewModel {
     private func endCapture(status: String = "") {
         captureEpoch += 1
         pendingAutoSendTask?.cancel()
+        // The tail of what the user said since the last question is still
+        // worth keeping — the transcript panel reads it as YOU.
+        recordSpokenAnswerSegment()
+        mySpeech = ""
+        mySpeechAttributed = ""
         stopTranscriber()
         isRecording   = false
         statusMessage = status
@@ -1507,6 +1620,7 @@ final class OverlayViewModel {
             endCapture()
         } else {
             transcription = ""
+            mySpeechSegments = []
             aiResponse    = ""
             Task { @MainActor [weak self] in
                 _ = await self?.beginCapture()
@@ -1528,6 +1642,7 @@ final class OverlayViewModel {
         interviewFocusMode = true
         showLiveTranscript = true
         transcription = ""
+        mySpeechSegments = []
         aiResponse    = ""
         // Fresh start — reset the elapsed counter and begin a new
         // running phase so the on-screen timer ticks from 00:00.
@@ -1801,6 +1916,11 @@ final class OverlayViewModel {
             return userText.isEmpty ? blocks : "\(blocks)\n\n\(userText)"
         }()
 
+        // Anything said on the mic since the last message is the user's
+        // spoken answer to it — recorded before the new turn so the
+        // transcript panel keeps the conversation in order and the coach
+        // (next) has it paired with the question it answers.
+        recordSpokenAnswerSegment()
         let wasFirstExchange = sessionStore.activeSession.turns.isEmpty
         sessionStore.appendUser(userText,
                                 attachments: attachments.map(\.name),

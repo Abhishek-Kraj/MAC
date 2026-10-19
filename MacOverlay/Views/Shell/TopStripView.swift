@@ -276,6 +276,8 @@ struct TopStripView: View {
                         }
                     }
                 }
+                Divider()
+                Text("You + Them hears the call and you separately: answers fire on the call only.")
             } label: {
                 Label("Audio source: \(vm.audioSource.label)", systemImage: "waveform")
             }

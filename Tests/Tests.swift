@@ -243,7 +243,9 @@ func testSessionModeQuickActionsExist() throws {
 func testAudioSourceLabels() throws {
     try assertEq(AudioSource.microphone.label, "Mic")
     try assertEq(AudioSource.systemAudio.label, "System")
-    try assertEq(AudioSource.both.label, "Both")
+    // Renamed from "Both": the split hears the call and the user on
+    // separate lanes, and the label should say so.
+    try assertEq(AudioSource.both.label, "You + Them")
     try assertEq(AudioSource.allCases.count, 3)
 }
 
@@ -3086,6 +3088,74 @@ extension Optional {
     }
 }
 
+// MARK: - You + Them split
+
+func testSplitCapturePlan() throws {
+    // "You + Them" hears both feeds on separate lanes, and the call's
+    // audio — never the mic — is what owns the questions.
+    try assertEq(AudioSource.both.capturePlan.primary, .systemAudio)
+    try assertEq(AudioSource.both.capturePlan.secondary, .microphone)
+
+    // Single-source modes keep their old meaning: one feed, no second lane.
+    try assertEq(AudioSource.microphone.capturePlan.primary, .microphone)
+    try assertTrue(AudioSource.microphone.capturePlan.secondary == nil)
+    try assertEq(AudioSource.systemAudio.capturePlan.primary, .systemAudio)
+    try assertTrue(AudioSource.systemAudio.capturePlan.secondary == nil)
+}
+
+func testTranscriptTimelineMergesSpeechAmongQuestions() throws {
+    let t0 = Date(timeIntervalSince1970: 1_000)
+    let t1 = Date(timeIntervalSince1970: 2_000)
+    let t2 = Date(timeIntervalSince1970: 3_000)
+    let q1 = ChatTurn(role: .user, content: "Tell me about yourself", timestamp: t0)
+    let q2 = ChatTurn(role: .user, content: "Why this team?", timestamp: t2)
+    let you = SpokenSegment(text: "I led the migration to Fabric.", at: t1)
+
+    let rows = TranscriptTimeline.rows(questions: [q1, q2], spoken: [you])
+    try assertEq(rows.count, 3)
+    // Read as a conversation: Q1, your answer, Q2.
+    try assertEq(rows[0].label, "Q1")
+    try assertEq(rows[0].isQuestion, true)
+    try assertEq(rows[1].label, "YOU")
+    try assertEq(rows[1].isQuestion, false)
+    try assertEq(rows[1].text, "I led the migration to Fabric.")
+    try assertEq(rows[2].label, "Q2")
+    // A YOU row between Q1 and Q2 must not push the next question to Q4 —
+    // numbering counts questions only.
+    try assertEq(rows[2].text, "Why this team?")
+
+    // No mic lane (single-source modes): questions only, unchanged.
+    let plain = TranscriptTimeline.rows(questions: [q1], spoken: [])
+    try assertEq(plain.map(\.label), ["Q1"])
+}
+
+func testSpeechBeyondAttribute() throws {
+    // Apple's recognizer re-emits one growing string with retroactive
+    // revisions; only the words after the attributed part are new.
+    try assertEq(TranscriptTimeline.speechBeyond("so it's a mesh model",
+                                                 attributed: "so"),
+                 "it's a mesh model")
+    // Cosmetic revision (casing/punctuation) is not new speech.
+    try assertEq(TranscriptTimeline.speechBeyond("a mesh model.",
+                                                 attributed: "a mesh model"),
+                 "")
+    // A revision that splits one word in two stops the scan there — the
+    // tail may repeat in a segment, but words before the seam are never
+    // lost from the recording.
+    try assertEq(TranscriptTimeline.speechBeyond("so it is a mesh",
+                                                 attributed: "so it's a mesh"),
+                 "it is a mesh")
+    // Everything is new when the attributed text was dropped by a revision.
+    try assertEq(TranscriptTimeline.speechBeyond("one lake shortcuts",
+                                                 attributed: "unrelated"),
+                 "one lake shortcuts")
+    // Nothing new yet.
+    try assertEq(TranscriptTimeline.speechBeyond("hello there",
+                                                 attributed: "HELLO THERE!"),
+                 "")
+    try assertEq(TranscriptTimeline.speechBeyond("", attributed: "something"), "")
+}
+
 // MARK: - Entry point
 
 @main
@@ -3218,6 +3288,9 @@ struct TestsMain {
         TestRunner.run("Minutes prompt locks the structure", testMinutesPromptLocksTheStructure)
         TestRunner.run("Minutes request carries the session title", testMinutesRequestCarriesTheSessionTitle)
         TestRunner.run("Name from a resume is extracted, not guessed", testNameFromResumeIsExtractedNotGuessed)
+        TestRunner.run("Split capture plan puts the call first", testSplitCapturePlan)
+        TestRunner.run("Transcript merges speech among questions", testTranscriptTimelineMergesSpeechAmongQuestions)
+        TestRunner.run("Speech beyond the attributed part", testSpeechBeyondAttribute)
 
         print("\n──────────────────────────────")
         print("  Passed: \(TestRunner.passed)")
