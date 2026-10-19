@@ -892,6 +892,32 @@ func testOpenCodeReasoningAllowlistMatchesTheGateway() throws {
     }
 }
 
+/// A temporary surface minimum must not erase the size the user chose.
+func testPanelManualSizeSurvivesSurfaceChanges() throws {
+    var preference = PanelSizePreference()
+    let fullMinimum = NSSize(width: 440, height: 420)
+    let focusMinimum = NSSize(width: 440, height: 160)
+    let fullDefault = NSSize(width: 440, height: 800)
+    let manual = NSSize(width: 520, height: 460)
+    try assertEq(preference.expandedSize(automatic: fullDefault, minimum: fullMinimum), fullDefault)
+    preference.record(manual) // resized on summary, before entering Live Focus
+    for automatic in [fullDefault, NSSize(width: 440, height: 220), fullDefault] {
+        try assertEq(preference.expandedSize(automatic: automatic, minimum: fullMinimum), manual,
+                     "switching surfaces must not restore the 800pt default")
+    }
+    try assertEq(preference.expandedSize(automatic: NSSize(width: 440, height: 250),
+                                        minimum: focusMinimum), manual,
+                 "entering Live Focus must retain a resize made on another surface")
+    preference.record(NSSize(width: 480, height: 180))
+    try assertEq(preference.expandedSize(automatic: fullDefault, minimum: fullMinimum),
+                 NSSize(width: 480, height: 420), "setup still enforces its content minimum")
+    try assertEq(preference.expandedSize(automatic: fullDefault, minimum: focusMinimum),
+                 NSSize(width: 480, height: 180), "a larger temporary minimum must not erase the choice")
+    preference.reset()
+    try assertEq(preference.expandedSize(automatic: fullDefault, minimum: fullMinimum), fullDefault,
+                 "Reset panel size must restore automatic sizing")
+}
+
 /// Every edge and corner resizes the side the user grabbed and holds the
 /// opposite side still. This is what made the panel "difficult" to size when a
 /// single bottom-trailing grip was the only affordance, and it is arithmetic —
@@ -3339,6 +3365,7 @@ struct TestsMain {
         TestRunner.run("OpenCode is its own gateway", testOpenCodeIsWiredAsItsOwnGateway)
         TestRunner.run("OpenCode ids exist on the gateway", testOpenCodeIdsExistOnTheGateway)
         TestRunner.run("OpenCode reasoning allowlist matches the gateway", testOpenCodeReasoningAllowlistMatchesTheGateway)
+        TestRunner.run("Manual panel size survives surface changes", testPanelManualSizeSurvivesSurfaceChanges)
         TestRunner.run("Panel resize edges pin the opposite side", testPanelResizeEdgesPinTheOppositeSide)
         TestRunner.run("Panel resize hit test covers every border", testPanelResizeHitTestCoversEveryBorder)
         TestRunner.run("Panel resize cursor bands match the hit test", testPanelResizeCursorBandsMatchTheHitTest)

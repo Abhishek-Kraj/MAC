@@ -230,6 +230,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     surface = .interview
                 } else {
+                    if raw == "interview" { vm.interviewSurfaceMode = .interview }
                     surface = OverlayViewModel.PrimarySurface(rawValue: raw)
                 }
             }
@@ -250,10 +251,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             var didSeed  = false
             func openSurface() {
                 if openSettingsWindow { self.showPreferences() }
-                // `-seedminutes` shows the summary sheet with sample content.
-                // The sheet is a separate attached window, and the only way to
-                // present it is to have finished a session first — so this is
-                // the only way to photograph it without a real model call.
+                // `-seedminutes` opens the summary surface with sample content.
+                // Keep the requested mode (e.g. regularCall) for its title.
                 if CommandLine.arguments.contains("-seedminutes"), !didSeedMinutes {
                     didSeedMinutes = true
                     vm.minutesText = """
@@ -291,7 +290,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         vm.primarySurface = .summary
                     }
                 }
-                guard surface != nil || forceExpanded else { return }
+                guard surface != nil || forceExpanded || didSeedMinutes else { return }
                 // `-fresh` clears the active session once, so the Interview
                 // surface draws its setup form rather than resuming whatever
                 // session was last open. That setup form is the screen the
@@ -310,6 +309,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if CommandLine.arguments.contains("-seedtranscript"), !didSeed {
                     didSeed = true
                     self.vm.audioSource        = .both
+                    self.vm.sessionMode        = .interview
+                    self.vm.interviewSurfaceMode = .interview
                     self.vm.isInterviewSession = true
                     self.vm.showLiveTranscript = true
                     self.vm.transcription      = "Walk me through how you set the Fabric capacity plan across the entities."
@@ -340,7 +341,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         - Split billing back out per entity with a shared overflow pool for peak windows.
                         """)
                 }
-                self.vm.primarySurface = surface
+                self.vm.primarySurface = didSeedMinutes ? .summary : surface
                 self.vm.shellStage = .expanded
                 self.animateShellFrame(stage: .expanded)
             }
@@ -915,7 +916,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // report animated the panel straight back — a visible
             // grow-then-snap flicker on every keyboard resize.
             if vm.shellStage == .expanded { lastFullSize = overlayPanel.frame.size }
-            if vm.focusHuggingActive { focusHeightUserOverride = true }
+            panelSizePreference.record(overlayPanel.frame.size)
+            vm.panelHasManualSize = true
             // Placed by hand, so a resize that was still animating is no longer
             // the frame the panel is heading for.
             forgetPendingPanelResize()
@@ -1079,6 +1081,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let edge = panelResizeEdge(atWindowPoint: event.locationInWindow) else {
             return event
         }
+        if CommandLine.arguments.contains("-resizeprobe") {
+            print("PROBE down point=\(event.locationInWindow) size=\(overlayPanel.frame.size) edge=\(edge)")
+        }
         activeResizeEdge = edge
         panelResizeAnchor = screenPoint(of: event)
         panelResizeBaseFrame = overlayPanel.frame
@@ -1092,13 +1097,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// rather than compounding per-event deltas.
     private var panelResizeBaseFrame: NSRect?
 
-    /// Set once the user drag-resizes while Live Focus is on screen. Their
-    /// chosen size then wins over content tracking for the rest of the
-    /// run — without this the next streamed line would immediately snap
-    /// the panel back to the content height, undoing the drag the moment
-    /// they let go. Only a relaunch resets it: the panel behaves like a
-    /// window the user sized, in every state, until the app restarts.
-    private var focusHeightUserOverride = false
+    /// Set by any manual resize, regardless of the surface it started on.
+    private var panelSizePreference = PanelSizePreference()
 
     /// Edge / corner drag-resize. `dx` grows to the right, `dy` grows
     /// downward; the edge the user grabbed decides which sides of the frame
@@ -1142,7 +1142,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         forgetPendingPanelResize()
         lastFullSize = panel.frame.size
         // The user's hand outranks content tracking from here on.
-        if vm.focusHuggingActive { focusHeightUserOverride = true }
+        panelSizePreference.record(panel.frame.size)
+        vm.panelHasManualSize = true
     }
 
     /// Latest content-height report from the Live Focus stack (the header
@@ -1178,7 +1179,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               let panel = overlayPanel,
               vm.focusHuggingActive,
               vm.shellStage == .expanded,
-              !focusHeightUserOverride,
+              panelSizePreference.manualSize == nil,
               panelResizeBaseFrame == nil else { return }
 
         let targetH = min(max(h + Self.focusPanelChrome,
@@ -1367,7 +1368,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// permanent until the app was restarted. This is the way back.
     @MainActor
     func resetPanelSize() {
-        focusHeightUserOverride = false
+        panelSizePreference.reset()
+        vm.panelHasManualSize = false
         lastFullSize = Self.expandedSize
         // Re-derive the size the current stage would have picked with no
         // manual size in play, so this works in the pill, the bar-only shell
@@ -1378,8 +1380,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if vm.shellStage == .pill {
             target = vm.hasPillPopup ? Self.pillWithPopupSize : Self.collapsedSize
         } else if surfaceOpen {
-            target = NSSize(width: max(cur.width, Self.expandedMinSize.width),
-                            height: Self.expandedSize.height)
+            target = Self.expandedSize
         }
         guard let panel = overlayPanel else { return }
         panel.setFrame(NSRect(x: cur.origin.x,
@@ -1475,9 +1476,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // A manual size wins over both: re-entering the mode
                     // keeps the height the user dragged to.
                     let h: CGFloat
-                    if focusHeightUserOverride {
-                        h = cur.height
-                    } else if vm.focusHuggingActive && lastFocusContentHeight > 0 {
+                    if vm.focusHuggingActive && lastFocusContentHeight > 0 {
                         h = min(max(lastFocusContentHeight + Self.focusPanelChrome,
                                     Self.expandedCompactMinSize.height),
                                 Self.expandedSize.height + 80)
@@ -1500,8 +1499,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.minSize = minForStage
         // A width the user dragged to under an older, smaller minimum (or
         // kept from the compact bar) must not survive into this stage.
-        target.width  = max(target.width,  minForStage.width)
-        target.height = max(target.height, minForStage.height)
+        if stage == .expanded && surfaceOpen {
+            target = panelSizePreference.expandedSize(automatic: target, minimum: minForStage)
+        } else {
+            target.width  = max(target.width,  minForStage.width)
+            target.height = max(target.height, minForStage.height)
+        }
         // The resize bands are measured from the panel's size and only exist on
         // an expanded panel, so a stage change moves them even when the frame
         // itself does not move.
@@ -1901,7 +1904,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         out.append("panel.frame=\(panel.frame)")
         out.append("content.frame=\(content.frame) bounds=\(content.bounds)")
         out.append("panel.minSize=\(panel.minSize) scale=\(panel.backingScaleFactor)")
-        out.append("lastFullSize=\(lastFullSize)")
+        out.append("lastFullSize=\(lastFullSize) manualSize=\(String(describing: panelSizePreference.manualSize))")
 
         func walk(_ v: NSView, _ depth: Int) {
             guard depth <= 4 else { return }
@@ -1948,42 +1951,100 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.postEvent(e, atStart: false)
         }
 
-        // Each case: a point on the named border, dragged 100pt outward along
-        // the axis that border controls. The expectation column is what the
-        // frame should show afterwards — in particular which edge stays put.
+        let originalFrame = panel.frame
+        let originalPreference = panelSizePreference
+        let originalFullSize = lastFullSize
+        let originalSurface = vm.primarySurface
+        let originalStage = vm.shellStage
+        let args = CommandLine.arguments
+        let directory = args.firstIndex(of: "-snapshot").flatMap { i in
+            args.indices.contains(i + 1) && !args[i + 1].hasPrefix("-")
+                ? URL(fileURLWithPath: args[i + 1]) : nil
+        } ?? Self.snapshotDirectory
+
+        func photograph(_ name: String) {
+            let dir = directory.appendingPathComponent(name)
+            _ = self.saveSnapshots(to: dir)
+            try? self.viewGeometryDump().joined(separator: "\n")
+                .write(to: dir.appendingPathComponent("geometry.txt"), atomically: true, encoding: .utf8)
+        }
+
+        // Check all surfaces at a real manual minimum, then close/reopen.
+        // This caught sizes being overwritten by tab defaults and pill frames.
+        let surfaces = OverlayViewModel.PrimarySurface.allCases
+        func checkSurface(_ index: Int) {
+            guard index < surfaces.count else {
+                self.vm.shellStage = .pill
+                self.animateShellFrame(stage: .pill)
+                self.vm.primarySurface = originalSurface
+                self.vm.shellStage = .expanded
+                self.animateShellFrame(stage: .expanded)
+                print("PROBE reopen \(panel.frame.size == Self.expandedMinSize ? "PASS" : "FAIL") frame=\(panel.frame)")
+                self.panelSizePreference = originalPreference
+                self.vm.panelHasManualSize = originalPreference.manualSize != nil
+                self.lastFullSize = originalFullSize
+                self.vm.primarySurface = originalSurface
+                self.vm.shellStage = originalStage
+                self.animateShellFrame(stage: originalStage)
+                panel.setFrame(originalFrame, display: true)
+                print("PROBE done")
+                return
+            }
+            let surface = surfaces[index]
+            self.vm.primarySurface = surface
+            self.animateShellFrame(stage: .expanded)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                print("PROBE surface=\(surface.rawValue) \(panel.frame.size == Self.expandedMinSize ? "PASS" : "FAIL") frame=\(panel.frame)")
+                photograph("minimum-" + surface.rawValue)
+                checkSurface(index + 1)
+            }
+        }
+
         let w = panel.frame.width, h = panel.frame.height
-        let cases: [(String, NSPoint, NSPoint, String)] = [
-            ("trailing", NSPoint(x: w - 5, y: h / 2), NSPoint(x: w + 95, y: h / 2),
-             "100 wider, leading edge pinned"),
-            ("leading", NSPoint(x: 5, y: h / 2), NSPoint(x: -95, y: h / 2),
-             "100 wider, trailing edge pinned"),
-            ("top", NSPoint(x: w / 2, y: h - 5), NSPoint(x: w / 2, y: h + 95),
-             "100 taller, bottom edge pinned"),
-            ("bottom", NSPoint(x: w / 2, y: 5), NSPoint(x: w / 2, y: -95),
-             "100 taller, top edge pinned"),
-            ("bottomTrailing", NSPoint(x: w - 5, y: 5), NSPoint(x: w + 95, y: -95),
-             "100 wider and taller, top-left corner pinned"),
-            ("interior", NSPoint(x: w / 2, y: h / 2), NSPoint(x: w / 2 + 100, y: h / 2),
-             "unchanged — the press belongs to the view under it"),
+        let cases: [(String, NSPoint, NSPoint, PanelResizeEdge?)] = [
+            ("trailing", NSPoint(x: w - 5, y: h / 2), NSPoint(x: 100, y: 0), .trailing),
+            ("leading", NSPoint(x: 5, y: h / 2), NSPoint(x: -100, y: 0), .leading),
+            ("top", NSPoint(x: w / 2, y: h - 5), NSPoint(x: 0, y: 100), .top),
+            ("bottom", NSPoint(x: w / 2, y: 5), NSPoint(x: 0, y: -100), .bottom),
+            ("topLeading", NSPoint(x: 5, y: h - 5), NSPoint(x: -100, y: 100), .topLeading),
+            ("topTrailing", NSPoint(x: w - 5, y: h - 5), NSPoint(x: 100, y: 100), .topTrailing),
+            ("bottomLeading", NSPoint(x: 5, y: 5), NSPoint(x: -100, y: -100), .bottomLeading),
+            ("bottomTrailing", NSPoint(x: w - 5, y: 5), NSPoint(x: 100, y: -100), .bottomTrailing),
+            ("interior", NSPoint(x: w / 2, y: h / 2), NSPoint(x: 100, y: 0), nil),
         ]
 
         func run(_ index: Int) {
             guard index < cases.count else {
-                print("PROBE done")
+                self.panelSizePreference.record(Self.expandedMinSize)
+                self.vm.panelHasManualSize = true
+                checkSurface(0)
                 return
             }
-            let (name, start, end, expect) = cases[index]
+            let (name, start, delta, edge) = cases[index]
             let before = panel.frame
+            let anchor = NSPoint(x: before.minX + start.x, y: before.minY + start.y)
+            func drag(_ fraction: CGFloat, type: NSEvent.EventType) {
+                post(type, NSPoint(x: anchor.x + delta.x * fraction - panel.frame.minX,
+                                   y: anchor.y + delta.y * fraction - panel.frame.minY))
+            }
+            let requested = edge?.resizedFrame(from: before, dx: delta.x, dy: -delta.y,
+                                                minimum: self.minimumPanelSize(for: self.vm.shellStage)) ?? before
+            let expected = panel.constrainFrameRect(requested, to: panel.screen)
             post(.leftMouseDown, start)
-            post(.leftMouseDragged, end)
-            post(.leftMouseUp, end)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                print("PROBE \(name) [\(expect)]: "
-                    + "\(before.size) @\(before.origin) -> \(panel.frame.size) @\(panel.frame.origin)")
-                // Put it back before the next case so every drag starts from
-                // the same frame.
-                panel.setFrame(before, display: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { run(index + 1) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                drag(0.5, type: .leftMouseDragged)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    drag(1, type: .leftMouseDragged)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        drag(1, type: .leftMouseUp)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            print("PROBE \(name) \(panel.frame == expected ? "PASS" : "FAIL") expected=\(expected) actual=\(panel.frame)")
+                            photograph("edge-" + name)
+                            panel.setFrame(before, display: true)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { run(index + 1) }
+                        }
+                    }
+                }
             }
         }
         run(0)

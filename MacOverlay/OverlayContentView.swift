@@ -14,25 +14,6 @@ import AppKit
 struct OverlayView: View {
     @Environment(OverlayViewModel.self) private var vm
 
-    /// Chrome (session title row, input bar) reveals on hover and melts
-    /// away otherwise — matching the reference UI where only the content
-    /// is visible until the cursor enters the panel. The state lives on
-    /// the view model (`isPointerInPanel`) so the composer, several
-    /// layers down, can observe the same signal for its hover-preview
-    /// auto-collapse.
-
-    /// The input bar is the whole UI in pill stage, and when it's opened
-    /// with no surface, so it never hides then: fading it would leave
-    /// nothing on screen. With a surface open, the surface shows where the
-    /// overlay is, so the bar shows on hover — and stays while the user
-    /// has a draft typed, so it can't vanish mid-thought.
-    private var barVisible: Bool {
-        vm.shellStage == .pill
-            || vm.primarySurface == nil
-            || vm.isPointerInPanel
-            || !vm.manualInput.isEmpty
-    }
-
     var body: some View {
         @Bindable var vm = vm
         rootContent
@@ -148,11 +129,9 @@ struct OverlayView: View {
                 // own internal hover/press states normally.
                 .animation(nil, value: vm.primarySurface)
                 .animation(nil, value: vm.shellStage)
-                // Hover-reveal: opacity (not removal) so the layout never
-                // reflows and the panel height stays put.
-                .opacity(barVisible ? 1 : 0)
-                .allowsHitTesting(barVisible)
-                .animation(.easeInOut(duration: 0.18), value: barVisible)
+                // This is also the panel's visible bottom border. Hiding it
+                // when inactive left the resize band in transparent space,
+                // below the card edge a user would naturally try to grab.
         }
     }
 
@@ -173,7 +152,17 @@ struct OverlayView: View {
         VStack(spacing: 0) {
             TopStripView()
             Divider().opacity(0.35)
-            topCard
+            if vm.panelHasManualSize {
+                // Hugging content has its own natural height. Once the user
+                // chooses a smaller window, constrain a scroll viewport so
+                // it cannot push the title bar and composer off the panel.
+                ScrollView { topCard }
+                    .hiddenScrollGutter()
+                    .frame(minHeight: 0, maxHeight: .infinity)
+                    .layoutPriority(-1)
+            } else {
+                topCard
+            }
             Divider().opacity(0.35)
             // Same bar as everywhere else, inked as a row of this card
             // instead of its own floating capsule (see `inline`), with the
@@ -278,9 +267,8 @@ struct OverlayView: View {
 
     /// Top card content — title + body. There is no title-only shell state
     /// any more: if the user opens a surface, they see its body.
-    /// Hover-reveal chrome content: editable session title, close,
-    /// compose, ⋯. Opacity / hit-testing are applied by `revealOnHover`
-    /// so the optional opaque backing fades together with the title.
+    /// Persistent title bar: editable session title, close, compose, ⋯.
+    /// Its drag area must remain usable while another app is active.
     private var titleStripContent: some View {
         VStack(spacing: 0) {
             TopStripView()
@@ -288,14 +276,6 @@ struct OverlayView: View {
                 .fill(Design.Surface.separator)
                 .frame(height: 0.5)
         }
-    }
-
-    /// Fade `view` in only while the cursor is over the panel.
-    private func revealOnHover(_ view: some View) -> some View {
-        view
-            .opacity(vm.isPointerInPanel ? 1 : 0)
-            .allowsHitTesting(vm.isPointerInPanel)
-            .animation(.easeInOut(duration: 0.18), value: vm.isPointerInPanel)
     }
 
     @ViewBuilder
@@ -308,10 +288,10 @@ struct OverlayView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
         } else {
             VStack(spacing: 0) {
-                // Other surfaces keep the chrome IN the layout (opacity-
-                // only reveal) so the scrolled body never reflows as the
-                // cursor enters.
-                revealOnHover(titleStripContent)
+                // Keep the title bar available while another app is active.
+                // Hover does not reliably arrive at a nonactivating panel;
+                // hiding this row also disabled its only drag handle.
+                titleStripContent
                 primarySurface
                     .frame(maxWidth: .infinity,
                            maxHeight: .infinity,

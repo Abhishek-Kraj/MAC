@@ -966,6 +966,9 @@ final class OverlayViewModel {
     /// `AppDelegate.installPanelResizeMonitor`).
     @ObservationIgnored var onPanelDrag: ((CGFloat, CGFloat, Bool) -> Void)?
 
+    /// The user chose a viewport; live content must scroll inside it.
+    var panelHasManualSize = false
+
     /// Live Focus content-height reports from SwiftUI. AppDelegate matches
     /// the panel height to the content so the window grows and shrinks
     /// smoothly with the streamed answer instead of sitting at a fixed

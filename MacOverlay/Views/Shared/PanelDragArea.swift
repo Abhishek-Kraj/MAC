@@ -8,22 +8,35 @@ import AppKit
 /// is wall-to-wall filled capsules, cards, and controls, so in practice
 /// almost none of the overlay could actually be grabbed.
 ///
-/// Two ways in:
-/// - `PanelDragArea` — an invisible layer to put BEHIND chrome. Buttons and
-///   text fields sit in front and keep their own clicks; the gaps between
-///   them drag the window.
-/// - `.panelDraggable(didDrag:)` — for chrome that IS a control, where
-///   there is no gap to grab (the brand pill in `.pill` stage is a 44×44
-///   button that covers essentially the whole collapsed overlay). The
-///   gesture runs alongside the control's own, and `didDrag` tells the
-///   control to skip its click when the press turned out to be a drag.
-struct PanelDragArea: View {
-    @State private var didDrag = false
+/// Empty chrome uses AppKit event tracking so it receives the press before
+/// SwiftUI's filled containers and measures movement from the press itself.
+/// The brand button retains its separate simultaneous click/drag gesture.
+struct PanelDragArea: NSViewRepresentable {
+    @Environment(OverlayViewModel.self) private var vm
 
-    var body: some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .panelDraggable(didDrag: $didDrag)
+    func makeNSView(context: Context) -> DragView { DragView() }
+
+    func updateNSView(_ view: DragView, context: Context) {
+        view.onDrag = { [vm] dx, dy, ended in vm.onPanelDrag?(dx, dy, ended) }
+    }
+
+    final class DragView: NSView {
+        var onDrag: ((CGFloat, CGFloat, Bool) -> Void)?
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window else { return }
+            let anchor = window.convertPoint(toScreen: event.locationInWindow)
+            var dragged = false
+            while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+                let point = window.convertPoint(toScreen: next.locationInWindow)
+                let dx = point.x - anchor.x, dy = point.y - anchor.y
+                if !dragged && hypot(dx, dy) >= 3 { dragged = true }
+                if dragged { onDrag?(dx, dy, next.type == .leftMouseUp) }
+                if next.type == .leftMouseUp { break }
+            }
+        }
     }
 }
 

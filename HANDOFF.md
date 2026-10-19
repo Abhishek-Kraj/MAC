@@ -26,7 +26,8 @@ Two hard rules learned the hard way this week — please keep them:
 - **Branch:** `remove-pro-entirely`
 - **origin:** `https://github.com/Abhishek-Kraj/MAC.git` (fork)
 - **upstream:** `https://github.com/TheCloserApp/MAC.git`
-- **Working tree:** clean at `33ad8e7`. **Do not push to `upstream`.**
+- **Task baseline:** clean at `d545f2d`, immediately after `33ad8e7`.
+  See section 10 for the verified fixes from 2026-10-19. **Do not push to `upstream`.**
 
 Rebase/merge target for the fork's PR is `main` on upstream — not started yet,
 parked deliberately.
@@ -147,7 +148,7 @@ exhaustive — adding a case breaks several switches (the header title is one).
 
 ## 6. Open issues (user-reported, all unfixed except where noted)
 
-### A. Panel geometry — worst offender, "buggy in every tab"
+### A. Panel geometry — original report; repaired 2026-10-19 (section 10)
 1. **Panel can be dragged/resized inconsistently.** The user reports being
    unable to move or resize things and it differing per tab. Not diagnosed.
    Suspect area: `PanelResizeEdge` bands (25pt horizontal / 14pt vertical,
@@ -157,7 +158,7 @@ exhaustive — adding a case breaks several switches (the header title is one).
    minimum was raised 80→160pt; the post-call clipping fix is in `b161a77`
    but the general case may remain.
 
-### B. Summary surface — `33ad8e7`, compiles, NOT visually verified
+### B. Summary surface — `33ad8e7`, visually verified 2026-10-19 (section 10)
    - Summary is now `SummarySurfaceView` (a primary surface) instead of a
      sheet, so it can move and resize. **Check the snapshot renders correctly
      and that drag/resize work on it.**
@@ -203,7 +204,7 @@ exhaustive — adding a case breaks several switches (the header title is one).
 
 ---
 
-## 9. First suggested moves
+## 9. Original first suggested moves (completed; see section 10)
 
 1. Snapshot-verify `33ad8e7` (the WIP commit) before anything else.
 2. Reproduce the drag/resize complaint in every tab and find the actual cause
@@ -211,3 +212,57 @@ exhaustive — adding a case breaks several switches (the header title is one).
    still undiagnosed.
 3. Consider making the resize grab strips visible on hover (a legitimate
    fine-tune of existing behaviour, not a feature).
+
+---
+
+## 10. Verified fixes — 2026-10-19
+
+Feature work remains stopped. The summary surface from `33ad8e7` renders
+readably in dark mode, including the Call summary title, scrollable markdown,
+Copy and Conversation actions. It was photographed before and after changes.
+
+Panel issues diagnosed and repaired:
+
+- Standard header/composer were hidden with hover-dependent hit testing.
+  Hover is unreliable while this nonactivating panel is inactive, so its move
+  handle disappeared and the bottom resize band sat below the only visible
+  card, in transparent space. Both rows now remain visible.
+- Empty header/composer space now uses `PanelDragArea.DragView`, an AppKit view
+  tracking the entire press in screen coordinates derived from each event.
+  The brand button retains its original simultaneous click/drag gesture.
+- Manual sizing only disabled content tracking if the resize started in Live
+  Focus, and normal surfaces restored an 800pt default. `PanelSizePreference`
+  now records any manual expanded size independently of temporary surface
+  minima and pill frames. Reset clears it and restores both default dimensions.
+  The pure source is explicitly included in `test.sh` and covered in
+  `Tests/Tests.swift`.
+- A small manually sized live window could center its oversized intrinsic
+  content outside the window, losing both header and composer. Manual live
+  sizing now uses a constrained scrolling viewport inside the fixed chrome.
+
+Verification:
+
+- `./build.sh --channel dev` succeeded with the stable local dev signing identity.
+- `./test.sh`: 123 passed, 0 failed.
+- `-resizeprobe` now checks all eight edges/corners using multiple event samples,
+  with separate run-loop turns and a pause after restoring frames. This pause
+  prevents false corner failures from stale window-server geometry.
+- The probe also checks all eight surface transitions at a manual 440×420,
+  photographs each state with geometry, and checks collapse/reopen retention.
+  Each of the eight initial surfaces, plus live interview and live call, passed:
+  180 checks, no failures. Allow 12 seconds before stopping a full probe.
+- Native UI verified header movement (100pt left, 40pt down), summary bottom
+  resize (800→540pt), scrolling through the final summary section, retaining the
+  size when switching to Browser, and Reset panel size restoring 440×800.
+- Visually inspected minimum-sized surfaces and live states; header, composer,
+  summary footer and whole-word Assistant labels remain readable.
+
+Snapshot corrections: `-seedminutes` now survives the recurring surface
+assertions instead of being overwritten by `-surface regularCall`. Interview
+fixtures explicitly select Interview mode instead of inheriting saved Call mode.
+
+Limits: no real audio/model/network validation was attempted. Coordinate clicks
+on this nonactivating app were unreliable in CUA even for unchanged buttons;
+AX button actions worked. The brand gesture was preserved rather than inferring
+a product regression from that automation behavior. Keep using the app's own
+snapshot/event harness and inspect the rendered images.
