@@ -1713,6 +1713,12 @@ final class OverlayViewModel {
         endCapture()
 
         if shouldSummarise {
+            // Land on the chat surface showing the finished conversation.
+            // Staying on the Interview tab with the live view torn down left
+            // the panel showing nothing but the composer — a bare bar with no
+            // surface above it, which read as "the app broke".
+            if primarySurface == .interview { primarySurface = .chat }
+
             // A beat later, so the panel has finished collapsing into its
             // post-session layout before the sheet is presented over it.
             Task { @MainActor [weak self] in
@@ -2557,6 +2563,11 @@ final class OverlayViewModel {
                 minutesText = minutes
                 showMinutesSheet = true
                 statusMessage = ""
+                // The call is over, so this transcript is history now. Turn
+                // writes are debounced ~400ms; flush so a summary generated
+                // at the very end of a session cannot outlive the turn that
+                // records it.
+                sessionStore.flushPendingPersist()
                 notesManager.add(content: minutes, source: .ai, mode: sessionMode)
                 sessionNotes = notesManager.entries
             } catch {

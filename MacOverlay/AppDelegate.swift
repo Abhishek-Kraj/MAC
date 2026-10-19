@@ -281,6 +281,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     - Whether the overflow pool stays shared or is split per entity.
                     """
                     vm.showMinutesSheet = true
+                    // Also photograph what the panel looks like AFTER the
+                    // sheet closes: the "bare bar with no surface above it"
+                    // state that ending a call used to leave behind.
+                    if CommandLine.arguments.contains("-seedafter") {
+                        vm.showMinutesSheet = false
+                        vm.stopInterviewSession()
+                    }
                 }
                 guard surface != nil || forceExpanded else { return }
                 // `-fresh` clears the active session once, so the Interview
