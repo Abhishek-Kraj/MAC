@@ -90,8 +90,19 @@ struct ModelFilterBar: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
-                .frame(width: 120)
+                .frame(width: 112)
                 .help("Narrow by price tier. Light models answer fastest.")
+
+                Picker("", selection: $store.gateway) {
+                    Text("All providers").tag(ModelGateway?.none)
+                    ForEach(ModelGateway.allCases) { g in
+                        Text(g.label).tag(ModelGateway?.some(g))
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 114)
+                .help("Show one gateway's models — OpenRouter models run on your OpenRouter key, OpenCode models on an OpenCode key.")
 
                 Toggle("Images", isOn: $store.imagesOnly)
                     .toggleStyle(.checkbox)

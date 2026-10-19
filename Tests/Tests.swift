@@ -1304,6 +1304,43 @@ func testFetchedModelsAreHiddenButSelectionSurvives() throws {
     try assertTrue(v.isVisible("openrouter/openai/gpt-5.5"), "built-in defaults stay visible")
 }
 
+/// The gateway filter: OpenCode and OpenRouter models share one picker but
+/// sit behind two different keys (the GLM 5.3 Flash pair is both), so the
+/// list must be narrowable to one gateway — this is the control that keeps
+/// a no-key model out of the way at Start.
+@MainActor
+func testModelFilterGatewayNarrowing() throws {
+    let store = ModelFilterStore.shared
+    defer { store.reset() }
+
+    let code = OpenRouterModel(id: "opencode/glm-5.3-flash", name: "GLM 5.3 Flash",
+                               provider: "OpenCode", supportsImages: false, isFree: false,
+                               contextLength: nil, supportedParameters: nil, blendedPrice: 0.65)
+    let router = OpenRouterModel(id: "openrouter/z-ai/glm-5.3-flash", name: "GLM 5.3 Flash",
+                                 provider: "Z.ai", supportsImages: true, isFree: false,
+                                 contextLength: nil, supportedParameters: nil, blendedPrice: 0.65)
+    let all = [code, router]
+
+    store.reset()
+    func countMatching() -> Int { all.filter { store.matches($0) }.count }
+
+    try assertEq(countMatching(), 2, "no gateway filter passes both")
+    try assertFalse(store.isFiltering, "a fresh store filters nothing")
+
+    store.gateway = .openCode
+    try assertTrue(store.isFiltering, "a gateway filter counts as filtering")
+    try assertEq(countMatching(), 1, "OpenCode keeps only its own")
+    try assertTrue(store.matches(code), "the OpenCode model survives the filter")
+
+    store.gateway = .openRouter
+    try assertEq(countMatching(), 1, "OpenRouter keeps only its own")
+    try assertTrue(store.matches(router), "the OpenRouter model survives the filter")
+
+    store.gateway = nil
+    try assertEq(countMatching(), 2, "clearing the gateway shows both again")
+    try assertFalse(store.isFiltering, "and the store reports no filtering")
+}
+
 /// Settings -> AI and the overlay's picker read the same `ModelFilterStore`,
 /// which is what stopped them disagreeing about which models exist. Filtering
 /// itself must also match on provider, or typing a vendor name in the picker
@@ -3256,6 +3293,7 @@ struct TestsMain {
         TestRunner.run("Show all is scoped to the filters", testShowAllIsScopedToTheGivenIds)
         TestRunner.run("Model tier thresholds", testModelTierThresholds)
         TestRunner.run("Shared model filter store", testSharedModelFilterStore)
+        TestRunner.run("Model gateway filter narrows the picker", testModelFilterGatewayNarrowing)
         TestRunner.run("Prep matcher retrieves the right question", testPrepMatcherRetrievesTheRightQuestion)
         TestRunner.run("Prep matcher refuses weak matches", testPrepMatcherRefusesWeakMatches)
         TestRunner.run("Prep matcher handles morphology", testPrepMatcherHandlesMorphology)

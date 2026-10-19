@@ -1,6 +1,24 @@
 import Foundation
 import Observation
 
+/// The two gateways a model can live on. The `opencode/` and `openrouter/`
+/// prefixes are what `AIManager` routes on and what `key(for:)` demands, so
+/// this split is not cosmetic: picking an OpenCode model with no OpenCode
+/// key dead-ends at the Start button.
+enum ModelGateway: String, CaseIterable, Identifiable {
+    case openRouter
+    case openCode
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .openRouter: return "OpenRouter"
+        case .openCode:   return "OpenCode"
+        }
+    }
+}
+
 /// Filters shared by every screen that shows a model list — Settings → AI and
 /// the overlay's model picker.
 ///
@@ -17,19 +35,27 @@ final class ModelFilterStore {
     /// nil means no tier filter.
     var tier: ModelTier? = nil
     var imagesOnly = false
+    /// nil means every gateway. OpenCode and OpenRouter models share one
+    /// list but sit behind two different keys — narrowing to one gateway is
+    /// how someone picks a model without tripping over the other's key
+    /// prompt at Start.
+    var gateway: ModelGateway? = nil
 
     /// Clears everything and shows the full catalogue again.
     func reset() {
         search = ""
         tier = nil
         imagesOnly = false
+        gateway = nil
     }
 
     var isFiltering: Bool {
-        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || tier != nil || imagesOnly
+        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || tier != nil || imagesOnly || gateway != nil
     }
 
     func matches(_ m: OpenRouterModel) -> Bool {
+        if let gateway, m.gateway != gateway { return false }
         if let tier, m.tier != tier { return false }
         if imagesOnly && !m.supportsImages { return false }
         let q = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -59,6 +85,17 @@ final class ModelFilterStore {
 
     var matchingIDs: [String] {
         OpenRouterCatalog.shared.allModels.filter { matches($0) }.map(\.id)
+    }
+}
+
+extension OpenRouterModel {
+    /// Which gateway serves this model. Derived from the id prefix rather
+    /// than stored, because the prefix is already the single source of truth
+    /// for routing (`AIManager`) — a stored copy could disagree with it.
+    var gateway: ModelGateway? {
+        if id.hasPrefix("opencode/") { return .openCode }
+        if id.hasPrefix("openrouter/") { return .openRouter }
+        return nil
     }
 }
 
