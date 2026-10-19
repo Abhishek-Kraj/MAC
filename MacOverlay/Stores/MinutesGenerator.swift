@@ -43,12 +43,22 @@ enum MinutesGenerator {
 
     Rules: use only what the transcript states. No pleasantries, no invented \
     owners, dates, or decisions.
+
+    Language: write the minutes in the language the conversation was mainly \
+    conducted in. If it was not English, do not translate it into English — a \
+    Hindi call gets Hindi minutes. Use English only when the conversation was \
+    itself in English. Keep proper nouns, product names and any quoted phrase \
+    exactly as they were spoken, in their original script.
     """
 
     /// The session's user turns are the transcript. A call's assistant turns
     /// are the app's own suggested answers — not something anyone said — so
     /// they are excluded, or the minutes would attribute the copilot's advice
     /// to a participant.
+    ///
+    /// The user's own speech IS included: in a call they are half the
+    /// conversation, and commitments they make ("I'll send it by Friday") are
+    /// exactly the action items the summary exists to catch.
     static func transcript(from turns: [ChatTurn]) -> String {
         let lines = turns
             .filter { $0.role == .user }

@@ -179,6 +179,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             var forceExpanded = false
             var openSettingsWindow = false
             var surface: OverlayViewModel.PrimarySurface?
+            // `-seedcall` photographs a Regular call IN PROGRESS. The call
+            // live view (a growing transcript) is otherwise unreachable from
+            // a shell: starting one needs the mic, which a scripted run has
+            // no permission to use.
+            var didSeedCall = false
+            func seedLiveCallIfRequested(_ seed: () -> Void) {
+                guard CommandLine.arguments.contains("-seedcall"), !didSeedCall else { return }
+                didSeedCall = true
+                seed()
+            }
             if let surfIdx = CommandLine.arguments.firstIndex(of: "-surface"),
                CommandLine.arguments.indices.contains(surfIdx + 1) {
                 let raw = CommandLine.arguments[surfIdx + 1]
@@ -194,7 +204,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // regular-call tab treats as a live call and renders as
                     // the chat.
                     vm.interviewSurfaceMode = .regularCall
-                    vm.forceInterviewSetup = true
+                    vm.forceInterviewSetup = !CommandLine.arguments.contains("-seedcall")
+                    seedLiveCallIfRequested {
+                        vm.audioSource        = .both
+                        vm.sessionMode        = .call
+                        vm.isInterviewSession = true
+                        vm.showLiveTranscript = true
+                        // Mid-sentence on both lanes: this is what makes the
+                        // photograph show a call in progress rather than a
+                        // finished exchange.
+                        vm.transcription      = "and the rollout across the other three entities starts in March"
+                        vm.mySpeech           = "that works, I will share the capacity numbers before then"
+                        // Two exchanges already behind us, so the growing
+                        // transcript layout can be photographed without a
+                        // live call (and its permissions).
+                        for (q, a) in [
+                            ("Hey, quick update on the Fabric rollout — are we still on track for the March window?",
+                             "- They're checking whether the rollout is still on the original timeline.\n- Say yes, with the caveat that two of four entities are already in production."),
+                            ("We should be, yes. The throttling issue from last month is fixed and CU consumption is stable.",
+                             "- They're confirming the throttle fix held and consumption is steady.\n- Follow-up: send the utilisation numbers so they can verify independently."),
+                        ] {
+                            self.vm.sessionStore.appendTurn(user: q, assistant: a)
+                        }
+                    }
                     surface = .interview
                 } else {
                     surface = OverlayViewModel.PrimarySurface(rawValue: raw)

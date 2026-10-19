@@ -151,7 +151,16 @@ struct ChatSurfaceView: View {
                 Divider().opacity(0.4)
             }
 
-            if vm.isInterviewSession && !vm.isInterviewTextOnly && vm.interviewFocusMode {
+            if vm.isRegularCallSession && !vm.isInterviewTextOnly {
+                // A call is not a quiz. The interview live view is built
+                // around discrete question→answer pairs with a ‹ n/n ›
+                // pager — correct when someone asks you one question at a
+                // time, wrong for a conversation, which is why a call kept
+                // arriving as "question, answer" instead of a transcript
+                // that grows as people talk. A call shows the running
+                // transcript instead.
+                liveCallTranscript(session: session)
+            } else if vm.isInterviewSession && !vm.isInterviewTextOnly && vm.interviewFocusMode {
                 // Live Focus: during a live interview only the current
                 // exchange matters — the full conversation stays one
                 // toggle away (list button on the strip).
@@ -171,6 +180,162 @@ struct ChatSurfaceView: View {
                 conversationView(session: session)
             }
         }
+    }
+
+    // MARK: - Live call (continuous transcript)
+
+    /// The Regular call live view: one growing transcript.
+    ///
+    /// Deliberately NOT the interview's one-pair-at-a-time card. In a call
+    /// nobody is quizzing the user — people talk over each other, back off,
+    /// change the subject, and the useful thing on screen is simply the
+    /// conversation so far, newest at the bottom, with whatever the assistant
+    /// said sitting under the line that prompted it. It follows people
+    /// talking, rather than asking them to page through a Q&A deck.
+    ///
+    /// The user's own speech is included and labelled YOU: on a call you are
+    /// half the conversation, and seeing your own words back is how you catch
+    /// the ASR getting a name wrong before it reaches your notes.
+    private func liveCallTranscript(session: ChatSession) -> some View {
+        let liveThem = vm.transcription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let liveYou  = (vm.isSplitCapture ? vm.liveYourSpeech : "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if session.turns.isEmpty && liveThem.isEmpty && liveYou.isEmpty {
+                        callWaitingState
+                    }
+
+                    ForEach(session.turns) { turn in
+                        if turn.role == .user {
+                            // A spoken question, in the same lane styling the
+                            // strip uses, so the card reads as one transcript
+                            // with the strip rather than two different UIs.
+                            laneLine("THEM", turn.content, primary: true)
+                                .padding(.horizontal, 22)
+                                .padding(.top, 12)
+                                .padding(.bottom, 2)
+                        } else {
+                            callAnswer(turn)
+                        }
+                    }
+
+                    // Anything still being spoken right now, so the
+                    // transcript visibly continues rather than freezing
+                    // between turns.
+                    if !liveThem.isEmpty {
+                        laneLine("THEM", liveThem, primary: true)
+                            .padding(.horizontal, 22)
+                            .padding(.top, 12)
+                            .padding(.bottom, 2)
+                    }
+                    if !liveYou.isEmpty {
+                        laneLine("YOU", liveYou, primary: false)
+                            .padding(.horizontal, 22)
+                            .padding(.top, 8)
+                            .padding(.bottom, 2)
+                    }
+
+                    Color.clear.frame(height: 1).id("call-bottom")
+                }
+                .padding(.bottom, 14)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FocusHeightKey.self, value: g.size.height)
+                })
+            }
+            .hiddenScrollGutter()
+            .onPreferenceChange(FocusHeightKey.self) { callContentHeight = $0 }
+            // Hug the transcript up to a cap, then scroll — pinned to the
+            // newest line, which is the only one that matters while talking.
+            .frame(height: min(max(callContentHeight, 56), Self.callTranscriptMaxHeight),
+                   alignment: .top)
+            .onAppear { proxy.scrollTo("call-bottom", anchor: .bottom) }
+            .onChange(of: session.turns.count) { _, _ in
+                proxy.scrollTo("call-bottom", anchor: .bottom)
+            }
+            // Follow the live partials, but not on every character — a
+            // coarse bucket keeps the scroll from chasing a layout that
+            // hasn't settled.
+            .onChange(of: (liveThem.count + liveYou.count) / 32) { _, _ in
+                proxy.scrollTo("call-bottom", anchor: .bottom)
+            }
+            .animation(vm.isUserResizingPanel ? nil : .easeOut(duration: 0.18),
+                       value: callContentHeight)
+        }
+    }
+
+    /// Cap on the call transcript before it starts scrolling.
+    private static let callTranscriptMaxHeight: CGFloat = 460
+
+    @State private var callContentHeight: CGFloat = 0
+
+    /// One assistant answer inside the call transcript. Indented and quieter
+    /// than the transcript itself so the two are never confused — the user
+    /// reads the conversation, and glances at what the assistant made of it.
+    private func callAnswer(_ turn: ChatTurn) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Labelled, inset and quieter than the transcript. Unlabelled
+            // bullets directly under a transcript read as more of what the
+            // person said — and on a call the whole point is telling "them"
+            // and "the assistant" apart at a glance.
+            // The label sits ABOVE the answer rather than in a narrow left column:
+                // lane labels are 28pt wide because they hold two letters, and
+                // "Assistant" does not fit there — it wrapped to "Assis /
+                // tant". Same visual grammar, sized for its content.
+                HStack(spacing: 5) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 8, weight: .semibold))
+                    Text("Assistant")
+                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                }
+                .foregroundStyle(Design.Ink.tertiary)
+                .padding(.top, 2)
+
+            if vm.isStreaming(turnID: turn.id) && turn.content.isEmpty {
+                StreamingPlaceholderRow()
+                    .frame(height: Self.placeholderRowHeight)
+            } else {
+                MarkdownResponseView(text: turn.content,
+                                     baseSize: 12.5 * vm.textScale,
+                                     codeSize: 10 * vm.textScale)
+            }
+            FocusCopyButton(text: turn.content)
+                .opacity(focusHovering ? 1 : 0.55)
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 4)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // A faint wash rather than a hard edge: it groups the assistant's
+        // words without drawing a second card inside the transcript.
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Design.Surface.previewFill.opacity(0.35))
+                .padding(.horizontal, 14)
+        )
+    }
+
+    /// Before anyone has said anything on a live call: say what is happening,
+    /// instead of the interview's "waiting for the first question" — nothing
+    /// was asked, and nothing is being waited for.
+    private var callWaitingState: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "waveform")
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(Design.Ink.tertiary)
+            Text("Listening")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Design.Ink.secondary)
+            Text("The conversation appears here as it's spoken.")
+                .font(.caption2)
+                .foregroundColor(Design.Ink.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 26)
     }
 
     // MARK: - Live Focus (interview)
@@ -504,15 +669,25 @@ struct ChatSurfaceView: View {
                     if vm.isInterviewSession && !vm.isInterviewTextOnly {
                         LiveSessionTimer()
                     }
-                    // During an interview the transcript stays on ONE line
-                    // and scrolls — head truncation keeps the newest words
-                    // visible — so it never pushes the answer around. In a
-                    // "You + Them" session the call and the mic are
-                    // transcribed separately, so each gets its own labelled
-                    // line and the transcript reads as a conversation —
-                    // with the call lane owning the answers, per the
-                    // capture plan.
-                    if vm.isSplitCapture {
+                    // A call shows the live lanes at the BOTTOM of its
+                    // growing transcript, so the strip would be showing the
+                    // same words twice — the strip's own job here is the
+                    // timer and the controls, not a second copy of the speech.
+                    if vm.isRegularCallSession {
+                        Text("Live")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Design.Ink.tertiary)
+                            .padding(.top, 2)
+                        Spacer(minLength: 0)
+                    } else if vm.isSplitCapture {
+                        // During an interview the transcript stays on ONE line
+                        // and scrolls — head truncation keeps the newest words
+                        // visible — so it never pushes the answer around. In a
+                        // "You + Them" session the call and the mic are
+                        // transcribed separately, so each gets its own labelled
+                        // line and the transcript reads as a conversation —
+                        // with the call lane owning the answers, per the
+                        // capture plan.
                         VStack(alignment: .leading, spacing: 2) {
                             laneLine("THEM", vm.transcription, primary: true)
                             if !vm.liveYourSpeech.isEmpty {
@@ -537,19 +712,31 @@ struct ChatSurfaceView: View {
                     if !vm.transcription.isEmpty {
                         TranscriptCopyButton()
                     }
-                    if !previousQuestions.isEmpty || !vm.transcription.isEmpty {
+                    // A call's transcript IS the main view — a drop-down of the same thing
+                    // would be a second copy of the page.
+                    if !vm.isRegularCallSession
+                        && (!previousQuestions.isEmpty || !vm.transcription.isEmpty) {
                         transcriptExpandToggle
                     }
                     if !vm.isInterviewSession {
                         backendBadge
                     }
                     if vm.isInterviewSession && !vm.isInterviewTextOnly {
-                        focusToggle
+                        // The focus toggle switches between the single-pair
+                        // card and the full conversation. A call has no
+                        // single-pair card to switch to — its transcript is
+                        // always the full one — so the button would be a
+                        // dead control there.
+                        if !vm.isRegularCallSession {
+                            focusToggle
+                        }
                         hideTranscriptButton
                     }
                 }
 
-                if transcriptExpanded {
+                // The drop-down is the interview's way of reaching the full
+                // conversation. On a call the main view already IS that.
+                if transcriptExpanded && !vm.isRegularCallSession {
                     transcriptHistoryPanel
                         .transition(.opacity)
                 }
