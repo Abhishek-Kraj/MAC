@@ -240,6 +240,21 @@ func testSessionModeQuickActionsExist() throws {
 }
 
 @MainActor
+func testAudioSourceDefaultsToSplitCapture() throws {
+    let suite = "thecloser.tests.audioSource"
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    // Fresh install: split capture, so only the call's audio asks questions.
+    try assertEq(AudioSource.saved(in: defaults), .both)
+    // A saved choice wins, including Mic (raw value 0, which a missing key
+    // also reads as).
+    defaults.set(AudioSource.microphone.rawValue, forKey: "audioSource")
+    try assertEq(AudioSource.saved(in: defaults), .microphone)
+    defaults.set(AudioSource.systemAudio.rawValue, forKey: "audioSource")
+    try assertEq(AudioSource.saved(in: defaults), .systemAudio)
+    defaults.removePersistentDomain(forName: suite)
+}
+
 func testAudioSourceLabels() throws {
     try assertEq(AudioSource.microphone.label, "Mic")
     try assertEq(AudioSource.systemAudio.label, "System")
@@ -3345,6 +3360,7 @@ struct TestsMain {
         TestRunner.run("SessionMode has non-empty fields", testSessionModeSystemPromptNotEmpty)
         TestRunner.run("SessionMode has quick actions", testSessionModeQuickActionsExist)
         TestRunner.run("AudioSource labels + cases", testAudioSourceLabels)
+        TestRunner.run("Audio source defaults to split capture", testAudioSourceDefaultsToSplitCapture)
         TestRunner.run("AppChannel resolves from Info.plist", testAppChannelResolution)
         TestRunner.run("AppChannel keeps data apart", testAppChannelKeepsDataApart)
         TestRunner.run("CallDetector recognises call apps", testCallDetectorRecognisesCallApps)

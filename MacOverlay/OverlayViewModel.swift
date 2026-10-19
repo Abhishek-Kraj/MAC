@@ -51,8 +51,7 @@ final class OverlayViewModel {
     }
 
     // MARK: - Audio / transcription
-    var audioSource: AudioSource = AudioSource(
-        rawValue: UserDefaults.standard.integer(forKey: "audioSource")) ?? .microphone {
+    var audioSource: AudioSource = AudioSource.saved() {
         didSet {
             guard oldValue != audioSource else { return }
             // The choice must survive launches: an interview tool that

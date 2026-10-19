@@ -293,7 +293,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | B7 ✅ | Start is blocked for Apple on-device (and Type mode) without an ElevenLabs/xAI key | VM:2927 | R |
 | B8 | Placeholders sent raw: `{ROLE}` `{COMPANY}` (+ preset `{TARGET_ROLE}` …); only `{NAME}` replaced | AIController.swift:68, SessionMode.swift:49/60/71 | R |
 | B9 | Answer depth ignored once a seeded or custom preset exists (always) | SessionMode.swift:40, PromptStore seeded():206-212 | C |
-| B10 | Default audio source is Mic, so the user's own speech triggers answers (HANDOFF §5 says split capture) | VM:54-55 | R |
+| B10 ✅ | Default audio source is Mic, so the user's own speech triggers answers (HANDOFF §5 says split capture) | VM:54-55 | R |
 | B11 | Post-call stale THEM caption; it also hides every post-End status ("Writing…", "Summary failed") | VM endCapture, ChatSurfaceView:128-149 | C (seen in snapshot) |
 | B12 | The summary lands up to 90s later and overrides whatever surface the user is on, even a new session | VM:2613-2614 | C |
 | B13 | The summary can't be reopened once left, and is lost on quit; "Saved to Session notes" points to in-memory notes with no UI | NotesManager.swift, CSV:1514, NotesPanelView unreferenced | R |
@@ -345,6 +345,7 @@ B7: Apple on-device and a typed Regular call no longer need a transcription
 key (`missingTranscriptionKey`); Automatic still asks for one — open question.
 Harness ran all 32 preference/key combinations.
 B15: only detached marks are re-spaced; a dot glued inside a token is never split or capitalised after. Pinned by testTranscriptCleanupKeepsDottedAndNumericTokens.
+B10: fresh installs default to You + Them (`AudioSource.saved`); a saved choice wins. Pinned by testAudioSourceDefaultsToSplitCapture.
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

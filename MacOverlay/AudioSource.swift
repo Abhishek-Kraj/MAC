@@ -1,3 +1,5 @@
+import Foundation
+
 enum AudioSource: Int, CaseIterable {
     case microphone = 0
     case systemAudio = 1
@@ -24,5 +26,13 @@ enum AudioSource: Int, CaseIterable {
         case .systemAudio: return (.systemAudio, nil)
         case .both:        return (.systemAudio, .microphone)
         }
+    }
+
+    /// The saved choice, or split capture on a fresh install, so the user's
+    /// own voice never triggers an answer by default. Checks for the key
+    /// itself: a missing integer reads as 0, which is `.microphone`.
+    static func saved(in defaults: UserDefaults = .standard) -> AudioSource {
+        guard defaults.object(forKey: "audioSource") != nil else { return .both }
+        return AudioSource(rawValue: defaults.integer(forKey: "audioSource")) ?? .both
     }
 }
