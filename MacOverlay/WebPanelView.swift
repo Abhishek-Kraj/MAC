@@ -178,17 +178,23 @@ struct WebPanelView: NSViewRepresentable {
 
         // Without this, `getUserMedia({audio:true})` inside any embedded site
         // is silently denied — WKWebView treats the absence of a UI delegate
-        // decision as a refusal. The host app already declares the mic
-        // purpose string (NSMicrophoneUsageDescription), so the OS-level
-        // prompt still gates first-time access.
+        // decision as a refusal. Each site asks through WebKit's own prompt
+        // instead of getting the mic unasked.
         func webView(_ webView: WKWebView,
                      requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                      initiatedByFrame frame: WKFrameInfo,
                      type: WKMediaCaptureType,
                      decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-            NSLog("[WebPanel] media capture request: type=%d origin=%@://%@",
-                  type.rawValue, origin.protocol, origin.host)
-            decisionHandler(.grant)
+            let decision = Self.mediaDecision(for: type)
+            NSLog("[WebPanel] media capture request: type=%d origin=%@://%@ decision=%d",
+                  type.rawValue, origin.protocol, origin.host, decision.rawValue)
+            decisionHandler(decision)
+        }
+
+        /// Mic: ask, per site. Camera (alone or with the mic): deny — the app
+        /// declares no camera purpose string, so granting it would abort.
+        static func mediaDecision(for type: WKMediaCaptureType) -> WKPermissionDecision {
+            type == .microphone ? .prompt : .deny
         }
 
         // MARK: WKScriptMessageHandler — diagnostic JS bridge
