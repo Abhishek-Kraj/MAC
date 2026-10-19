@@ -1372,7 +1372,9 @@ final class OverlayViewModel {
 
         // Sessions created before workspaces existed need to inherit the
         // default workspace so they still show up in the list.
-        sessionStore.migrateWorkspacelessSessions(to: workspaceStore.activeWorkspaceID)
+        sessionStore.migrateOrphanedSessions(
+            validWorkspaceIDs: Set(workspaceStore.workspaces.map(\.id)),
+            to: workspaceStore.activeWorkspaceID)
 
         transcriptionManager.elevenLabsAPIKey = elevenLabsAPIKey
         transcriptionManager.grokAPIKey       = grokAPIKey

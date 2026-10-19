@@ -27,6 +27,11 @@ final class WorkspaceStore {
                                     isDefault: true)
             self.workspaces = [general]
             self.activeWorkspaceID = general.id
+            // Observers don't fire in init. Unsaved, the seed was re-minted
+            // with a new id every launch, and History (scoped to it) lost
+            // every earlier session.
+            persist()
+            UserDefaults.standard.set(general.id.uuidString, forKey: "activeWorkspaceID")
         } else {
             self.workspaces = loaded
             if let raw = UserDefaults.standard.string(forKey: "activeWorkspaceID"),

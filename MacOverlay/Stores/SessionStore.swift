@@ -389,12 +389,15 @@ final class SessionStore {
         }
     }
 
-    /// Ensures every session has a workspace. Called once at app launch —
-    /// legacy sessions saved before workspaces existed get auto-assigned to
-    /// the given fallback.
-    func migrateWorkspacelessSessions(to fallback: UUID) {
+    /// Ensures every session has a live workspace. Called once at app launch:
+    /// sessions with none (saved before workspaces existed), or with an id
+    /// that no longer exists, go to `fallback`. Earlier builds re-minted the
+    /// default workspace each launch, so their sessions point at ids that
+    /// were never saved.
+    func migrateOrphanedSessions(validWorkspaceIDs: Set<UUID>, to fallback: UUID) {
         var changed = false
-        for i in sessions.indices where sessions[i].workspaceID == nil {
+        for i in sessions.indices
+        where sessions[i].workspaceID.map({ !validWorkspaceIDs.contains($0) }) ?? true {
             sessions[i].workspaceID = fallback
             changed = true
         }
