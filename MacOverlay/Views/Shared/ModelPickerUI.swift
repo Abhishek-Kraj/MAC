@@ -148,17 +148,40 @@ struct ModelListView: View {
     @Bindable var store = ModelFilterStore.shared
     var selectedID: String?
     var showsID: Bool = true
+    /// When set, models this returns false for are left out — the overlay's
+    /// picker passes the gateway-key check so a model that cannot start
+    /// (`opencode/…` with no OpenCode key) is not offered at all. Settings
+    /// passes nothing: curating the catalogue is its job, and the banner —
+    /// not the list — explains what a missing key costs.
+    var canRun: ((OpenRouterModel) -> Bool)? = nil
     var onSelect: (OpenRouterModel) -> Void
 
     var body: some View {
-        let groups = store.groupedModels
+        let all = store.groupedModels
+        let groups = canRun.map { runnable in
+            all.compactMap { group -> (provider: String, models: [OpenRouterModel])? in
+                let kept = group.models.filter(runnable)
+                return kept.isEmpty ? nil : (group.provider, kept)
+            }
+        } ?? all
+        let hidden = hiddenCount(all)
+
         if groups.isEmpty {
-            Text(store.isFiltering
-                 ? "No models match these filters."
-                 : "No models available.")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .padding(.vertical, 8)
+            VStack(alignment: .leading, spacing: 4) {
+                if all.isEmpty {
+                    Text(store.isFiltering
+                         ? "No models match these filters."
+                         : "No models available.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                if hidden > 0 {
+                    Text(hiddenNotice(hidden))
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.vertical, 8)
         } else {
             LazyVStack(alignment: .leading, spacing: 10) {
                 ForEach(groups, id: \.provider) { group in
@@ -181,6 +204,27 @@ struct ModelListView: View {
                 }
             }
         }
+    }
+
+    private func hiddenCount(_ groups: [(provider: String, models: [OpenRouterModel])]) -> Int {
+        guard let canRun else { return 0 }
+        return groups.reduce(0) { $0 + $1.models.filter { !canRun($0) }.count }
+    }
+
+    /// "2 models hidden — an OpenCode key unlocks them (Settings → AI)."
+    /// Only shown when the key filter emptied the list; a partly hidden
+    /// list needs no footnote.
+    private func hiddenNotice(_ count: Int) -> String {
+        guard let canRun else { return "" }
+        let labels = Set(store.groupedModels
+            .flatMap(\.models)
+            .filter { !canRun($0) }
+            .compactMap(\.gateway?.label)).sorted()
+        let noun = count == 1 ? "model" : "models"
+        guard !labels.isEmpty else {
+            return "\(count) \(noun) hidden — a gateway key you haven't added yet unlocks them."
+        }
+        return "\(count) \(noun) hidden — an \(labels.joined(separator: " / ")) key unlocks them (Settings → AI)."
     }
 }
 /// The overlay's model control: a popover holding the same filter bar and
@@ -228,7 +272,8 @@ struct ModelPickerButton: View {
             ScrollView {
                 ModelListView(store: store,
                               selectedID: vm.selectedModel,
-                              showsID: true) { m in
+                              showsID: true,
+                              canRun: { vm.canRun($0) }) { m in
                     vm.selectedModel = m.id
                     onSelect?(m)
                     isOpen = false

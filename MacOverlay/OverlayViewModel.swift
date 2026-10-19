@@ -1129,6 +1129,7 @@ final class OverlayViewModel {
         let retiredID = selectedModel
         let replacement = Self.availableModels.first {
             visibility.isVisible($0.id) && $0.id != retiredID
+                && !key(for: $0.id).key.isEmpty
         }
         guard let replacement else { return }
         selectedModel = replacement.id
@@ -2729,6 +2730,14 @@ final class OverlayViewModel {
     }
 
     var keyForSelectedModel: (key: String, provider: String) { key(for: selectedModel) }
+
+    /// Whether this model's gateway key is present — the same rule the
+    /// Start gate and the answer path use. The overlay's model picker hides
+    /// what fails this, so a tap cannot land the interview on a model that
+    /// will refuse to start.
+    func canRun(_ model: OpenRouterModel) -> Bool {
+        !key(for: model.id).key.isEmpty
+    }
 
     var canSend: Bool {
         let hasText = showManualInput ? !manualInput.isEmpty : !transcription.isEmpty
