@@ -1554,7 +1554,16 @@ private struct MinutesSheet: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
         }
-        .frame(width: 540, height: 480)
+        // The sheet window has no ground of its own — a SwiftUI sheet is a
+        // separate NSWindow, and an unbacked one shows whatever is behind it.
+        // This one used to end at a hard 540x480, which meant a short summary
+        // left a large empty band under the footer and long content ran to
+        // the very edge. Hug the content between sensible bounds instead, and
+        // carry the same tint the overlay uses so the controls match.
+        .tint(Design.Accent.brand)
+        .background(Design.Surface.shellFill)
+        .frame(minWidth: 460, idealWidth: 540, maxWidth: 640,
+               minHeight: 320, idealHeight: 480, maxHeight: 720)
     }
 }
 

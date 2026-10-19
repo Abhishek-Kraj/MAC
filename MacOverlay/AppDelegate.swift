@@ -184,6 +184,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // a shell: starting one needs the mic, which a scripted run has
             // no permission to use.
             var didSeedCall = false
+            var didSeedMinutes = false
             func seedLiveCallIfRequested(_ seed: () -> Void) {
                 guard CommandLine.arguments.contains("-seedcall"), !didSeedCall else { return }
                 didSeedCall = true
@@ -249,6 +250,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             var didSeed  = false
             func openSurface() {
                 if openSettingsWindow { self.showPreferences() }
+                // `-seedminutes` shows the summary sheet with sample content.
+                // The sheet is a separate attached window, and the only way to
+                // present it is to have finished a session first — so this is
+                // the only way to photograph it without a real model call.
+                if CommandLine.arguments.contains("-seedminutes"), !didSeedMinutes {
+                    didSeedMinutes = true
+                    vm.minutesText = """
+                    ## Summary
+                    The call covered the Fabric rollout schedule across four legal \
+                    entities. The March window is confirmed as long as the March \
+                    throttling fix holds, and the team agreed to share utilisation \
+                    numbers before the next sync so progress can be verified \
+                    independently.
+
+                    ## Participants
+                    Gokul, Rucha, Abhishek.
+
+                    ## Decisions
+                    - Keep the March rollout window; no change to the per-entity schedule.
+                    - Hold the 20% headroom buffer for month-end reporting spikes.
+                    - Share CU utilisation numbers before the next sync.
+
+                    ## Action items
+                    - Send the CU utilisation numbers — Abhishek — before the next sync
+                    - Confirm the remaining two entities are production-ready — Gokul — no date
+                    - Re-check throttling after the March workloads land — Rucha — March
+
+                    ## Open questions
+                    - Whether the overflow pool stays shared or is split per entity.
+                    """
+                    vm.showMinutesSheet = true
+                }
                 guard surface != nil || forceExpanded else { return }
                 // `-fresh` clears the active session once, so the Interview
                 // surface draws its setup form rather than resuming whatever
@@ -427,6 +460,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Drag handles behind the header strip and the input bar.
+        vm.onResetPanelSize = { [weak self] in
+            MainActor.assumeIsolated { self?.resetPanelSize() }
+        }
+
         vm.onPanelDrag = { [weak self] dx, dy, ended in
             self?.handlePanelDrag(dx: dx, dy: dy, ended: ended)
         }
@@ -574,6 +611,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // and anything else floating. Verified via the window list: the panel
         // reported `layer=3` where `.statusBar + 1` is 26.
         overlayPanel.isFloatingPanel            = true
+        // Pin the panel to dark at the AppKit level, not just via
+        // `.preferredColorScheme(.dark)` on its content view. A SwiftUI sheet
+        // is presented in its OWN window, outside the presenting view's
+        // modifier chain — so the colour scheme did not reach it. On a Mac in
+        // light mode that rendered every sheet (call summary, create prompt,
+        // prep setup, bank, backups, editor, new workspace) light-on-light:
+        // a washed-out grey title on near-white, unreadable against this dark
+        // app. Setting appearance on the panel makes every attached sheet
+        // inherit it, so this class of bug cannot come back per-sheet.
+        overlayPanel.appearance                 = NSAppearance(named: .darkAqua)
         overlayPanel.level                      = .statusBar + 1
         overlayPanel.collectionBehavior         = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         overlayPanel.isOpaque                   = false
@@ -1303,11 +1350,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         vm.pillAnchor = newAnchor
     }
 
+    /// Put the panel back to its default size, discarding any manual resize.
+    ///
+    /// Manual sizing is sticky on purpose (the panel must not fight the user),
+    /// which means a size reached by accident — a stray drag while trying to
+    /// move the panel, a double-click caught by the border — used to be
+    /// permanent until the app was restarted. This is the way back.
+    @MainActor
+    func resetPanelSize() {
+        focusHeightUserOverride = false
+        lastFullSize = Self.expandedSize
+        // Re-derive the size the current stage would have picked with no
+        // manual size in play, so this works in the pill, the bar-only shell
+        // and a live focus card alike.
+        let cur = overlayPanel?.frame ?? .zero
+        let surfaceOpen = vm.primarySurface != nil
+        var target = Self.expandedSize
+        if vm.shellStage == .pill {
+            target = vm.hasPillPopup ? Self.pillWithPopupSize : Self.collapsedSize
+        } else if surfaceOpen {
+            target = NSSize(width: max(cur.width, Self.expandedMinSize.width),
+                            height: Self.expandedSize.height)
+        }
+        guard let panel = overlayPanel else { return }
+        panel.setFrame(NSRect(x: cur.origin.x,
+                              y: cur.origin.y + (cur.height - target.height),
+                              width: target.width, height: target.height),
+                       display: true, animate: true)
+        forgetPendingPanelResize()
+        refreshResizeCursors()
+        // Let the content measurement reassert itself now that the manual
+        // override is gone, or a focus card would keep the height it had.
+        applyFocusPanelHeight()
+    }
+
     /// MINIMUM panel size — the user can manually resize, but never below
     /// this. Two values: pill (just the brand dot) and expanded (wide enough
     /// for every visible bar element).
     static let pillMinSize             = collapsedSize
-    static let expandedCompactMinSize  = NSSize(width: 360, height: 80)
+    static let expandedCompactMinSize  = NSSize(width: 360, height: 160)
     /// With a surface open the width can't go below the width the layouts
     /// are designed for: narrower, and the setup screen's buttons wrap one
     /// letter per line. Settings used to be the other example here, but it is

@@ -269,6 +269,16 @@ struct TopStripView: View {
                 Label("Rename…", systemImage: "pencil")
             }
 
+            // The way back from a size the user does not want. A manual
+            // resize is sticky on purpose, so this has to be reachable
+            // without hunting — a squashed panel with the bar cut in half
+            // is otherwise only fixable by restarting the app.
+            Button {
+                vm.onResetPanelSize?()
+            } label: {
+                Label("Reset panel size", systemImage: "arrow.up.left.and.arrow.down.right")
+            }
+
             Divider()
 
             Menu {

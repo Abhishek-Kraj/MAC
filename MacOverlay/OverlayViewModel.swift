@@ -1002,6 +1002,10 @@ final class OverlayViewModel {
             || !quickAskResponse.isEmpty
     }
     @ObservationIgnored var onPillPopupChange: ((Bool) -> Void)?
+    /// Restore the panel's default size. Manual resizes are sticky by
+    /// design, so without this a size reached by accident (a stray border
+    /// drag meant as a move) was permanent until the app restarted.
+    @ObservationIgnored var onResetPanelSize: (() -> Void)?
 
     /// Set only when the app is being driven headlessly (see AppDelegate's
     /// `-snapshot`). The bar collapses itself back to the pill 350ms after
