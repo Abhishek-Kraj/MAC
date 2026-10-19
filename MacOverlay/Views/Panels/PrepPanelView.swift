@@ -99,7 +99,7 @@ struct PrepPanelView: View {
             // placeholder — which is inert until it happens, so making it wait
             // for a sheet the user may never open leaves it dead.
             guard isPlaceholderBank || generator.roleName.isEmpty else { return }
-            let key = UserDefaults.standard.string(forKey: "openRouterAPIKey")?
+            let key = SecretStore.string("openRouterAPIKey")?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             await generator.detectRole(context: vm.interviewContext,
                                         resume: vm.interviewResumeText,
@@ -491,7 +491,7 @@ struct PrepSetupView: View {
         }
         .frame(width: 560, height: 720)
         .task {
-            let key = UserDefaults.standard.string(forKey: "openRouterAPIKey")?
+            let key = SecretStore.string("openRouterAPIKey")?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             await generator.detectRole(context: vm.interviewContext,
                                        resume: vm.interviewResumeText,
@@ -788,7 +788,7 @@ struct PrepSetupView: View {
             return
         }
         gapsLoading = true
-        let key = UserDefaults.standard.string(forKey: "openRouterAPIKey")?
+        let key = SecretStore.string("openRouterAPIKey")?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         Task {
             let report = await GapAnalyser.analyse(
@@ -906,7 +906,7 @@ struct PrepSetupView: View {
         Task {
             // Anything too long to read between questions is shortened first,
             // so what appears live is speakable. The original is kept.
-            let key = UserDefaults.standard.string(forKey: "openRouterAPIKey")?
+            let key = SecretStore.string("openRouterAPIKey")?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             var shortened = 0
             for pair in result.pairs

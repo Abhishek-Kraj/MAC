@@ -282,7 +282,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 |---|---|---|---|
 | B1 ✅ | History hides every session from earlier launches: the default workspace is never saved, so each launch gets a new UUID (88 sessions, 79 workspace IDs) | WorkspaceStore.swift:19-29, HistoryPanelView:56/150 | R |
 | B2 ✅ | A live call keeps recording into a different session after ⌘N, History open, or Delete Session; ⌘N monitor swallows the key unconditionally | AppDelegate.swift:720-731, VM continueSession / startNewSession, SessionStore.delete | R/C |
-| B3 | API keys stored plaintext in the UserDefaults plist, no Keychain | VM:590-640 (e.g. :623) | R |
+| B3 ✅ | API keys stored plaintext in the UserDefaults plist, no Keychain | VM:590-640 (e.g. :623) | R |
 | B4 | In-app browser grants mic/camera to any origin; no camera usage string | WebPanelView.swift:184-192 | R |
 | B5 | Screen-share hiding not proven for sheets, NSOpen/SavePanel, popovers, menus; inspector is capturable by design | AppDelegate swizzle :2210-2241 | S |
 | B6 | Any JSON decode error loads an empty store; the next write overwrites sessions.json (no backup) | JSONStore.swift:40-47, SessionStore init | S |
@@ -347,6 +347,7 @@ Harness ran all 32 preference/key combinations.
 B15: only detached marks are re-spaced; a dot glued inside a token is never split or capitalised after. Pinned by testTranscriptCleanupKeepsDottedAndNumericTokens.
 B10: fresh installs default to You + Them (`AudioSource.saved`); a saved choice wins. Pinned by testAudioSourceDefaultsToSplitCapture.
 B8: `PromptPreset.resolvingPlaceholders` fills {NAME} and drops lines with any other unfilled placeholder; built-in "User context: {ROLE} at {COMPANY}" lines removed. Checked on real presets (Interview drops 3 template lines, Meeting/Call 1). Pinned by testPromptPlaceholdersResolveOrDrop.
+B3: keys live in the login Keychain (`SecretStore`, service = bundle id, not synced, cached); launch migrates plist copies, removing each only after read-back matches. Verified over two launches: plist keys gone, Keychain items present and equal to the originals, no prompt, keys load. B7b (user decision): Automatic with no cloud key starts on Apple; the gear stays amber (`lacksCloudTranscriptionKey`).
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

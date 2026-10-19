@@ -587,39 +587,39 @@ final class OverlayViewModel {
         didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
     }
     var apiKey: String {
-        didSet { UserDefaults.standard.set(apiKey, forKey: "anthropicAPIKey") }
+        didSet { SecretStore.set(apiKey, for: "anthropicAPIKey") }
     }
     var openAIApiKey: String {
-        didSet { UserDefaults.standard.set(openAIApiKey, forKey: "openAIApiKey") }
+        didSet { SecretStore.set(openAIApiKey, for: "openAIApiKey") }
     }
     /// Moonshot / Kimi API key. Kimi models route through Moonshot's
     /// OpenAI-compatible endpoint with this key — see AIManager.
     var moonshotAPIKey: String {
-        didSet { UserDefaults.standard.set(moonshotAPIKey, forKey: "moonshotAPIKey") }
+        didSet { SecretStore.set(moonshotAPIKey, for: "moonshotAPIKey") }
     }
     /// xAI / Grok API key. Grok models route through xAI's OpenAI-compatible
     /// endpoint (https://api.x.ai/v1) with this key — see AIManager.
     /// xAI key: Grok chat models, and Grok transcription.
     var grokAPIKey: String {
         didSet {
-            UserDefaults.standard.set(grokAPIKey, forKey: "grokAPIKey")
+            SecretStore.set(grokAPIKey, for: "grokAPIKey")
             transcriptionManager.grokAPIKey = grokAPIKey
         }
     }
     /// DeepSeek API key. DeepSeek models route through its OpenAI-compatible
     /// endpoint (https://api.deepseek.com) with this key — see AIManager.
     var deepSeekAPIKey: String {
-        didSet { UserDefaults.standard.set(deepSeekAPIKey, forKey: "deepSeekAPIKey") }
+        didSet { SecretStore.set(deepSeekAPIKey, for: "deepSeekAPIKey") }
     }
     /// NVIDIA NIM API key (nvapi-…). Namespaced `vendor/model` ids route through
     /// NVIDIA's OpenAI-compatible endpoint (integrate.api.nvidia.com) with this.
     var nvidiaAPIKey: String {
-        didSet { UserDefaults.standard.set(nvidiaAPIKey, forKey: "nvidiaAPIKey") }
+        didSet { SecretStore.set(nvidiaAPIKey, for: "nvidiaAPIKey") }
     }
     /// OpenRouter API key (sk-or-…). Catalogue ids prefixed `openrouter/` route
     /// through openrouter.ai (one key, any model) — see AIManager.
     var openRouterAPIKey: String {
-        didSet { UserDefaults.standard.set(openRouterAPIKey, forKey: "openRouterAPIKey") }
+        didSet { SecretStore.set(openRouterAPIKey, for: "openRouterAPIKey") }
     }
     /// OpenCode Console API key. Ids prefixed `opencode/` route through
     /// opencode.ai's OpenAI-compatible gateway (one key, any model) — see
@@ -628,11 +628,11 @@ final class OverlayViewModel {
     /// their own app (HTTP 403 for any other client), so free interviews run on
     /// OpenRouter's `:free` models instead.
     var openCodeAPIKey: String {
-        didSet { UserDefaults.standard.set(openCodeAPIKey, forKey: "openCodeAPIKey") }
+        didSet { SecretStore.set(openCodeAPIKey, for: "openCodeAPIKey") }
     }
     var elevenLabsAPIKey: String {
         didSet {
-            UserDefaults.standard.set(elevenLabsAPIKey, forKey: "elevenLabsAPIKey")
+            SecretStore.set(elevenLabsAPIKey, for: "elevenLabsAPIKey")
             transcriptionManager.elevenLabsAPIKey = elevenLabsAPIKey
         }
     }
@@ -1284,15 +1284,19 @@ final class OverlayViewModel {
     init() {
         // NOTE: didSet observers do NOT fire during init for properties set on `self`,
         // so initial values are loaded without triggering UserDefaults writes or broadcasts.
-        apiKey             = UserDefaults.standard.string(forKey: "anthropicAPIKey") ?? ""
-        openAIApiKey       = UserDefaults.standard.string(forKey: "openAIApiKey") ?? ""
-        moonshotAPIKey     = UserDefaults.standard.string(forKey: "moonshotAPIKey") ?? ""
-        grokAPIKey         = UserDefaults.standard.string(forKey: "grokAPIKey") ?? ""
-        deepSeekAPIKey     = UserDefaults.standard.string(forKey: "deepSeekAPIKey") ?? ""
-        nvidiaAPIKey       = UserDefaults.standard.string(forKey: "nvidiaAPIKey") ?? ""
-        openRouterAPIKey   = UserDefaults.standard.string(forKey: "openRouterAPIKey") ?? ""
-        openCodeAPIKey     = UserDefaults.standard.string(forKey: "openCodeAPIKey") ?? ""
-        elevenLabsAPIKey   = UserDefaults.standard.string(forKey: "elevenLabsAPIKey") ?? ""
+        // Keys live in the Keychain; move any an earlier build left in the plist.
+        SecretStore.migrateFromDefaults(["anthropicAPIKey", "openAIApiKey", "moonshotAPIKey",
+                                         "grokAPIKey", "deepSeekAPIKey", "nvidiaAPIKey",
+                                         "openRouterAPIKey", "openCodeAPIKey", "elevenLabsAPIKey"])
+        apiKey             = SecretStore.string("anthropicAPIKey") ?? ""
+        openAIApiKey       = SecretStore.string("openAIApiKey") ?? ""
+        moonshotAPIKey     = SecretStore.string("moonshotAPIKey") ?? ""
+        grokAPIKey         = SecretStore.string("grokAPIKey") ?? ""
+        deepSeekAPIKey     = SecretStore.string("deepSeekAPIKey") ?? ""
+        nvidiaAPIKey       = SecretStore.string("nvidiaAPIKey") ?? ""
+        openRouterAPIKey   = SecretStore.string("openRouterAPIKey") ?? ""
+        openCodeAPIKey     = SecretStore.string("openCodeAPIKey") ?? ""
+        elevenLabsAPIKey   = SecretStore.string("elevenLabsAPIKey") ?? ""
         transcriptionPreference = TranscriptionPreference(
             rawValue: UserDefaults.standard.string(forKey: "transcriptionPreference") ?? ""
         ) ?? .auto
@@ -2930,6 +2934,14 @@ final class OverlayViewModel {
     /// never started.
     var hasModelAccess: Bool { !keyForSelectedModel.key.isEmpty }
 
+    /// Automatic with no ElevenLabs or xAI key: it starts on Apple, but the
+    /// gear still nudges toward a cloud key, which transcribes better.
+    var lacksCloudTranscriptionKey: Bool {
+        transcriptionPreference == .auto
+            && elevenLabsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && grokAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Keys still to add before starting: the key for the model the user
     /// picked, and one for transcription when the session will need one.
     var missingRequiredKeys: [String] {
@@ -2949,7 +2961,7 @@ final class OverlayViewModel {
 
     /// The transcription key a session still needs, if any. Apple runs on
     /// this Mac and a typed Regular call doesn't transcribe, so neither needs
-    /// one; Automatic still asks for a cloud key, as v1 did.
+    /// one; Automatic falls back to Apple (see `lacksCloudTranscriptionKey`).
     static func missingTranscriptionKey(for preference: TranscriptionPreference,
                                         transcribes: Bool,
                                         hasElevenLabs: Bool,
@@ -2958,7 +2970,7 @@ final class OverlayViewModel {
         switch preference {
         case .grok:       return hasGrok ? nil : "xAI"
         case .elevenLabs: return hasElevenLabs ? nil : "ElevenLabs"
-        case .auto:       return hasElevenLabs || hasGrok ? nil : "ElevenLabs"
+        case .auto:       return nil
         case .apple:      return nil
         }
     }

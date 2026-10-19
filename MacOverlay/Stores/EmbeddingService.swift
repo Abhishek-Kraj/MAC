@@ -56,7 +56,7 @@ enum EmbeddingService {
     /// a single entry.
     static func embed(_ texts: [String]) async throws -> [[Double]] {
         guard !texts.isEmpty else { return [] }
-        let key = UserDefaults.standard.string(forKey: "openRouterAPIKey")?
+        let key = SecretStore.string("openRouterAPIKey")?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !key.isEmpty else {
             throw Failure(underlying: "no OpenRouter key — needed to embed")

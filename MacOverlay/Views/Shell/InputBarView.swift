@@ -465,7 +465,7 @@ struct InputBarView: View {
     /// `primarySurface`: it brings a window forward and tints while that
     /// window is up, which is where the state lives.
     private var settingsButton: some View {
-        let attention = !vm.missingRequiredKeys.isEmpty
+        let attention = !vm.missingRequiredKeys.isEmpty || vm.lacksCloudTranscriptionKey
         let active = vm.preferencesWindowOpen
         return Button {
             (NSApp.delegate as? AppDelegate)?.showPreferences()

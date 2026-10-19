@@ -334,7 +334,7 @@ final class OpenRouterCatalog {
 
     /// True when the app has a key to fetch the catalogue with.
     var hasKey: Bool {
-        !(UserDefaults.standard.string(forKey: "openRouterAPIKey") ?? "")
+        !(SecretStore.string("openRouterAPIKey") ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -428,7 +428,7 @@ final class OpenRouterCatalog {
 
         var request = URLRequest(url: Self.modelsURL)
         request.timeoutInterval = 20
-        if let key = UserDefaults.standard.string(forKey: "openRouterAPIKey"),
+        if let key = SecretStore.string("openRouterAPIKey"),
            !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         }

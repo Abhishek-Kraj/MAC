@@ -337,7 +337,7 @@ final class PrepGenerator {
         let role = roleName.trimmingCharacters(in: .whitespacesAndNewlines)
         stage = .researching
 
-        let key = UserDefaults.standard.string(forKey: "openRouterAPIKey")?
+        let key = SecretStore.string("openRouterAPIKey")?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !key.isEmpty else {
             stage = .failed("Add your OpenRouter key in Settings → AI first.")
