@@ -4,7 +4,26 @@ import Security
 /// API keys in the login Keychain instead of the preferences plist, which is
 /// plain text and travels in backups. One generic-password item per key under
 /// this build's bundle id, so Dev, Beta and Prod keep their own; never synced.
+///
+/// Only for builds signed with an Apple Team ID. A Keychain item is tied to
+/// the app's code identity; without a Team ID (a self-signed dev build) that
+/// identity is the binary's hash, which changes on every rebuild, so macOS
+/// asked for the login password each time. Those builds keep keys in
+/// UserDefaults as before.
 enum SecretStore {
+    static let usesKeychain: Bool = {
+        var code: SecCode?
+        var staticCode: SecStaticCode?
+        var info: CFDictionary?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopySigningInformation(staticCode,
+                                            SecCSFlags(rawValue: kSecCSSigningInformation),
+                                            &info) == errSecSuccess,
+              let dict = info as? [String: Any] else { return false }
+        return dict[kSecCodeInfoTeamIdentifier as String] != nil
+    }()
+
     /// A test binary has no bundle id; its own service keeps it away from the
     /// app's items (and from any Keychain prompt they would raise).
     private static let service = Bundle.main.bundleIdentifier ?? "tech.thecloser.mac.unbundled"
@@ -13,6 +32,7 @@ enum SecretStore {
     nonisolated(unsafe) private static var cache: [String: String] = [:]
 
     static func string(_ account: String) -> String? {
+        guard usesKeychain else { return UserDefaults.standard.string(forKey: account) }
         lock.lock(); defer { lock.unlock() }
         if let hit = cache[account] { return hit.isEmpty ? nil : hit }
         let value = read(account)
@@ -22,6 +42,7 @@ enum SecretStore {
 
     /// Saves `value`; an empty value deletes the item.
     static func set(_ value: String, for account: String) {
+        guard usesKeychain else { return UserDefaults.standard.set(value, forKey: account) }
         lock.lock(); defer { lock.unlock() }
         if write(value, for: account) {
             cache[account] = value
@@ -34,6 +55,7 @@ enum SecretStore {
     /// plist copy goes only once the Keychain reads back the same value, so a
     /// failed write never loses a key.
     static func migrateFromDefaults(_ accounts: [String], defaults: UserDefaults = .standard) {
+        guard usesKeychain else { return }
         for account in accounts {
             guard let legacy = defaults.string(forKey: account) else { continue }
             if !legacy.isEmpty && string(account) == nil {
