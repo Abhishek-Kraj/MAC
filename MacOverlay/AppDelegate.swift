@@ -246,6 +246,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         SpokenSegment(text: "We only split capacity once throttling showed up in the metrics app.",
                                       at: Date(timeIntervalSinceNow: -40)),
                     ]
+                    // Two completed exchanges so the Live Focus question
+                    // line + answer photograph with real content, and the
+                    // ‹ 2/2 › navigation shows. The seeded live transcription
+                    // above matches the newest question, as it would right
+                    // after the interviewer finished asking it.
+                    self.vm.sessionStore.appendTurn(
+                        user: "Sorry, then you have to update everybody that you are on top of it, build it up.",
+                        assistant: """
+                        - They're noting a past miscommunication where the discussion went off-track, and want everyone kept updated.
+                        - Suggested reply: "Understood — I'll make sure updates go to everyone on the thread so we stay aligned this time."
+                        - Follow-up: send a status update to the group.
+                        """)
+                    self.vm.sessionStore.appendTurn(
+                        user: "Walk me through how you set the Fabric capacity plan across the entities.",
+                        assistant: """
+                        - Consolidated four entities onto one F64 capacity after profiling CU usage per workload.
+                        - Left a 20% headroom buffer for month-end reporting spikes; throttling only appeared once we dropped below 10%.
+                        - Split billing back out per entity with a shared overflow pool for peak windows.
+                        """)
                 }
                 self.vm.primarySurface = surface
                 self.vm.shellStage = .expanded
@@ -387,12 +406,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Stepping to another Q&A pair (or toggling the transcript
-        // drop-down) resumes content tracking: a drag-resize froze the
-        // height for the answer the user resized on, not the one they
-        // just navigated to.
+        // drop-down) re-checks the fit — but a manual size holds: the
+        // panel no longer snaps back to the content height when the
+        // user flips through answers or toggles the strip.
         vm.onResumeFocusTracking = { [weak self] in
             guard let self else { return }
-            self.focusHeightUserOverride = false
             self.applyFocusPanelHeight()
         }
 
@@ -987,10 +1005,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelResizeBaseFrame: NSRect?
 
     /// Set once the user drag-resizes while Live Focus is on screen. Their
-    /// chosen height then wins over content tracking — without this the
-    /// next streamed line would immediately snap the panel back to the
-    /// content height, undoing the drag the moment they let go.
-    /// Cleared on any stage / surface transition (see animateShellFrame).
+    /// chosen size then wins over content tracking for the rest of the
+    /// run — without this the next streamed line would immediately snap
+    /// the panel back to the content height, undoing the drag the moment
+    /// they let go. Only a relaunch resets it: the panel behaves like a
+    /// window the user sized, in every state, until the app restarts.
     private var focusHeightUserOverride = false
 
     /// Edge / corner drag-resize. `dx` grows to the right, `dy` grows
@@ -1295,10 +1314,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func animateShellFrame(stage: OverlayViewModel.ShellStage) {
         guard let panel = overlayPanel else { return }
-        // A stage / surface transition re-lays out the shell anyway, so
-        // this is the natural point to hand height control back to content
-        // tracking after a manual drag-resize.
-        focusHeightUserOverride = false
+        // A manual size now holds for the whole run: a stage or surface
+        // transition keeps the panel where the user put it, instead of
+        // handing height control back to content tracking. Content
+        // hugging is the default only until the first drag of an edge.
         let cur = panel.frame
         let surfaceOpen = vm.primarySurface != nil
         let responseHugging = stage == .expanded && surfaceOpen && vm.usesResponseHuggingPanel
@@ -1331,11 +1350,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // so entering the mode lands at the right size, not
                     // the fixed response height. Non-focus response mode
                     // (scrolling conversation) keeps the fixed height.
-                    let h: CGFloat = vm.focusHuggingActive && lastFocusContentHeight > 0
-                        ? min(max(lastFocusContentHeight + Self.focusPanelChrome,
-                                  Self.expandedCompactMinSize.height),
-                              Self.expandedSize.height + 80)
-                        : Self.responseExpandedSize.height
+                    // A manual size wins over both: re-entering the mode
+                    // keeps the height the user dragged to.
+                    let h: CGFloat
+                    if focusHeightUserOverride {
+                        h = cur.height
+                    } else if vm.focusHuggingActive && lastFocusContentHeight > 0 {
+                        h = min(max(lastFocusContentHeight + Self.focusPanelChrome,
+                                    Self.expandedCompactMinSize.height),
+                                Self.expandedSize.height + 80)
+                    } else {
+                        h = Self.responseExpandedSize.height
+                    }
                     target = NSSize(width: preservedWidth, height: h)
                 } else {
                     target = NSSize(

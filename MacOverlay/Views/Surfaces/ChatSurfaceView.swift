@@ -217,13 +217,12 @@ struct ChatSurfaceView: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             if let pair {
-                focusHeader(pair: pair,
-                            position: pairs.count - clamped,
-                            total: pairs.count,
-                            offset: clamped,
-                            maxOffset: pairs.count - 1,
-                            streamingTurnID: streaming ? pair.answer?.id : nil)
-                Divider().opacity(0.25)
+                focusQuestionLine(pair: pair,
+                                  position: pairs.count - clamped,
+                                  total: pairs.count,
+                                  offset: clamped,
+                                  maxOffset: pairs.count - 1,
+                                  streamingTurnID: streaming ? pair.answer?.id : nil)
 
                 if streaming {
                     streamingAnswer(pair.answer)
@@ -245,22 +244,16 @@ struct ChatSurfaceView: View {
         .onChange(of: pairs.last?.question.id) { _, _ in focusPairOffset = 0 }
     }
 
-    /// Question line + ‹ › pair navigation. Arrows only appear once
-    /// there's more than one exchange.
-    private func focusHeader(pair: QAPair, position: Int, total: Int,
-                             offset: Int, maxOffset: Int,
-                             streamingTurnID: UUID?) -> some View {
+    /// The question of the focused pair, drawn the way the transcript strip
+    /// draws its lanes — a labelled flow line ("THEM …"), not a titled
+    /// question card — so the whole live view reads as one transcript with
+    /// the answer attached underneath it. ‹ › navigation sits quietly at the
+    /// trailing edge once there is more than one exchange.
+    private func focusQuestionLine(pair: QAPair, position: Int, total: Int,
+                                   offset: Int, maxOffset: Int,
+                                   streamingTurnID: UUID?) -> some View {
         HStack(alignment: .top, spacing: 7) {
-            Image(systemName: "questionmark.bubble")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(Design.Ink.secondary)
-                .padding(.top, 2)
-            Text(pair.question.content)
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundColor(Design.Ink.secondary)
-                .lineLimit(2)
-                .textSelection(.enabled)
-            Spacer(minLength: 6)
+            laneLine("THEM", pair.question.content, primary: true)
             if total > 1 || streamingTurnID != nil {
                 HStack(spacing: 3) {
                     if total > 1 {
@@ -285,6 +278,7 @@ struct ChatSurfaceView: View {
                         focusHeaderStopButton(turnID: streamingTurnID)
                     }
                 }
+                .padding(.top, 1)
             }
         }
         .padding(.horizontal, 22)
@@ -778,7 +772,7 @@ struct ChatSurfaceView: View {
                                  : (primary
                                     ? AnyShapeStyle(Design.Ink.primary)
                                     : AnyShapeStyle(Design.Ink.secondary)))
-                .lineLimit(vm.isInterviewSession ? 1 : 3)
+                .lineLimit(vm.isInterviewSession ? 2 : 3)
                 .truncationMode(vm.isInterviewSession ? .head : .tail)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
