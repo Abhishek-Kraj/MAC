@@ -86,26 +86,12 @@ struct OverlayView: View {
 
     @ViewBuilder
     private var stageStack: some View {
-        ZStack(alignment: .bottom) {
-            upperLayer
-            InputBarView()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, Self.panelInsetLeading)
-                .padding(.trailing, Self.panelInsetTrailing)
-                // The bar's job is to sit exactly at the bottom of the
-                // panel and never move. Explicitly nil out the animation
-                // for the two state values that produced the visible
-                // jump — primarySurface and shellStage — so any
-                // withAnimation block on a surface-button click cannot
-                // lerp the bar's layout. The bar still animates its
-                // own internal hover/press states normally.
-                .animation(nil, value: vm.primarySurface)
-                .animation(nil, value: vm.shellStage)
-                // Hover-reveal: opacity (not removal) so the layout never
-                // reflows and the panel height stays put.
-                .opacity(barVisible ? 1 : 0)
-                .allowsHitTesting(barVisible)
-                .animation(.easeInOut(duration: 0.18), value: barVisible)
+        Group {
+            if focusHugging && vm.shellStage == .expanded && vm.primarySurface != nil {
+                liveFocusStack
+            } else {
+                standardStack
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .onHover { chromeHovering = $0 }
@@ -140,6 +126,70 @@ struct OverlayView: View {
         .animation(Design.Motion.standard, value: vm.resumeFileURL)
         .animation(Design.Motion.standard, value: vm.isQuickAskSending)
         .animation(Design.Motion.standard, value: vm.quickAskResponse.isEmpty)
+    }
+
+    /// The standard shell: the floating bar over a card, or the ambient
+    /// strip when nothing is open. Every non-interview stage uses this.
+    private var standardStack: some View {
+        ZStack(alignment: .bottom) {
+            upperLayer
+            InputBarView()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, Self.panelInsetLeading)
+                .padding(.trailing, Self.panelInsetTrailing)
+                // The bar's job is to sit exactly at the bottom of the
+                // panel and never move. Explicitly nil out the animation
+                // for the two state values that produced the visible
+                // jump — primarySurface and shellStage — so any
+                // withAnimation block on a surface-button click cannot
+                // lerp the bar's layout. The bar still animates its
+                // own internal hover/press states normally.
+                .animation(nil, value: vm.primarySurface)
+                .animation(nil, value: vm.shellStage)
+                // Hover-reveal: opacity (not removal) so the layout never
+                // reflows and the panel height stays put.
+                .opacity(barVisible ? 1 : 0)
+                .allowsHitTesting(barVisible)
+                .animation(.easeInOut(duration: 0.18), value: barVisible)
+        }
+    }
+
+    /// A live interview is ONE card: session header, transcript strip +
+    /// answer, attachment tray, and the composer, stacked with hairline
+    /// separators.
+    ///
+    /// It used to be four floating cards — header, answer card, tray,
+    /// input bar — each with its own background and reserved slot. Any
+    /// panel height other than the exact content height left the pieces
+    /// drifting apart with the desktop showing through between them, so
+    /// they visibly could not be aligned; four pieces, none of them
+    /// anchored to the others. One card is one width, one radius, one
+    /// stack: the panel height is simply this stack's height, and no
+    /// state — hover, attachments, streaming — can pull the pieces
+    /// apart.
+    private var liveFocusStack: some View {
+        VStack(spacing: 0) {
+            TopStripView()
+            Divider().opacity(0.35)
+            topCard
+            Divider().opacity(0.35)
+            // Same bar as everywhere else, inked as a row of this card
+            // instead of its own floating capsule (see `inline`), with the
+            // attachment tray riding above it inside the same surface.
+            InputBarView(inline: true)
+        }
+        .cardSurface(topRadius: 16, bottomRadius: 16, opacity: vm.surfaceOpacity)
+        .padding(.leading, Self.panelInsetLeading)
+        .padding(.trailing, Self.panelInsetTrailing)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FocusShellHeightKey.self,
+                                   value: g.size.height)
+        })
+        .onPreferenceChange(FocusShellHeightKey.self) { h in
+            guard h > 0 else { return }
+            vm.onFocusContentHeight?(h)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     /// Pill-anchored floating popup. Renders the same indicator pills as
@@ -195,43 +245,15 @@ struct OverlayView: View {
     private var upperLayer: some View {
         VStack(spacing: 0) {
             if vm.shellStage == .expanded && vm.primarySurface != nil {
-                if focusHugging {
-                    // Live Focus: the session-name header is a separate bar
-                    // that reveals on hover ABOVE the card. It reserves its
-                    // own slot (transparent when idle, so no empty bar
-                    // shows) so the card — transcript strip + answer — never
-                    // moves, and the header never overlaps the transcript.
-                    // The stack's natural height is measured and reported so
-                    // AppDelegate can track the panel height to the content
-                    // in realtime — the window grows/shrinks smoothly with
-                    // the answer instead of clipping it or leaving a dead
-                    // gap below the card.
-                    VStack(spacing: 0) {
-                        revealOnHover(floatingHeaderBar)
-                            .padding(.bottom, 6)
-                        topCard
-                            .cardSurface(topRadius: 16, bottomRadius: 16, opacity: vm.surfaceOpacity)
-                            .transition(.opacity)
-                    }
+                // Live Focus never reaches here — `stageStack` routes it to
+                // `liveFocusStack` (one card with the bar inside). This is
+                // the standard floating-card layout for every other surface.
+                topCard
+                    .cardSurface(topRadius: 16, bottomRadius: 16, opacity: vm.surfaceOpacity)
                     .padding(.leading, Self.panelInsetLeading)
                     .padding(.trailing, Self.panelInsetTrailing)
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: FocusShellHeightKey.self,
-                                               value: g.size.height)
-                    })
-                    .onPreferenceChange(FocusShellHeightKey.self) { h in
-                        guard h > 0 else { return }
-                        vm.onFocusContentHeight?(h)
-                    }
-                    Spacer(minLength: 0)
-                } else {
-                    topCard
-                        .cardSurface(topRadius: 16, bottomRadius: 16, opacity: vm.surfaceOpacity)
-                        .padding(.leading, Self.panelInsetLeading)
-                        .padding(.trailing, Self.panelInsetTrailing)
-                        .frame(maxHeight: .infinity)
-                        .transition(.opacity)
-                }
+                    .frame(maxHeight: .infinity)
+                    .transition(.opacity)
             } else if vm.shellStage == .expanded && vm.primarySurface == nil
                         && hasAmbientStatus {
                 Spacer(minLength: 0)
@@ -274,22 +296,12 @@ struct OverlayView: View {
             .animation(.easeInOut(duration: 0.18), value: chromeHovering)
     }
 
-    /// Live Focus session-name header — a STANDALONE bar that floats above
-    /// the answer card (placed by `upperLayer`). Same glass surface as the
-    /// card so the two read as one stack, but kept separate so revealing it
-    /// on hover never overlaps the live-transcript strip at the card's top
-    /// nor shifts the answer.
-    private var floatingHeaderBar: some View {
-        TopStripView()
-            .cardSurface(topRadius: 16, bottomRadius: 16, opacity: vm.surfaceOpacity)
-    }
-
     @ViewBuilder
     private var topCard: some View {
         if focusHugging {
-            // Live Focus: card body only. The session-name header lives in
-            // its own floating bar above the card (see upperLayer), so the
-            // card top is free for the transcript strip + answer.
+            // Live Focus: card body only. The session-name header is the
+            // first row of the same card (`liveFocusStack`), so the card
+            // top goes straight to the transcript strip + answer.
             primarySurface
                 .frame(maxWidth: .infinity, alignment: .top)
         } else {

@@ -1042,10 +1042,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// slot + card). Drives the dynamic panel height below.
     private var lastFocusContentHeight: CGFloat = 0
 
-    /// Extra vertical space the panel needs beyond the focus stack: the
-    /// reserved input-bar slot (60) + the root padding above and below
-    /// (Design.Space.sm ×2 = 16).
-    private static let focusPanelChrome: CGFloat = 76
+    /// Extra vertical space the panel needs beyond the focus stack. The
+    /// stack now INCLUDES the composer and attachment tray (the live view
+    /// is one card), so the only thing outside it is the shell's own 8pt
+    /// padding above and below.
+    private static let focusPanelChrome: CGFloat = 16
 
     /// Track the panel height to the Live Focus content so the window
     /// grows and shrinks with the answer in realtime. Short implicit

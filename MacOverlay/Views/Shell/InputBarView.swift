@@ -11,6 +11,19 @@ import AppKit
 /// custom prompt, model menu picks the LLM, mic toggles recording (or
 /// stops streaming), send fires the message.
 struct InputBarView: View {
+    /// True when the bar is a ROW of the live-focus card instead of its
+    /// own floating capsule: no fill, stroke, clip or shadow — the card
+    /// around it is the surface — and full-width internal padding so the
+    /// row lines up with the header and the answer above it.
+    var inline: Bool = false
+
+    /// The synthesized memberwise init is inaccessible outside this file —
+    /// the state properties below are private — so spell out the one knob
+    /// the shell needs.
+    init(inline: Bool = false) {
+        self.inline = inline
+    }
+
     @Environment(OverlayViewModel.self) private var vm
     @FocusState private var inputFocused: Bool
 
@@ -65,36 +78,50 @@ struct InputBarView: View {
                 attachmentTray
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            barRow
-                // The bar spans the panel, not its own buttons. Without
-                // this the capsule sized to its content — 225pt inside a
-                // 440pt panel — so expanding left a stub hanging off the
-                // bottom-left corner with empty space beside it, which is
-                // what "the expansion is not aligned" was.
-                //
-                // Collapsed is the exception: there the row must hug the
-                // brand button so the capsule is a small dot, not a
-                // full-width bar with the logo at one end.
-                .frame(maxWidth: vm.shellStage == .pill ? nil : CGFloat.infinity)
-                // Drag handle behind the row — this is the only chrome on
-                // screen in `.pill`, so without it the collapsed overlay
-                // can't be moved by mouse at all. In front of the capsule
-                // fill (which would otherwise swallow the drag) and behind
-                // the controls, which keep their own clicks.
-                .background(PanelDragArea())
-                // Constant horizontal padding across stages — animating
-                // padding 4 → 8 during expansion shifts the brand pill 4pt
-                // right mid-flight, which reads as the icon "twitching" as
-                // the bar grows. Lock it.
-                .padding(.horizontal, 4)
-                .padding(.vertical, 4)
-                .background(barShape.fill(Design.Surface.shellFill).opacity(vm.backgroundOpacity))
-                .overlay(barShape.stroke(Design.Surface.hairline, lineWidth: 0.75))
-                // Clip transitioning content (inner HStack sliding in from
-                // the leading edge) to the capsule outline so the controls
-                // visibly emerge from inside the bar.
-                .clipShape(barShape)
-                .designShadow(Design.Shadow.raised)
+            Group {
+                if inline {
+                    // Row of the live-focus card: the card owns the
+                    // surface, so no fill / stroke / clip / shadow — just
+                    // the controls on the card's own glass, full-width
+                    // padding so the row aligns with the header above.
+                    barRow
+                        .frame(maxWidth: .infinity)
+                        .background(PanelDragArea())
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                } else {
+                    barRow
+                        // The bar spans the panel, not its own buttons. Without
+                        // this the capsule sized to its content — 225pt inside a
+                        // 440pt panel — so expanding left a stub hanging off the
+                        // bottom-left corner with empty space beside it, which is
+                        // what "the expansion is not aligned" was.
+                        //
+                        // Collapsed is the exception: there the row must hug the
+                        // brand button so the capsule is a small dot, not a
+                        // full-width bar with the logo at one end.
+                        .frame(maxWidth: vm.shellStage == .pill ? nil : CGFloat.infinity)
+                        // Drag handle behind the row — this is the only chrome on
+                        // screen in `.pill`, so without it the collapsed overlay
+                        // can't be moved by mouse at all. In front of the capsule
+                        // fill (which would otherwise swallow the drag) and behind
+                        // the controls, which keep their own clicks.
+                        .background(PanelDragArea())
+                        // Constant horizontal padding across stages — animating
+                        // padding 4 → 8 during expansion shifts the brand pill 4pt
+                        // right mid-flight, which reads as the icon "twitching" as
+                        // the bar grows. Lock it.
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 4)
+                        .background(barShape.fill(Design.Surface.shellFill).opacity(vm.backgroundOpacity))
+                        .overlay(barShape.stroke(Design.Surface.hairline, lineWidth: 0.75))
+                        // Clip transitioning content (inner HStack sliding in from
+                        // the leading edge) to the capsule outline so the controls
+                        // visibly emerge from inside the bar.
+                        .clipShape(barShape)
+                        .designShadow(Design.Shadow.raised)
+                }
+            }
         }
         .animation(Design.Motion.fast, value: vm.pendingAttachments.count)
         .animation(Design.Motion.fast, value: vm.pendingScreenshot != nil)
@@ -556,13 +583,25 @@ struct InputBarView: View {
 
     // MARK: - Attachment tray
 
-    /// Floating tray above the bar holding everything queued for the next
-    /// send — screenshot thumbnail + file chips. Renders as its own glass
-    /// card so the bar capsule keeps its shape; scrolls horizontally when
-    /// there are many files. The extracted text is already in
-    /// `vm.pendingAttachments[i].extractedText` and merges into the AI
-    /// prompt at send time.
+    /// The tray holding everything queued for the next send — screenshot
+    /// thumbnail + file chips. Renders as its own glass card so the bar
+    /// capsule keeps its shape; scrolls horizontally when there are many
+    /// files. `inline` drops the card (the live-focus card is the
+    /// surface) and lines the chips up with the rest of the card's rows.
+    /// The extracted text is already in `vm.pendingAttachments[i]
+    /// .extractedText` and merges into the AI prompt at send time.
+    @ViewBuilder
     private var attachmentTray: some View {
+        if inline {
+            trayScroll
+                .padding(.horizontal, 4)
+        } else {
+            trayScroll
+                .glassCard(cornerRadius: 14, opacity: vm.backgroundOpacity)
+        }
+    }
+
+    private var trayScroll: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 if let img = vm.pendingScreenshot {
@@ -600,7 +639,6 @@ struct InputBarView: View {
             }
             .padding(8)
         }
-        .glassCard(cornerRadius: 14, opacity: vm.backgroundOpacity)
     }
 
     /// One chip in the tray: leading content + remove ✕.
