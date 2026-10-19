@@ -65,6 +65,7 @@ struct TopStripView: View {
                 ? vm.sessionStore.activeSession.displayTitle
                 : vm.interviewSurfaceMode.displayName
         case .sessions?:  return "History"
+        case .summary?:   return vm.minutesTitle
         case .resumes?:   return "Resumes"
         case .prompts?:   return "Prompts"
         case .calendar?:  return "Calendar"

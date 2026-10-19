@@ -846,6 +846,7 @@ final class OverlayViewModel {
     enum PrimarySurface: String, Hashable, CaseIterable, Codable {
         case chat       // live transcript + conversation bubbles (default)
         case interview  // interview setup + live interview surface
+        case summary    // generated call / meeting summary
         case sessions   // sessions history list
         case resumes    // resume builder + library
         case prompts    // prompt library
@@ -856,6 +857,7 @@ final class OverlayViewModel {
             switch self {
             case .chat:      return "Chat"
             case .interview: return "Interview"
+            case .summary:   return "Summary"
             case .sessions:  return "History"
             case .resumes:   return "Resumes"
             case .prompts:   return "Prompts"
@@ -867,6 +869,7 @@ final class OverlayViewModel {
             switch self {
             case .chat:      return "bubble.left.and.bubble.right"
             case .interview: return "person.fill.checkmark"
+            case .summary:   return "list.clipboard"
             case .sessions:  return "clock.arrow.circlepath"
             case .resumes:   return "doc.text"
             case .prompts:   return "text.bubble"
@@ -878,6 +881,7 @@ final class OverlayViewModel {
             switch self {
             case .chat:      return "bubble.left.and.bubble.right.fill"
             case .interview: return "person.fill.checkmark"
+            case .summary:   return "list.clipboard"
             case .sessions:  return "clock.arrow.circlepath"
             case .resumes:   return "doc.text.fill"
             case .prompts:   return "text.bubble.fill"
@@ -2489,6 +2493,10 @@ final class OverlayViewModel {
     var isGeneratingMinutes = false
     /// The generated minutes, shown in a sheet. Nil until one has run.
     var minutesText: String?
+    /// Retained so the state that drives "a summary is ready" survives, but
+    /// the summary itself is now a panel surface — see `SummarySurfaceView`
+    /// — so it moves and resizes with the rest of the panel instead of
+    /// floating above it in a fixed-size sheet.
     var showMinutesSheet = false
 
     /// What to call the summary. Derived from the session tab rather than
@@ -2561,7 +2569,13 @@ final class OverlayViewModel {
                     return
                 }
                 minutesText = minutes
+                // Open the summary AS A SURFACE, not a sheet. It is a full,
+                // scrollable, draggable, resizable document the user reads at
+                // their own pace — exactly like History or Resumes — not a
+                // fixed-size dialog that covers the conversation it came from.
                 showMinutesSheet = true
+                primarySurface = .summary
+                shellStage = .expanded
                 statusMessage = ""
                 // The call is over, so this transcript is history now. Turn
                 // writes are debounced ~400ms; flush so a summary generated

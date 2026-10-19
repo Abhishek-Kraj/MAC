@@ -379,6 +379,8 @@ struct OverlayView: View {
                 ChatSurfaceView()
             case .interview:
                 InterviewSurfaceView()
+            case .summary:
+                SummarySurfaceView()
             case .sessions:
                 HistoryPanelView()
             case .resumes:

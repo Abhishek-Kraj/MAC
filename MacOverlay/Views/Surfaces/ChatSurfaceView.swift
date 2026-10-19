@@ -37,9 +37,6 @@ struct ChatSurfaceView: View {
             .onDrop(of: [.fileURL, .image], isTargeted: $isDropTargeted) { providers in
                 handleDrop(providers: providers)
             }
-            .sheet(isPresented: $vm.showMinutesSheet) {
-                MinutesSheet()
-            }
     }
 
     private var dropOverlay: some View {
@@ -1489,37 +1486,51 @@ private struct GenerateMinutesButton: View {
 /// The generated minutes: markdown, selectable, with a copy button. The note
 /// itself is already in Session notes (export from the notes panel); this
 /// sheet is for reading and copying the text right away.
-private struct MinutesSheet: View {
+/// The generated summary, as a full panel surface.
+///
+/// It used to be a SwiftUI `.sheet`. A sheet is its own fixed-size window
+/// attached to the panel: it cannot be moved, cannot be resized, and it
+/// covers the conversation behind it — so the one artifact a user wants to
+/// read at their own pace was the one thing they could not control. As a
+/// primary surface it inherits the panel's own drag handle and the
+/// eight-edge resize every other surface has.
+struct SummarySurfaceView: View {
     @Environment(OverlayViewModel.self) private var vm
     @State private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Sits under the shell's own header strip, so it repeats only
+            // what the header does not already say: what this document is,
+            // and that it is saved.
             HStack(spacing: 8) {
                 Image(systemName: "list.clipboard")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(Design.Accent.brand)
-                // "Call summary" reads correctly on the Regular call tab;
-                // "Meeting minutes" only ever did on the chat side. Same
-                // artifact, named for what the user just did.
                 Text(vm.minutesTitle)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(Design.Ink.primary)
-                Spacer()
+                Spacer(minLength: 6)
                 Text("Saved to Session notes")
                     .font(.system(size: 10))
                     .foregroundColor(Design.Ink.secondary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 22)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
 
             Rectangle().fill(Design.Surface.hairline).frame(height: 0.5)
 
+            // The summary is the scrollable body. Hard-sizing the document
+            // instead (as the old sheet did) meant a long summary ran past
+            // the bottom edge with no way to reach the rest of it.
             ScrollView {
-                MarkdownResponseView(text: vm.minutesText ?? "", baseSize: 12)
+                MarkdownResponseView(text: vm.minutesText ?? "", baseSize: 12.5 * vm.textScale,
+                                     codeSize: 10.5 * vm.textScale)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 16)
             }
             .hiddenScrollGutter()
 
@@ -1548,22 +1559,26 @@ private struct MinutesSheet: View {
 
                 Spacer()
 
-                Button("Close") { vm.showMinutesSheet = false }
-                    .keyboardShortcut(.cancelAction)
+                // Back to the conversation, not a bare Close: the summary was
+                // generated FROM this session, so they are two views of the
+                // same thing and the user switches between them.
+                Button {
+                    vm.primarySurface = .chat
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.left")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Conversation")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(Design.Ink.primary)
+                }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 11)
         }
-        // The sheet window has no ground of its own — a SwiftUI sheet is a
-        // separate NSWindow, and an unbacked one shows whatever is behind it.
-        // This one used to end at a hard 540x480, which meant a short summary
-        // left a large empty band under the footer and long content ran to
-        // the very edge. Hug the content between sensible bounds instead, and
-        // carry the same tint the overlay uses so the controls match.
-        .tint(Design.Accent.brand)
-        .background(Design.Surface.shellFill)
-        .frame(minWidth: 460, idealWidth: 540, maxWidth: 640,
-               minHeight: 320, idealHeight: 480, maxHeight: 720)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
