@@ -602,6 +602,23 @@ private struct RegularCallSetupForm: View {
 private struct MissingKeyWarning: View {
     @Environment(OverlayViewModel.self) private var vm
 
+    /// "Add your OpenCode key to start" reads as "the app requires OpenCode",
+    /// which sends the user hunting for a key they never needed — the key is
+    /// only asked for because of the model currently chosen, and some models
+    /// live on OpenCode's catalogue. When that model's own gateway key is the
+    /// missing one, name the model and the way out (switch models); keep the
+    /// generic wording for everything else (transcription keys).
+    private var warningText: String {
+        if !vm.hasModelAccess {
+            let provider = vm.keyForSelectedModel.provider
+            let name = OpenRouterCatalog.shared.model(id: vm.selectedModel)?.name
+                ?? vm.selectedModel
+            return "\(name) runs on \(provider). Add your \(provider) key, or pick another model."
+        }
+        let keys = vm.missingRequiredKeys.joined(separator: " and ")
+        return "Add your \(keys) key\(vm.missingRequiredKeys.count > 1 ? "s" : "") to start. Click to open API keys."
+    }
+
     var body: some View {
         Button {
             (NSApp.delegate as? AppDelegate)?.showPreferences()
@@ -610,7 +627,7 @@ private struct MissingKeyWarning: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundColor(Design.Accent.amber)
-                Text("Add your \(vm.missingRequiredKeys.joined(separator: " and ")) key\(vm.missingRequiredKeys.count > 1 ? "s" : "") to start. Click to open API keys.")
+                Text(warningText)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(Design.Ink.primary)
                     .fixedSize(horizontal: false, vertical: true)
