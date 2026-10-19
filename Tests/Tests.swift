@@ -405,6 +405,20 @@ func testIncompleteSentinelDetection() throws {
     try assertFalse(TranscriptFilter.isIncompleteSentinel("Sure — here's the answer ⏳"))
 }
 
+func testTranscriptCleanupKeepsDottedAndNumericTokens() throws {
+    // Spacing fixes a mark the recogniser detached; it must not split a
+    // token that has a mark inside it.
+    try assertEq(TranscriptCleanup.clean("we run Node.js 3.5 and ASP.NET"),
+                 "We run Node.js 3.5 and ASP.NET")
+    try assertEq(TranscriptCleanup.clean("the call is at 10:30 for 1,000 users"),
+                 "The call is at 10:30 for 1,000 users")
+    try assertEq(TranscriptCleanup.clean("the Q3.2 numbers were fine"),
+                 "The Q3.2 numbers were fine")
+    // Glued commas and question marks before a word still get a space.
+    try assertEq(TranscriptCleanup.clean("first,second"), "First, second")
+    try assertEq(TranscriptCleanup.clean("really?yes"), "Really? Yes")
+}
+
 func testTranscriptCleanupRemovesSpeechNoise() throws {
     // Fillers go, as standalone words only — never inside a real word.
     try assertEq(TranscriptCleanup.clean("um so tell me about the role"),
@@ -3343,6 +3357,7 @@ struct TestsMain {
         TestRunner.run("TranscriptFilter question completeness", testTranscriptFilterSeemsComplete)
         TestRunner.run("Incomplete-question sentinel", testIncompleteSentinelDetection)
         TestRunner.run("Transcript cleanup", testTranscriptCleanupRemovesSpeechNoise)
+        TestRunner.run("Transcript cleanup keeps dotted and numeric tokens", testTranscriptCleanupKeepsDottedAndNumericTokens)
         TestRunner.run("TranscriptFilter response gate triage", testTranscriptFilterWarrantsResponse)
         TestRunner.run("TranscriptFilter normalized change detection", testTranscriptFilterNormalized)
         TestRunner.run("ChatTurn replayText composition", testChatTurnReplayText)

@@ -298,7 +298,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | B12 | The summary lands up to 90s later and overrides whatever surface the user is on, even a new session | VM:2613-2614 | C |
 | B13 | The summary can't be reopened once left, and is lost on quit; "Saved to Session notes" points to in-memory notes with no UI | NotesManager.swift, CSV:1514, NotesPanelView unreferenced | R |
 | B14 | A ⏳ on the first exchange holds the attached JD/résumé blob as the question fragment | AIController.swift:197-198, VM:1992-1996 | C |
-| B15 | TranscriptCleanup splits `Node.js`, `3.5`, `10:30`, `1,000` | TranscriptCleanup.swift:88-94 | R |
+| B15 ✅ | TranscriptCleanup splits `Node.js`, `3.5`, `10:30`, `1,000` | TranscriptCleanup.swift:88-94 | R |
 | B16 | Setup leaks: pendingAttachments duplicate across Start/End/Start; interviewResumeSessionID never cleared; a resumed session overrides sessionMode and the prompt pick | VM:1836/1858-1874/2670-2671, :368 | C |
 | B17 | No text field outside a live session: ⌘N and starter cards lead to a chat with nothing to type into | InputBarView:270-288, CSV:1011 | C (matches §10 snapshot) |
 | B18 | Empty-session litter: 65 of 88 sessions have 0 turns; History lists them | SessionStore.startNewSession:304-314 | R |
@@ -344,6 +344,7 @@ session; ⌘⇧N ignored; idle ⌘N opens a new chat.
 B7: Apple on-device and a typed Regular call no longer need a transcription
 key (`missingTranscriptionKey`); Automatic still asks for one — open question.
 Harness ran all 32 preference/key combinations.
+B15: only detached marks are re-spaced; a dot glued inside a token is never split or capitalised after. Pinned by testTranscriptCleanupKeepsDottedAndNumericTokens.
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

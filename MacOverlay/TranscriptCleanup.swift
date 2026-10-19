@@ -84,13 +84,21 @@ enum TranscriptCleanup {
         out = folded.joined(separator: " ")
 
         // Punctuation spacing, in the order that keeps the cases independent:
-        //   "word ," -> "word,"   then   "word,next" -> "word, next".
+        //   "word .next" -> "word. next"   then   "word ," -> "word,"
+        //   then   "word,next" -> "word, next".
+        // Only a mark the recogniser detached is re-spaced before a digit or
+        // after a dot: a mark inside a token stays put, or "Node.js", "3.5",
+        // "10:30" and "1,000" would split.
         for mark in [",", ".", "!", "?", ";", ":"] {
             let escaped = NSRegularExpression.escapedPattern(for: mark)
+            out = out.replacingOccurrences(of: "\\s+\(escaped)(?=[A-Za-z0-9])",
+                                            with: "\(mark) ", options: .regularExpression)
             out = out.replacingOccurrences(of: "\\s+\(escaped)", with: mark,
                                             options: .regularExpression)
-            out = out.replacingOccurrences(of: "\(escaped)(?=[A-Za-z0-9])",
-                                            with: "\(mark) ", options: .regularExpression)
+            if mark != "." {
+                out = out.replacingOccurrences(of: "\(escaped)(?=[A-Za-z])",
+                                                with: "\(mark) ", options: .regularExpression)
+            }
         }
 
         // Leading space an edge filler may have left at the very start.
@@ -115,18 +123,25 @@ enum TranscriptCleanup {
         guard !text.isEmpty else { return text }
         // The very first character is uppercased in the same pass as the
         // rest, so a leading quote or digit doesn't hide the first word.
+        // A mark ends a sentence only when a space follows it; "Node.js" and
+        // "3.5" are one token.
         var result = ""
         var pendingCap = true
+        var afterMark = false
         for ch in text {
             if ch == "." || ch == "!" || ch == "?" {
-                pendingCap = true
+                afterMark = true
                 result.append(ch)
-            } else if pendingCap && ch.isWhitespace {
+            } else if ch.isWhitespace {
+                if afterMark { pendingCap = true }
+                afterMark = false
                 result.append(ch)
             } else if pendingCap {
                 result.append(contentsOf: String(ch).uppercased())
                 pendingCap = false
+                afterMark = false
             } else {
+                afterMark = false
                 result.append(ch)
             }
         }
