@@ -1094,7 +1094,24 @@ final class OverlayViewModel {
     /// Name of the call app that just started using the microphone
     /// ("Zoom"), while the "start your interview?" prompt is showing.
     var detectedCallApp: String? {
-        didSet { if detectedCallApp != oldValue { onDetectedCallAppChange?(detectedCallApp) } }
+        didSet {
+            guard detectedCallApp != oldValue else { return }
+            onDetectedCallAppChange?(detectedCallApp)
+            scheduleCallPromptTimeout()
+        }
+    }
+    @ObservationIgnored private var callPromptTimeout: Task<Void, Never>?
+
+    /// An ignored prompt closes itself after 20s, like a notification, and
+    /// doesn't ask again for that call.
+    private func scheduleCallPromptTimeout() {
+        callPromptTimeout?.cancel()
+        guard let app = detectedCallApp else { return }
+        callPromptTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            guard !Task.isCancelled, let self, self.detectedCallApp == app else { return }
+            self.dismissCallPrompt()
+        }
     }
     /// The app delegate shows and hides the top-right prompt window from this.
     @ObservationIgnored var onDetectedCallAppChange: ((String?) -> Void)?
