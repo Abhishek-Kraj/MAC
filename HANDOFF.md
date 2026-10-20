@@ -294,7 +294,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | B8 ✅ | Placeholders sent raw: `{ROLE}` `{COMPANY}` (+ preset `{TARGET_ROLE}` …); only `{NAME}` replaced | AIController.swift:68, SessionMode.swift:49/60/71 | R |
 | B9 | Answer depth ignored once a seeded or custom preset exists (always) | SessionMode.swift:40, PromptStore seeded():206-212 | C |
 | B10 ✅ | Default audio source is Mic, so the user's own speech triggers answers (HANDOFF §5 says split capture) | VM:54-55 | R |
-| B11 | Post-call stale THEM caption; it also hides every post-End status ("Writing…", "Summary failed") | VM endCapture, ChatSurfaceView:128-149 | C (seen in snapshot) |
+| B11 ✅ | Post-call stale THEM caption; it also hides every post-End status ("Writing…", "Summary failed") | VM endCapture, ChatSurfaceView:128-149 | C (seen in snapshot) |
 | B12 | The summary lands up to 90s later and overrides whatever surface the user is on, even a new session | VM:2613-2614 | C |
 | B13 | The summary can't be reopened once left, and is lost on quit; "Saved to Session notes" points to in-memory notes with no UI | NotesManager.swift, CSV:1514, NotesPanelView unreferenced | R |
 | B14 | A ⏳ on the first exchange holds the attached JD/résumé blob as the question fragment | AIController.swift:197-198, VM:1992-1996 | C |
@@ -351,6 +351,7 @@ B3: keys live in the login Keychain (`SecretStore`, service = bundle id, not syn
 B4: browser mic requests get WebKit's per-site prompt; camera and camera+mic are denied (`WebPanelView.Coordinator.mediaDecision`).
 B6: confirmed worse than suspected: the launch migration saved the empty store at once. `JSONStore.load` now moves an undecodable file to `<name>.corrupt-<time>.json` (all stores). Pinned by testJSONStoreKeepsUndecodableFile; not reproduced on real data.
 B5: probe (alert sheet, popover, NSOpenPanel, read via CGWindowListCopyWindowInfo) found the sheet and popover capturable (sharing=1); swizzling `order(_:relativeTo:)` too makes all of them 0. Menu-bar item stays capturable (hidden during calls by design). Note: the dev build's saved "Hide from screen sharing" is OFF on this Mac (user setting, left as is).
+B11: `stopInterviewSession` clears `transcription`; snapshot shows no THEM strip after End and the "Writing call summary…" status visible.
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

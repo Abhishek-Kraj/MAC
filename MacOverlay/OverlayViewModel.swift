@@ -1756,6 +1756,10 @@ final class OverlayViewModel {
         // Stop any answers still generating — ending the session means stop.
         cancelStreaming()
         endCapture()
+        // The last unsent caption would otherwise stay on the finished
+        // conversation as a live "THEM" line, and its presence also hides the
+        // status row ("Writing call summary…", "Summary failed").
+        transcription = ""
 
         if shouldSummarise {
             // Land on the chat surface showing the finished conversation.
