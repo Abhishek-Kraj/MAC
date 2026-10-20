@@ -2215,6 +2215,10 @@ extension NSWindow {
              #selector(NSWindow._sp_orderFrontRegardless)),
             (#selector(NSWindow.makeKeyAndOrderFront(_:)),
              #selector(NSWindow._sp_makeKeyAndOrderFront(_:))),
+            // Sheets and popovers never pass through the three above; a probe
+            // of an alert sheet and a popover found both capturable.
+            (#selector(NSWindow.order(_:relativeTo:)),
+             #selector(NSWindow._sp_order(_:relativeTo:))),
         ]
         for (orig, swiz) in pairs {
             guard
@@ -2238,6 +2242,11 @@ extension NSWindow {
     @objc func _sp_makeKeyAndOrderFront(_ sender: Any?) {
         sharingType = NSWindow.desiredSharingType
         _sp_makeKeyAndOrderFront(sender)  // calls original after swap
+    }
+
+    @objc func _sp_order(_ place: NSWindow.OrderingMode, relativeTo otherWin: Int) {
+        if place != .out { sharingType = NSWindow.desiredSharingType }
+        _sp_order(place, relativeTo: otherWin)  // calls original after swap
     }
 }
 
