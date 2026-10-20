@@ -42,8 +42,11 @@ struct TranscriptionLanguagePicker: View {
         .help("The language spoken in the interview")
     }
 
-    private var chipName: String {
-        guard let language = TranscriptionLanguage.language(for: vm.transcriptionLanguageID) else { return "English (US)" }
+    private var chipName: String { Self.label(for: vm.transcriptionLanguageID) }
+
+    /// The chip's text for a language id; also shown in the setup summary.
+    static func label(for id: String) -> String {
+        guard let language = TranscriptionLanguage.language(for: id) else { return "English (US)" }
         return language.isAutomatic ? "All languages" : language.name
     }
 

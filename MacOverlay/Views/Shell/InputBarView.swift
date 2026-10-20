@@ -56,6 +56,8 @@ struct InputBarView: View {
     /// debounces the expansion so a quick mouse-cross doesn't pop the
     /// bar open. Cancelled if the cursor leaves before it elapses.
     @State private var brandHoverTask: Task<Void, Never>?
+    /// The live gear's quick options (depth, auto-answer, model, audio).
+    @State private var showSessionOptions = false
 
     /// Mouse must rest on the brand logo this long before the bar
     /// expands. Short enough to feel instant on intent, long enough that
@@ -537,11 +539,16 @@ struct InputBarView: View {
 
     private var settingsButton: some View {
         let attention = !vm.missingRequiredKeys.isEmpty || vm.lacksCloudTranscriptionKey
-        let active = vm.preferencesWindowOpen
+        let active = vm.preferencesWindowOpen || showSessionOptions
+        // While live, full Settings would cover the session, so the gear
+        // opens the options worth changing mid-session; Settings is one row
+        // further. A toggle, like the other bar buttons.
+        let live = vm.isInterviewSession
         return Button {
-            // A toggle, like the other bar buttons.
-            if active {
+            if vm.preferencesWindowOpen {
                 vm.closeSurface()
+            } else if live {
+                showSessionOptions.toggle()
             } else {
                 (NSApp.delegate as? AppDelegate)?.showPreferences()
             }
@@ -553,8 +560,15 @@ struct InputBarView: View {
                         attention: attention)
         }
         .buttonStyle(.plain)
-        .help(attention ? "Add your API keys in Settings" : "Settings")
-        .accessibilityLabel(Text("Settings"))
+        .popover(isPresented: $showSessionOptions, arrowEdge: .top) {
+            LiveSessionOptions {
+                showSessionOptions = false
+                (NSApp.delegate as? AppDelegate)?.showPreferences()
+            }
+            .environment(vm)
+        }
+        .help(attention ? "Add your API keys in Settings" : (live ? "Session options" : "Settings"))
+        .accessibilityLabel(Text(live ? "Session options" : "Settings"))
     }
 
     private func surfaceButton(_ surface: OverlayViewModel.PrimarySurface,
@@ -846,5 +860,107 @@ private struct SurfaceIcon: View {
             return Design.Accent.amber.opacity(0.40)
         }
         return Design.Surface.hairline
+    }
+}
+
+/// The live gear's popover: what is worth changing mid-session, without
+/// leaving the session for Settings. Each row is the same setting as
+/// Settings → Interview & Calls (and the bar), not a copy of it.
+private struct LiveSessionOptions: View {
+    @Environment(OverlayViewModel.self) private var vm
+    let openSettings: () -> Void
+
+    var body: some View {
+        @Bindable var vm = vm
+        let interview = !vm.isRegularCallSession
+        let voice = !vm.isInterviewTextOnly
+        VStack(alignment: .leading, spacing: 10) {
+            Text(interview ? "Interview options" : "Call options")
+                .font(.system(size: 12, weight: .semibold))
+
+            if interview {
+                row("Answers") {
+                    Picker("", selection: $vm.answerDepth) {
+                        ForEach(AnswerDepth.allCases) { d in
+                            Text(d.displayName).tag(d)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 190)
+                }
+                if voice {
+                    row("Auto-answer") {
+                        Toggle("", isOn: $vm.interviewAutoGenerate)
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .labelsHidden()
+                    }
+                }
+            }
+
+            row("Model") {
+                ModelPickerButton(
+                    currentModelName: OverlayViewModel.availableModels
+                        .first { $0.id == vm.selectedModel }?.name ?? "Model"
+                )
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            if voice {
+                row("Listen to") {
+                    Picker("", selection: $vm.audioSource) {
+                        ForEach(AudioSource.allCases, id: \.self) { source in
+                            Text(source.label).tag(source)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                row("Transcript strip") {
+                    Toggle("", isOn: $vm.showLiveTranscript)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
+                if interview {
+                    row("Focus mode") {
+                        Toggle("", isOn: $vm.interviewFocusMode)
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .labelsHidden()
+                    }
+                }
+            }
+
+            Divider()
+
+            Button(action: openSettings) {
+                HStack(spacing: 6) {
+                    Image(systemName: "gearshape")
+                    Text("All Settings…")
+                }
+                .font(.system(size: 12))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(Design.Ink.secondary)
+        }
+        .padding(14)
+        .frame(width: 320)
+        // A popover is its own window; like the call prompt, it is dark to
+        // match the overlay rather than following the system appearance.
+        .preferredColorScheme(.dark)
+    }
+
+    private func row<Control: View>(_ title: String,
+                                    @ViewBuilder control: () -> Control) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.system(size: 12))
+            Spacer(minLength: 8)
+            control()
+        }
     }
 }

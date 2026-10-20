@@ -947,6 +947,14 @@ final class OverlayViewModel {
         shellStage = .expanded
     }
 
+    /// The tab Settings should switch to; PreferencesView takes it and clears it.
+    var requestedSettingsTab: PreferencesView.Tab?
+
+    func openSettings(tab: PreferencesView.Tab) {
+        requestedSettingsTab = tab
+        openSettings()
+    }
+
     /// The header ✕: closes what's showing. The summary was generated from
     /// the conversation, so it goes back there like "← Conversation" does.
     /// A live session minimizes (its bar has no way back to the transcript);
@@ -3009,14 +3017,10 @@ final class OverlayViewModel {
         interviewSurfaceMode = mode
     }
 
-    /// "+ new session" handler when the user is on the Interview surface.
-    /// Tears down any paused-live state so the setup form actually
-    /// renders (otherwise `interviewSurfaceShowsChat` keeps returning
-    /// true). Doesn't create a session yet — the real session is created
-    /// when the user hits Start in the form.
     /// ⌘N, the header pencil and ⋯ New Session. On the Interview surface it
-    /// goes back to the setup form, ending a live session first; elsewhere
-    /// it opens a fresh chat (refused while a session is live).
+    /// goes back to the setup form; elsewhere it opens a fresh chat. Both are
+    /// refused while a session is live: it ended the interview with no
+    /// confirmation, from a button beside ✕.
     func requestNewSession() {
         if primarySurface == .interview {
             requestNewInterviewSession()
@@ -3025,8 +3029,11 @@ final class OverlayViewModel {
         }
     }
 
+    /// "+ new session" on the Interview surface: shows the setup form. Doesn't
+    /// create a session yet — the real one is created when the user hits
+    /// Start in the form.
     func requestNewInterviewSession() {
-        if isInterviewSession { stopInterviewSession() }
+        guard !isInterviewSession else { return }
         forceInterviewSetup = true
     }
 

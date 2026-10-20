@@ -8,7 +8,6 @@ struct TopStripView: View {
     @Environment(OverlayViewModel.self) private var vm
     @State private var editingTitle = false
     @State private var draftTitle = ""
-    @AppStorage(KeywordStyle.defaultsKey) private var keywordStyle = KeywordStyle.standard
 
     var body: some View {
         HStack(spacing: 8) {
@@ -162,86 +161,20 @@ struct TopStripView: View {
         }
         .buttonStyle(.plain)
         .keyboardShortcut("n", modifiers: .command)
-        // Off the Interview surface a new chat can't start under a live session.
-        .disabled(vm.isInterviewSession && vm.primarySurface != .interview)
-        .help(vm.primarySurface == .interview ? "New interview setup" : "New chat (⌘N)")
+        // A live session has to be ended first, from the bar: one slip on
+        // this button used to end the interview.
+        .disabled(vm.isInterviewSession)
+        .help(vm.isInterviewSession ? "End the session first"
+              : (vm.primarySurface == .interview ? "New interview setup" : "New chat (⌘N)"))
     }
 
-    private func keywordStyleButton(_ style: KeywordStyle) -> some View {
-        Button {
-            keywordStyle = style
-        } label: {
-            HStack {
-                Text(style.displayName)
-                if keywordStyle == style { Image(systemName: "checkmark") }
-            }
-        }
-    }
-
-    /// "Pause call" on the call tab, "Pause interview" on the interview tab.
-    private var pauseVerb: String { vm.isRegularCallSession ? "Pause call" : "Pause interview" }
-    private var resumeVerb: String { vm.isRegularCallSession ? "Resume call" : "Resume interview" }
-
+    /// The session menu: things you do to this session, then the window.
+    /// Pause, End and the gear sit on the bar; what is set once (audio,
+    /// engine, answers, appearance) lives in Settings, and what is changed
+    /// mid-session is in the live gear's popover. The menu ran to 24 items
+    /// while it held all of them.
     private var sessionMenu: some View {
         Menu {
-            // Live-session controls first — pause/resume and End moved
-            // here from the input bar so the bar stays minimal during
-            // an interview.
-            if vm.isInterviewSession {
-                if !vm.isInterviewTextOnly {
-                    Button {
-                        if vm.isInterviewPaused {
-                            vm.resumeInterviewSession()
-                        } else {
-                            vm.pauseInterviewSession()
-                        }
-                    } label: {
-                        Label(vm.isInterviewPaused ? resumeVerb : pauseVerb,
-                              systemImage: vm.isInterviewPaused ? "play.fill" : "pause.fill")
-                    }
-                }
-                Button(role: .destructive) {
-                    vm.stopInterviewSession()
-                } label: {
-                    // "End call" on the call tab, "End interview" on the
-                    // interview tab. The user should never have to translate
-                    // the app's terminology back into what they were doing.
-                    Label(vm.isRegularCallSession ? "End call" : "End interview",
-                          systemImage: "stop.circle")
-                }
-                .help(vm.isRegularCallSession
-                      ? "Stop recording and write the call summary"
-                      : "Stop the session and write the summary")
-                Divider()
-            }
-
-            // Same switch as on the setup screen; it applies straight
-            // away, mid-interview included.
-            Menu {
-                ForEach([true, false], id: \.self) { on in
-                    Button {
-                        vm.interviewAutoGenerate = on
-                    } label: {
-                        HStack {
-                            Text(on ? "On" : "Off")
-                            if vm.interviewAutoGenerate == on { Image(systemName: "checkmark") }
-                        }
-                    }
-                }
-            } label: {
-                Label("Auto-generate responses: \(vm.interviewAutoGenerate ? "On" : "Off")",
-                      systemImage: "wand.and.sparkles")
-            }
-
-            // Model picker. A popover rather than a Menu because it shares
-            // the filter bar, tier badges and search with Settings -> AI; a
-            // Menu cannot host a search field, which is why the two screens
-            // used to disagree about which models existed.
-            ModelPickerButton(currentModelName: currentModelName)
-
-
-            Divider()
-
             Button {
                 // Context-aware new session: on the Interview surface,
                 // flip back to the setup form rather than minting a new
@@ -259,6 +192,8 @@ struct TopStripView: View {
                       : "New Session (⌘N)",
                       systemImage: "square.and.pencil")
             }
+            // A live session has to be ended first, from the bar.
+            .disabled(vm.isInterviewSession)
 
             Button {
                 withAnimation(Design.Motion.spring) {
@@ -275,18 +210,6 @@ struct TopStripView: View {
                 Label("Rename…", systemImage: "pencil")
             }
 
-            // The way back from a size the user does not want. A manual
-            // resize is sticky on purpose, so this has to be reachable
-            // without hunting — a squashed panel with the bar cut in half
-            // is otherwise only fixable by restarting the app.
-            Button {
-                vm.onResetPanelSize?()
-            } label: {
-                Label("Reset panel size", systemImage: "arrow.up.left.and.arrow.down.right")
-            }
-
-            Divider()
-
             Menu {
                 Button("Copy as Markdown") { vm.copyActiveSessionAsMarkdown() }
                 Button("Save as Markdown…") { vm.exportActiveSessionToDisk() }
@@ -294,130 +217,12 @@ struct TopStripView: View {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
 
-            Menu {
-                ForEach(AudioSource.allCases, id: \.self) { src in
-                    Button { vm.audioSource = src } label: {
-                        HStack {
-                            Text(src.label)
-                            if vm.audioSource == src { Image(systemName: "checkmark") }
-                        }
-                    }
-                }
-                Divider()
-                Text("You + Them hears the call and you separately: answers fire on the call only.")
-            } label: {
-                Label("Audio source: \(vm.audioSource.label)", systemImage: "waveform")
-            }
-
-            // Quick transparency presets — reachable mid-interview so the
-            // overlay can fade over the call window without a trip to
-            // Preferences (which also has the fine-grained sliders).
-            Menu {
-                ForEach([1.0, 0.85, 0.7, 0.55, 0.4], id: \.self) { level in
-                    Button {
-                        vm.opacity = level
-                    } label: {
-                        HStack {
-                            Text("\(Int(level * 100))%")
-                            if abs(vm.opacity - level) < 0.01 {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            } label: {
-                Label("Transparency: \(Int(vm.opacity * 100))%",
-                      systemImage: "circle.lefthalf.filled")
-            }
-
-            Menu {
-                ForEach([1.0, 0.8, 0.6, 0.4, 0.2], id: \.self) { level in
-                    Button {
-                        vm.backgroundOpacity = level
-                    } label: {
-                        HStack {
-                            Text("\(Int(level * 100))%")
-                            if abs(vm.backgroundOpacity - level) < 0.01 {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            } label: {
-                Label("Background: \(Int(vm.backgroundOpacity * 100))%",
-                      systemImage: "rectangle.on.rectangle")
-            }
-
-            // Answer text size — the same setting as the slider in
-            // Settings → General.
-            Menu {
-                ForEach([0.9, 1.0, 1.15, 1.3, 1.5], id: \.self) { level in
-                    Button {
-                        vm.textScale = level
-                    } label: {
-                        HStack {
-                            Text("\(Int((level * 100).rounded()))%")
-                            if abs(vm.textScale - level) < 0.01 {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            } label: {
-                Label("Text size: \(Int((vm.textScale * 100).rounded()))%",
-                      systemImage: "textformat.size")
-            }
-
-            // How keywords in answers stand out — the same setting as
-            // Settings → General → Keywords. Coloured text first, then the
-            // highlighter styles.
-            Menu {
-                ForEach(KeywordStyle.allCases.filter { !$0.isHighlight }) { keywordStyleButton($0) }
-                Divider()
-                ForEach(KeywordStyle.allCases.filter(\.isHighlight)) { keywordStyleButton($0) }
-            } label: {
-                Label("Keywords: \(keywordStyle.displayName)", systemImage: "highlighter")
-            }
-
-            // Which speech engine is doing the transcribing — switchable
-            // here so the strip doesn't need a badge for it.
-            Menu {
-                ForEach(OverlayViewModel.TranscriptionPreference.allCases) { pref in
-                    Button {
-                        vm.transcriptionPreference = pref
-                    } label: {
-                        HStack {
-                            Text(pref.displayName)
-                            if vm.transcriptionPreference == pref {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            } label: {
-                Label("Transcription: \(vm.transcriptionBackend.rawValue)",
-                      systemImage: "waveform.badge.mic")
-            }
-
-            if vm.isInterviewSession && !vm.isInterviewTextOnly {
-                Divider()
-
+            // The way back after the strip's eye button hides it.
+            if vm.isInterviewSession && !vm.isInterviewTextOnly && !vm.showLiveTranscript {
                 Button {
-                    vm.showLiveTranscript.toggle()
+                    vm.showLiveTranscript = true
                 } label: {
-                    HStack {
-                        Text("Show live transcript")
-                        if vm.showLiveTranscript { Image(systemName: "checkmark") }
-                    }
-                }
-
-                Button {
-                    vm.interviewFocusMode.toggle()
-                } label: {
-                    HStack {
-                        Text("Focus mode (current Q&A only)")
-                        if vm.interviewFocusMode { Image(systemName: "checkmark") }
-                    }
+                    Label("Show live transcript", systemImage: "eye")
                 }
             }
 
@@ -435,39 +240,53 @@ struct TopStripView: View {
 
             // App-level controls. The menu-bar icon hides during calls (the
             // menu bar is in every screen share), so these live here too.
-            Button {
-                (NSApp.delegate as? AppDelegate)?.resetPosition()
-            } label: {
-                Label("Reset overlay position", systemImage: "arrow.uturn.backward")
-            }
+            Menu {
+                // The way back from a size the user does not want. A manual
+                // resize is sticky on purpose, so this has to be reachable
+                // without hunting — a squashed panel with the bar cut in half
+                // is otherwise only fixable by restarting the app.
+                Button {
+                    vm.onResetPanelSize?()
+                } label: {
+                    Label("Reset panel size", systemImage: "arrow.up.left.and.arrow.down.right")
+                }
 
-            Button {
-                (NSApp.delegate as? AppDelegate)?.closeToMenuBar()
-            } label: {
-                Label("Close to menu bar", systemImage: "menubar.arrow.up.rectangle")
-            }
+                Button {
+                    (NSApp.delegate as? AppDelegate)?.resetPosition()
+                } label: {
+                    Label("Reset overlay position", systemImage: "arrow.uturn.backward")
+                }
 
-            // Troubleshooting: the overlay floats above everything and the
-            // window under it is unreachable, so a layout problem cannot be
-            // photographed and there is nothing to look at but this menu.
-            // These two make the app inspectable and gettable-out-of.
-            Button {
-                (NSApp.delegate as? AppDelegate)?.toggleInspector()
+                Button {
+                    (NSApp.delegate as? AppDelegate)?.closeToMenuBar()
+                } label: {
+                    Label("Close to menu bar", systemImage: "menubar.arrow.up.rectangle")
+                }
+
+                Button {
+                    (NSApp.delegate as? AppDelegate)?.saveSnapshotsAndReveal()
+                } label: {
+                    Label("Save a picture of this window", systemImage: "camera")
+                }
+
+                // Troubleshooting: the overlay floats above everything and the
+                // window under it is unreachable, so a layout problem cannot be
+                // photographed and there is nothing to look at but this menu.
+                // These two make the app inspectable and gettable-out-of.
+                Button {
+                    (NSApp.delegate as? AppDelegate)?.toggleInspector()
+                } label: {
+                    Label("Show / hide app window (troubleshooting)",
+                          systemImage: "macwindow.on.rectangle")
+                }
             } label: {
-                Label("Show / hide app window (troubleshooting)",
-                      systemImage: "macwindow.on.rectangle")
+                Label("Window", systemImage: "macwindow")
             }
 
             Button {
                 (NSApp.delegate as? AppDelegate)?.showPreferences()
             } label: {
                 Label("Settings…", systemImage: "gearshape")
-            }
-
-            Button {
-                (NSApp.delegate as? AppDelegate)?.saveSnapshotsAndReveal()
-            } label: {
-                Label("Save a picture of this window", systemImage: "camera")
             }
 
             Button {
@@ -486,10 +305,6 @@ struct TopStripView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-    }
-
-    private var currentModelName: String {
-        OverlayViewModel.availableModels.first { $0.id == vm.selectedModel }?.name ?? "Model"
     }
 
     private func commitTitle() {

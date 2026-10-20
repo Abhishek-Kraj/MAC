@@ -2390,6 +2390,84 @@ func testSettingsOpensInsideTheOverlay() throws {
                    "and the missing-keys warning on the setup form")
 }
 
+/// Each interview control has one home, plus one quick place where it is used.
+///
+/// The ⋯ menu ran to 24 items during a call, and the setup form pushed the
+/// prompt, model and depth below the fold. Session-wide options now live in
+/// Settings → Interview & Calls; the setup form shows a summary of them and
+/// the live gear opens the ones worth changing mid-session.
+func testInterviewControlsHaveOneHome() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    func read(_ p: String) throws -> String {
+        try String(contentsOf: root.appending(path: p), encoding: .utf8)
+    }
+    let prefs = try read("MacOverlay/Views/Preferences/PreferencesView.swift")
+    let setup = try read("MacOverlay/Views/Surfaces/InterviewSurfaceView.swift")
+    let bar = try read("MacOverlay/Views/Shell/InputBarView.swift")
+    let strip = try read("MacOverlay/Views/Shell/TopStripView.swift")
+
+    let tab = prefs
+        .components(separatedBy: "private var interviewCallsTab").dropFirst().first?
+        .components(separatedBy: "private var generalTab").first ?? ""
+    for control in ["$vm.transcriptionPreference", "$vm.audioSource", "TranscriptionLanguagePicker()",
+                    "$vm.suggestSessionOnCall", "$vm.answerDepth", "$vm.interviewAutoGenerate",
+                    "ModelPickerButton", "allowModelThinking"] {
+        try assertTrue(tab.contains(control), "Interview & Calls holds \(control)")
+    }
+    let general = prefs
+        .components(separatedBy: "private var generalTab").dropFirst().first?
+        .components(separatedBy: "private var quickAskTab").first ?? ""
+    try assertTrue(!general.contains("Transcription engine"), "General no longer holds Recording")
+    try assertTrue(general.contains("$vm.userProfile.name"), "Your name is in General")
+
+    for moved in ["$vm.answerDepth", "$vm.interviewAutoGenerate", "$vm.userProfile.name",
+                  "Set up your interview", "answers as they talk"] {
+        try assertTrue(!setup.contains(moved), "the setup form no longer has \(moved)")
+    }
+    try assertTrue(setup.contains("SessionOptionsSummary(isInterview: true)")
+                   && setup.contains("SessionOptionsSummary(isInterview: false)"),
+                   "both setup forms show the options summary")
+    try assertTrue(setup.contains("vm.openSettings(tab: .interviewCalls)"),
+                   "which opens Settings on the right tab")
+
+    try assertTrue(bar.contains("LiveSessionOptions"), "the live gear opens quick options")
+
+    let menu = strip
+        .components(separatedBy: "private var sessionMenu").dropFirst().first?
+        .components(separatedBy: "private func commitTitle").first ?? ""
+    for gone in ["Audio source:", "Transparency:", "Background:", "Text size:", "Keywords:",
+                 "Transcription:", "Auto-generate responses", "ModelPickerButton",
+                 "pauseInterviewSession", "stopInterviewSession", "Focus mode"] {
+        try assertTrue(!menu.contains(gone), "⋯ no longer lists \(gone)")
+    }
+    try assertTrue(menu.contains("Label(\"Window\""), "window items are grouped")
+}
+
+/// A live session is never ended by the new-session button.
+///
+/// The pencil sits beside ✕ and ⋯; on the Interview surface it (and ⌘N)
+/// stopped a live interview with no confirmation.
+func testNewSessionIsRefusedWhileLive() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let vm = try String(contentsOf: root.appending(path: "MacOverlay/OverlayViewModel.swift"),
+                        encoding: .utf8)
+    let strip = try String(contentsOf: root.appending(path: "MacOverlay/Views/Shell/TopStripView.swift"),
+                           encoding: .utf8)
+    let body = vm
+        .components(separatedBy: "func requestNewInterviewSession()").dropFirst().first?
+        .components(separatedBy: "\n    }").first ?? ""
+    try assertTrue(body.contains("guard !isInterviewSession else { return }"),
+                   "a live session refuses a new setup")
+    try assertTrue(!body.contains("stopInterviewSession()"), "and is not ended by it")
+    let compose = strip
+        .components(separatedBy: "private var composeButton").dropFirst().first?
+        .components(separatedBy: "private var sessionMenu").first ?? ""
+    try assertTrue(compose.contains(".disabled(vm.isInterviewSession)"),
+                   "the pencil is disabled while live")
+}
+
 /// Every Settings tab shares one frame.
 ///
 /// Prompts used to be special-cased to zero outer padding because its list is
@@ -3587,6 +3665,8 @@ struct TestsMain {
         TestRunner.run("Settings returns to where it opened", testSettingsReturnsToWhereItOpened)
         TestRunner.run("Settings opens inside the overlay", testSettingsOpensInsideTheOverlay)
         TestRunner.run("Settings tabs share one frame", testEverySettingsTabSharesOneFrame)
+        TestRunner.run("Interview controls have one home", testInterviewControlsHaveOneHome)
+        TestRunner.run("New session is refused while live", testNewSessionIsRefusedWhileLive)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)

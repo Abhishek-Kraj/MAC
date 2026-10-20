@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Named custom prompts. Select one to use. Add/edit/delete. Each session
 /// mode (interview · call/general) keeps its own active prompt via
-/// `PromptStore.activeConversationIDs`; picks made here follow the mode this
-/// view is open on.
+/// `PromptStore.activeConversationIDs`; picks made here apply to the mode in
+/// its "Use for" picker.
 struct PromptLibraryView: View {
     @Environment(OverlayViewModel.self) private var vm
     @State private var editingID: UUID? = nil
@@ -13,6 +13,10 @@ struct PromptLibraryView: View {
     @State private var draftIcon: String = "text.bubble.fill"
     @State private var draftLinkedMode: SessionMode? = nil
     @State private var filter: Filter = .all
+    @State private var targetMode: SessionMode? = nil
+
+    /// The mode a tap sets the prompt for. Starts on the current mode.
+    private var mode: SessionMode { targetMode ?? vm.sessionMode }
 
     enum Filter: Hashable {
         case all
@@ -76,12 +80,23 @@ struct PromptLibraryView: View {
                         .padding(.vertical, 1)
                         .background(Capsule().fill(Color.white.opacity(0.06)))
                 }
-                // A prompt is chosen per mode now, so the library has to name
-                // the mode a selection applies to — otherwise the active mark
-                // has no visible subject.
-                Text("Selecting one sets it for \(vm.sessionMode.displayName).")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                // A prompt is chosen per mode, so the library names the mode a
+                // selection applies to — and lets you pick it, rather than
+                // following whichever mode the app happens to be in.
+                HStack(spacing: 4) {
+                    Text("Use for")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    Picker("", selection: Binding(get: { mode }, set: { targetMode = $0 })) {
+                        ForEach([SessionMode.interview, .call, .general], id: \.self) { m in
+                            Text(m.displayName).tag(m)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize()
+                }
             }
             Spacer()
             if FeatureFlags.resumesEnabled {
@@ -176,7 +191,7 @@ struct PromptLibraryView: View {
     private func row(_ p: PromptPreset) -> some View {
         // Active means "what the mode you are in will run", not "the one
         // preset in the app" — every mode keeps its own.
-        let isActive = p.id == store.activePresetID(for: vm.sessionMode)
+        let isActive = p.id == store.activePresetID(for: mode)
         let isEditing = p.id == editingID
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 8) {
@@ -242,7 +257,7 @@ struct PromptLibraryView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            if editingID == nil { store.setActivePresetID(p.id, for: vm.sessionMode) }
+            if editingID == nil { store.setActivePresetID(p.id, for: mode) }
         }
     }
 
@@ -424,8 +439,8 @@ struct PromptLibraryView: View {
         store.update(p)
         // Auto-activate a freshly-created conversation preset only if the mode
         // you are in has none.
-        if p.kind == .conversation && store.activePresetID(for: vm.sessionMode) == nil {
-            store.setActivePresetID(p.id, for: vm.sessionMode)
+        if p.kind == .conversation && store.activePresetID(for: mode) == nil {
+            store.setActivePresetID(p.id, for: mode)
         }
         editingID = nil
         draftName = ""

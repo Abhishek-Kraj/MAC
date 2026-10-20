@@ -34,7 +34,9 @@ struct PreferencesView: View {
     /// Read by `InputBarView`.
     @AppStorage("bar.fontSize") private var barFontSize = 13.0
 
-    enum Tab: String, CaseIterable, Identifiable {        case general    = "General"
+    enum Tab: String, CaseIterable, Identifiable {
+        case general    = "General"
+        case interviewCalls = "Interview & Calls"
         case ai         = "Keys & Models"
         case quickAsk   = "Quick Ask"
         case prompts    = "Prompts"
@@ -46,7 +48,8 @@ struct PreferencesView: View {
         var icon: String {
             switch self {
             case .general:    return "gearshape.fill"
-            case .ai:         return "key.fill"
+            case .interviewCalls: return "person.wave.2.fill"
+            case .ai:       return "key.fill"
             case .quickAsk:   return "bolt.fill"
             case .prompts:    return "text.bubble.fill"
             case .memory:     return "brain.head.profile"
@@ -117,9 +120,11 @@ struct PreferencesView: View {
                     Group {
                         switch tab {
                         case .general:    generalTab
+                        case .interviewCalls: interviewCallsTab
                         case .ai:         aiTab
                         case .quickAsk:   quickAskTab
-                        case .prompts:    promptsTab                        case .memory:     memoryTab
+                        case .prompts:    promptsTab
+                        case .memory:     memoryTab
                         case .workspaces: workspacesTab
                         case .peer:       peerTab
                         case .shortcuts:  shortcutsTab
@@ -144,10 +149,18 @@ struct PreferencesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear(perform: takeRequestedTab)
+        .onChange(of: vm.requestedSettingsTab) { takeRequestedTab() }
         .sheet(isPresented: $showNewWorkspaceSheet) {
             NewWorkspaceSheet(isPresented: $showNewWorkspaceSheet)
                 .environment(vm)
         }
+    }
+
+    private func takeRequestedTab() {
+        guard let requested = vm.requestedSettingsTab else { return }
+        tab = requested
+        vm.requestedSettingsTab = nil
     }
 
     private var sidebarHeader: some View {
@@ -277,17 +290,12 @@ struct PreferencesView: View {
                 RoundedRectangle(cornerRadius: Design.Radius.md, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
     }
+    /// Everything about how an interview or call runs: what is recorded and
+    /// how answers come back. These lived in General, in Keys & Models and on
+    /// the setup form; the setup form now shows a summary that opens here.
     @ViewBuilder
-    private var generalTab: some View {
+    private var interviewCallsTab: some View {
         @Bindable var vm = vm
-        section(title: "Privacy") {
-            Toggle(isOn: $vm.screenShareInvisible) {
-                labelTwoLine(title: "Hide from screen sharing",
-                             subtitle: "Keeps the overlay out of screen shares and recordings.")
-            }
-            .toggleStyle(.switch)
-        }
-
         section(title: "Recording") {
             HStack(alignment: .top, spacing: 12) {
                     labelTwoLine(title: "Transcription engine",
@@ -322,6 +330,13 @@ struct PreferencesView: View {
                 .frame(width: 150)
             }
 
+            HStack(alignment: .top, spacing: 12) {
+                labelTwoLine(title: "Language",
+                             subtitle: "Spoken in the interview or call. Takes effect from the next recording.")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                TranscriptionLanguagePicker()
+            }
+
             Toggle(isOn: $vm.suggestSessionOnCall) {
                 labelTwoLine(title: "Offer to start when a call begins",
                              subtitle: "When Zoom, Meet or Teams starts using your mic.")
@@ -349,6 +364,78 @@ struct PreferencesView: View {
                             .foregroundColor(.green)
                     }
                 }
+            }
+        }
+
+        section(title: "Answers") {
+            HStack(alignment: .top, spacing: 12) {
+                labelTwoLine(title: "Answer depth", subtitle: vm.answerDepth.blurb)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Picker("", selection: $vm.answerDepth) {
+                    ForEach(AnswerDepth.allCases) { d in
+                        Text(d.displayName).tag(d)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 190)
+            }
+
+            Toggle(isOn: $vm.interviewAutoGenerate) {
+                labelTwoLine(title: "Auto-generate responses",
+                             subtitle: "Answers each real question as it's asked. Off: press send when you want one.")
+            }
+            .toggleStyle(.switch)
+
+            HStack(alignment: .top, spacing: 12) {
+                labelTwoLine(title: "Answer model",
+                             subtitle: "Used for answers and questions. Switchable mid-session from the bar's gear.")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                ModelPickerButton(
+                    currentModelName: OverlayViewModel.availableModels
+                        .first { $0.id == vm.selectedModel }?.name ?? "Model"
+                )
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            Toggle(isOn: Binding(
+                get: { AIManager.allowModelThinking },
+                set: { AIManager.allowModelThinking = $0 })) {
+                labelTwoLine(title: "Let models think first",
+                             subtitle: "Off is faster for interview questions. Turn on for open-ended or maths questions.")
+            }
+            .toggleStyle(.switch)
+
+            let fast = OpenRouterCatalog.reasoningEffortIDs.count
+            Text(fast == 0
+                 ? "No model metadata yet — fetch the OpenRouter catalogue to apply this to every model that supports it."
+                 : "Applied to \(fast) of \(OpenRouterCatalog.shared.allModels.count) models. Models that still think regardless are left alone.")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var generalTab: some View {
+        @Bindable var vm = vm
+        section(title: "Privacy") {
+            Toggle(isOn: $vm.screenShareInvisible) {
+                labelTwoLine(title: "Hide from screen sharing",
+                             subtitle: "Keeps the overlay out of screen shares and recordings.")
+            }
+            .toggleStyle(.switch)
+        }
+
+        section(title: "You") {
+            HStack(alignment: .top, spacing: 12) {
+                labelTwoLine(title: "Your name",
+                             subtitle: "Fills {NAME} in your prompts, and greets you on calendar reminders.")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                TextField("Alex", text: $vm.userProfile.name)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+                    .frame(width: 180)
             }
         }
 
@@ -515,24 +602,6 @@ struct PreferencesView: View {
 
         apiKeysSection
 
-
-        section(title: "Answer speed",
-                subtitle: "Ask models that can to answer without a long thinking block first.") {
-            Toggle(isOn: Binding(
-                get: { AIManager.allowModelThinking },
-                set: { AIManager.allowModelThinking = $0 })) {
-                labelTwoLine(title: "Let models think first",
-                             subtitle: "Off is faster for interview questions. Turn on for open-ended or maths questions.")
-            }
-            .toggleStyle(.switch)
-
-            let fast = OpenRouterCatalog.reasoningEffortIDs.count
-            Text(fast == 0
-                 ? "No model metadata yet — fetch the OpenRouter catalogue to apply this to every model that supports it."
-                 : "Applied to \(fast) of \(OpenRouterCatalog.shared.allModels.count) models. Models that still think regardless are left alone.")
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-        }
 
         section(title: "Model picker",
                 subtitle: "Choose which models show in the model menu.") {

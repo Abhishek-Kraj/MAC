@@ -109,20 +109,17 @@ private struct InterviewSetupForm: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     InterviewModeBar()
-                    header
                     sessionPicker
-                    languagePicker
                     resumePicker
                     contextEditor
-                    nameRow
-                    // Directly under the inputs it consumes. The order now
-                    // reads as a sequence: add a resume, add context, then
-                    // prepare.
-                    PrepPanelView()
                     promptPicker
-                    autoGenerateRow
-                    modelPickerRow
-                    depthRow
+                    // Depth, auto-answer, model, audio and language live in
+                    // Settings → Interview & Calls; this shows what is set.
+                    SessionOptionsSummary(isInterview: true)
+                    // Last: it consumes the resume and context above, and it
+                    // grows (question count, sources), so above the prompt it
+                    // pushed everything after it below the fold.
+                    PrepPanelView()
                 }
                 .padding(.horizontal, 22)
                 .padding(.vertical, 18)
@@ -136,45 +133,7 @@ private struct InterviewSetupForm: View {
         }
     }
 
-    /// Auto-generate suggestion checkbox. When ON, the AI streams a
-    /// suggested response into the chat as the interview transcript
-    /// updates. When OFF, the user controls send via the bar's Send
-    /// button — useful when the interviewer is still mid-question.
-    private var autoGenerateRow: some View {
-        @Bindable var vm = vm
-        return HStack(spacing: 8) {
-            Toggle(isOn: $vm.interviewAutoGenerate) {
-                HStack(spacing: 6) {
-                    Image(systemName: "wand.and.sparkles")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(Design.Ink.secondary)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Auto-generate responses")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Answers each real question as it's asked.")
-                            .font(.system(size: 10))
-                            .foregroundColor(Design.Ink.secondary)
-                    }
-                }
-            }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            Spacer()
-        }
-    }
-
     // MARK: Sections
-
-    private var header: some View {
-        Text("Set up your interview")
-            .font(.system(size: 18, weight: .semibold))
-    }
-
-    private var languagePicker: some View {
-        SetupSection(title: "Language") {
-            TranscriptionLanguagePicker()
-        }
-    }
 
     private var sessionPicker: some View {
         SetupSection(title: "Session") {
@@ -341,76 +300,11 @@ private struct InterviewSetupForm: View {
         )
     }
 
-    /// The name substituted for `{NAME}` in prompts — and the greeting name on
-    /// calendar reminders. It lived in Settings → Profile beside Role and
-    /// Company, neither of which any prompt asked for; the one field that does
-    /// something moved here, next to the context it personalises.
-    private var nameRow: some View {
-        @Bindable var vm = vm
-        return SetupSection(title: "Your name", optional: true) {
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("Alex", text: $vm.userProfile.name)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
-                    .frame(width: 220)
-                Text("Fills {NAME} in your prompts, and greets you on calendar reminders.")
-                    .font(.system(size: 11))
-                    .foregroundColor(Design.Ink.secondary)
-            }
-        }
-    }
-
     /// The prompt the interview runs. Resolved for `.interview`, so the call tab
     /// showing the interview's prompt is no longer possible.
     private var promptPicker: some View {
         PromptPickerRow(mode: .interview, defaultLabel: "Default (Interview)") {
             showCreatePrompt = true
-        }
-    }
-    /// Which model answers the interview. The setup screen had no model
-    /// control at all, so the only way to change it was after starting, from
-    /// the bar. Now it sits directly above Start and uses the same shared
-    /// picker as Settings and the bar, so all four surfaces agree.
-    /// How much each answer should say. The prompt used to hard-code "at most
-    /// 3 short bullets" for every question, which suited a yes/no question
-    /// and starved a design question. Chosen per interview, because nobody is
-    /// picking this mid-answer.
-    private var depthRow: some View {
-        @Bindable var vm = vm
-        return SetupSection(title: "Answer depth") {
-            HStack(spacing: 10) {
-                Picker("", selection: $vm.answerDepth) {
-                    ForEach(AnswerDepth.allCases) { d in
-                        Text(d.displayName).tag(d)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 220)
-                .help("How much each answer should say")
-
-                Text(vm.answerDepth.blurb)
-                    .font(.system(size: 11))
-                    .foregroundColor(Design.Ink.secondary)
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    private var modelPickerRow: some View {
-        SetupSection(title: "Answer model") {
-            HStack(spacing: 10) {
-                Text("Used for every answer in this interview. Switchable mid-session.")
-                    .font(.system(size: 11))
-                    .foregroundColor(Design.Ink.secondary)
-                Spacer(minLength: 8)
-                ModelPickerButton(
-                    currentModelName: OverlayViewModel.availableModels
-                        .first { $0.id == vm.selectedModel }?.name ?? "Model"
-                )
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
         }
     }
 
@@ -467,6 +361,49 @@ private struct InterviewSetupForm: View {
 
 // MARK: - Regular call setup form
 
+/// One line saying how the session will run, with a way to change it.
+///
+/// Depth, auto-answer, model, audio source and language each had a row on the
+/// setup form, which pushed Start and the prompt below the fold; they are set
+/// once and kept, so they live in Settings → Interview & Calls and the form
+/// shows what is set.
+private struct SessionOptionsSummary: View {
+    @Environment(OverlayViewModel.self) private var vm
+    let isInterview: Bool
+
+    private var parts: [String] {
+        let model = OverlayViewModel.availableModels
+            .first { $0.id == vm.selectedModel }?.name ?? vm.selectedModel
+        var parts: [String] = []
+        if isInterview {
+            parts.append("\(vm.answerDepth.displayName) answers")
+            parts.append(vm.interviewAutoGenerate ? "Auto-answer on" : "Auto-answer off")
+        }
+        parts.append(model)
+        if isInterview || vm.regularCallAsCall {
+            parts.append(vm.audioSource.label)
+            parts.append(TranscriptionLanguagePicker.label(for: vm.transcriptionLanguageID))
+        }
+        return parts
+    }
+
+    var body: some View {
+        SetupSection(title: "Options") {
+            HStack(alignment: .center, spacing: 10) {
+                Text(parts.joined(separator: " · "))
+                    .font(.system(size: 12))
+                    .foregroundColor(Design.Ink.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button("Change") { vm.openSettings(tab: .interviewCalls) }
+                    .buttonStyle(.secondaryCompact)
+                    .help("Settings → Interview & Calls")
+            }
+        }
+    }
+}
+
 /// Lighter setup form for the "Regular call" mode tab. No resume, no JD —
 /// just a system prompt picker, free-text + file context, and a Call/Chat
 /// toggle that picks between starting a live mic session (Call) or a
@@ -485,7 +422,7 @@ private struct RegularCallSetupForm: View {
                     contextEditor
                     promptPicker
                     modeToggleRow
-                    if vm.regularCallAsCall { languagePicker }
+                    SessionOptionsSummary(isInterview: false)
                 }
                 .padding(.horizontal, 22)
                 .padding(.vertical, 18)
@@ -499,23 +436,11 @@ private struct RegularCallSetupForm: View {
         }
     }
 
+    /// What the form will do for you. The title bar already names the tab.
     private var header: some View {
-        // The old header was "Set up a call", which described the tab rather
-        // than the outcome. It says what the panel will do for you — which is
-        // the thing the user is actually deciding when they open this form.
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Live call assistant")
-                .font(.system(size: 18, weight: .semibold))
-            Text("Records the call, transcribes it live, and answers as they talk.")
-                .font(.system(size: 11))
-                .foregroundColor(Design.Ink.secondary)
-        }
-    }
-
-    private var languagePicker: some View {
-        SetupSection(title: "Language") {
-            TranscriptionLanguagePicker()
-        }
+        Text("Records and transcribes the call. Ask about it any time; notes are written when it ends.")
+            .font(.system(size: 11))
+            .foregroundColor(Design.Ink.secondary)
     }
 
     private var contextEditor: some View {
