@@ -144,7 +144,10 @@ def main() -> None:
     result = json.load(open(args[0], encoding="utf-8"))
     opt = {args[i]: args[i + 1] for i in range(1, len(args) - 1, 2)}
     print(f"# Interview test — {result['mode']}  ({result['status']})")
-    print(f"model {result['model']} · depth {result['depth']} · auto-answer {result['autoAnswer']}\n")
+    engine = f" · transcription {result['engine']}" if result.get("engine") else ""
+    print(f"model {result['model']} · depth {result['depth']} · auto-answer {result['autoAnswer']}{engine}\n")
+    if result.get("statusBeforeEnd"):
+        print(f"status line during the session: {result['statusBeforeEnd']}\n")
 
     if result["mode"] == "scripted":
         rows = scripted_rows(result)

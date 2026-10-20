@@ -56,6 +56,10 @@ final class InterviewTestDriver {
         let yourSpeech: [String]
         let decisions: [Decision]
         let minutes: String?
+        /// The status line just before End: where capture and transcription
+        /// errors show.
+        var statusBeforeEnd: String = ""
+        var engine: String = ""
     }
 
     private let vm: OverlayViewModel
@@ -167,6 +171,14 @@ final class InterviewTestDriver {
 
     private func runLive() async {
         try? await Task.sleep(for: .seconds(2))
+        // `-engine apple|elevenLabs|grok|auto` for this run only; the user's
+        // choice is put back at the end.
+        let savedEngine = vm.transcriptionPreference
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "-engine"), args.indices.contains(i + 1),
+           let engine = OverlayViewModel.TranscriptionPreference(rawValue: args[i + 1]) {
+            vm.transcriptionPreference = engine
+        }
         vm.interviewSurfaceMode = .interview
         vm.primarySurface = .interview
         vm.shellStage = .expanded
@@ -176,6 +188,7 @@ final class InterviewTestDriver {
         vm.beginInterviewFromSetup()
 
         guard await waitUntil(seconds: 20, { self.vm.isRecording }) else {
+            vm.transcriptionPreference = savedEngine
             finish(Result.failure(mode: "live", status: "recording did not start: \(vm.statusMessage)", vm: vm))
             return
         }
@@ -184,15 +197,19 @@ final class InterviewTestDriver {
 
         let endFile = out.appendingPathComponent("end").path
         _ = await waitUntil(seconds: 1800) { FileManager.default.fileExists(atPath: endFile) }
+        let statusBeforeEnd = vm.statusMessage
         let minutes = await endAndWaitForMinutes(sessionID: sessionID)
         vm.testObserver = nil
+        let engineUsed = vm.transcriptionBackend.rawValue
+        vm.transcriptionPreference = savedEngine
         vm.sessionStore.flushPendingPersist()
 
         finish(Result(mode: "live", status: minutes == nil ? "no debrief: \(vm.statusMessage)" : "ok",
                       model: vm.selectedModel, depth: vm.answerDepth.displayName,
                       autoAnswer: vm.interviewAutoGenerate, lines: [],
                       turns: turnsOut(sessionID), yourSpeech: vm.mySpeechSegments.map(\.text),
-                      decisions: decisions, minutes: minutes))
+                      decisions: decisions, minutes: minutes, statusBeforeEnd: statusBeforeEnd,
+                      engine: engineUsed))
     }
 
     // MARK: - Helpers
@@ -230,6 +247,7 @@ final class InterviewTestDriver {
             self.session(sessionID)?.minutes != nil
                 || self.vm.statusMessage.hasPrefix("Summary failed")
                 || self.vm.statusMessage == "The model returned no summary"
+                || self.vm.statusMessage == "Nothing in the transcript yet"
         }
         return session(sessionID)?.minutes
     }

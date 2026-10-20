@@ -60,6 +60,10 @@ class TranscriptionManager: NSObject, @unchecked Sendable {
     /// Consecutive failed connection attempts since the last healthy
     /// `session_started`. Only touched on the main queue.
     private var reconnectAttempts = 0
+    /// Set when the service refuses the account (out of credits), as
+    /// opposed to dropping the connection. Retrying cannot help, and every
+    /// retry's "Reconnecting…" would bury the reason.
+    private var refusal: String?
     /// After this many straight failures the UI is told the connection is
     /// down (`.failed`) — but reconnection KEEPS RUNNING in the background
     /// for as long as the session is live. Hours-long interviews ride out
@@ -116,6 +120,7 @@ class TranscriptionManager: NSObject, @unchecked Sendable {
         }
 
         reconnectAttempts = 0
+        refusal           = nil
         receivedAudio     = false
         await refreshProToken()
         try openWebSocket()
@@ -308,6 +313,7 @@ class TranscriptionManager: NSObject, @unchecked Sendable {
         guard isRunning else { return }
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
+        guard refusal == nil else { return }
 
         reconnectAttempts += 1
         let attempt = reconnectAttempts
@@ -343,6 +349,14 @@ class TranscriptionManager: NSObject, @unchecked Sendable {
         }
     }
 
+    /// Transcript text arrived, so the connection works: end any reconnect
+    /// streak. Main queue only.
+    private func markConnectionWorking() {
+        guard reconnectAttempts > 0 else { return }
+        reconnectAttempts = 0
+        onConnectionEvent?(.reconnected)
+    }
+
     private func handleResponse(_ json: String) {
         guard
             let data = json.data(using: .utf8),
@@ -355,6 +369,7 @@ class TranscriptionManager: NSObject, @unchecked Sendable {
             let text = msg.text ?? ""
             if !text.isEmpty {
                 DispatchQueue.main.async { [weak self] in
+                    self?.markConnectionWorking()
                     self?.onUpdate?(text)
                     self?.onPartial?(text)
                 }
@@ -364,6 +379,7 @@ class TranscriptionManager: NSObject, @unchecked Sendable {
             let text = msg.text ?? ""
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                self.markConnectionWorking()
                 if !text.isEmpty {
                     self.onUpdate?(text)
                     self.onCommit?(text)
@@ -372,19 +388,30 @@ class TranscriptionManager: NSObject, @unchecked Sendable {
             }
 
         case "session_started":
+            // Not proof the connection works: an account that is out of
+            // credits gets session_started, then quota_exceeded, then a close.
+            // Resetting here kept every retry at attempt 1, so the
+            // "connection lost" warning never came.
             print("[ElevenLabs] Session started")
+
+        case "quota_exceeded":
+            let detail = msg.error ?? msg.message ?? "quota exceeded"
+            NSLog("[ElevenLabs] refused: %@", detail)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                if self.reconnectAttempts > 0 {
-                    self.onConnectionEvent?(.reconnected)
+                let reason = "ElevenLabs: \(detail) Transcription stopped — choose another engine in Settings → Interview & Calls."
+                self.refusal = reason
+                if let onConnectionEvent = self.onConnectionEvent {
+                    onConnectionEvent(.failed(reason))
+                } else {
+                    (self.onError ?? self.onUpdate)?(reason)
                 }
-                self.reconnectAttempts = 0
             }
 
         default:
             // Catch all error types from ElevenLabs
-            if type.contains("error") || type.contains("Error") {
-                let detail = msg.message ?? type
+            if type.contains("error") || type.contains("Error") || msg.error != nil {
+                let detail = msg.message ?? msg.error ?? type
                 print("[ElevenLabs] Error: \(detail)")
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
@@ -684,6 +711,7 @@ private struct ElevenLabsMessage: Decodable {
     let message_type: String?
     let text:         String?
     let message:      String?  // error detail field
+    let error:        String?  // detail on quota_exceeded
 }
 
 // MARK: - Errors
