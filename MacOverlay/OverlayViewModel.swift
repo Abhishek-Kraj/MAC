@@ -2323,6 +2323,14 @@ final class OverlayViewModel {
     /// it rolls to a fresh recognition segment in place
     /// (`resetSegment`) — the engine and taps keep running, so there's
     /// no deaf window between question and answer.
+    /// Reopens a session's saved summary.
+    func showSummary(of session: ChatSession) {
+        guard let text = session.minutes else { return }
+        minutesText = text
+        minutesKind = session.kind == .normal && session.mode == .interview ? .interview : session.kind
+        primarySurface = .summary
+    }
+
     /// A one-tap question during a call; the send carries the call transcript.
     func askAboutCall(_ question: String) {
         manualInput = question
@@ -2756,10 +2764,14 @@ final class OverlayViewModel {
     /// session has ended and that flag is already false by then — the
     /// summary for a call was reading "Meeting minutes", which is the third
     /// place the tab stopped sounding like a call.
+    /// The kind of session `minutesText` belongs to, so its title is right
+    /// when it is reopened later or opened over another tab.
+    var minutesKind: ChatSession.Kind?
+
     var minutesTitle: String {
-        switch interviewSurfaceMode.sessionKind {
+        switch minutesKind ?? interviewSurfaceMode.sessionKind {
         case .regularCall: return "Call summary"
-        case .interview:   return "Interview summary"
+        case .interview:   return "Interview debrief"
         case .normal:      return "Summary"
         case .quickAsk:    return "Summary"
         }
@@ -2782,11 +2794,23 @@ final class OverlayViewModel {
         }
 
         isGeneratingMinutes = true
+        // An interview gets a debrief for the candidate — what was asked, how
+        // it went, what to do next — not meeting minutes. It also reads the
+        // candidate's own captured words.
+        let isInterview = session.kind == .interview || session.mode == .interview
+        let sessionID = session.id
+        let kind: ChatSession.Kind = isInterview ? .interview : session.kind
+        minutesKind = kind
+        let request = isInterview
+            ? MinutesGenerator.debriefUserPrompt(turns: turns,
+                                                 yourSpeech: mySpeechSegments.map(\.text),
+                                                 sessionTitle: session.displayTitle)
+            : MinutesGenerator.userPrompt(turns: turns, sessionTitle: session.displayTitle)
+        let system = isInterview ? MinutesGenerator.interviewSystemPrompt : MinutesGenerator.systemPrompt
         // Ending a session and seeing nothing happen for the few seconds the
         // model takes reads as "it didn't work". This row is the difference
         // between a pause and a bug.
         statusMessage = "Writing \(minutesTitle.lowercased())…"
-        let title  = session.displayTitle
         let model  = selectedModel
         // Captured now, like the title regenerator: the request outlives the
         // click, and keys are read back off the VM's own properties.
@@ -2800,7 +2824,7 @@ final class OverlayViewModel {
             defer { isGeneratingMinutes = false }
             do {
                 let raw = try await AIManager.shared.sendMessage(
-                    MinutesGenerator.userPrompt(turns: turns, sessionTitle: title),
+                    request,
                     apiKey: keys.anthropic,
                     openAIApiKey: keys.openAI,
                     moonshotAPIKey: keys.moonshot,
@@ -2811,7 +2835,7 @@ final class OverlayViewModel {
                     openCodeAPIKey: keys.openCode,
                     model: model,
                     screenshot: nil,
-                    systemPrompt: MinutesGenerator.systemPrompt,
+                    systemPrompt: system,
                     maxTokens: 2000,
                     timeoutInterval: 90
                 )
@@ -2821,14 +2845,22 @@ final class OverlayViewModel {
                     return
                 }
                 minutesText = minutes
-                // Open the summary AS A SURFACE, not a sheet. It is a full,
-                // scrollable, draggable, resizable document the user reads at
-                // their own pace — exactly like History or Resumes — not a
-                // fixed-size dialog that covers the conversation it came from.
-                showMinutesSheet = true
-                primarySurface = .summary
-                shellStage = .expanded
-                statusMessage = ""
+                minutesKind = kind
+                // Kept on the session, so it can be reopened after closing it
+                // or after a relaunch.
+                sessionStore.setMinutes(minutes, for: sessionID)
+                // Open the summary AS A SURFACE, not a sheet — but only if the
+                // user is still on that session's conversation. It can take a
+                // while; taking over History, Settings or a new session was
+                // worse than waiting for them to open it.
+                let stillHere = sessionStore.activeSessionID == sessionID && !isInterviewSession
+                    && [nil, .chat, .interview].contains(primarySurface)
+                if stillHere {
+                    showMinutesSheet = true
+                    primarySurface = .summary
+                    shellStage = .expanded
+                }
+                statusMessage = stillHere ? "" : "Summary saved with the session"
                 // The call is over, so this transcript is history now. Turn
                 // writes are debounced ~400ms; flush so a summary generated
                 // at the very end of a session cannot outlive the turn that

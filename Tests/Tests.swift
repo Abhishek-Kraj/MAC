@@ -3345,6 +3345,42 @@ func testMinutesPromptLocksTheStructure() throws {
     try assertTrue(p.contains("None noted"), "empty sections must say so instead of vanishing")
 }
 
+func testSessionSummaryIsSavedAndOldFilesLoad() throws {
+    var session = ChatSession(kind: .interview, mode: .interview)
+    session.minutes = "### Questions asked\n- Tell me about yourself"
+    let data = try JSONEncoder().encode(session)
+    let back = try JSONDecoder().decode(ChatSession.self, from: data)
+    try assertEq(back.minutes ?? "", session.minutes ?? "")
+    // A file written before summaries existed still loads, with none.
+    let old = #"{"id":"6B0D1D56-7FA1-43A7-829C-4D547E457008","turns":[]}"#
+    let legacy = try JSONDecoder().decode(ChatSession.self, from: Data(old.utf8))
+    try assertTrue(legacy.minutes == nil, "no summary on an old file")
+}
+
+func testInterviewDebriefPromptAndInput() throws {
+    let p = MinutesGenerator.interviewSystemPrompt
+    for heading in ["### Questions asked", "### What they cared about", "### How you answered",
+                    "### Strengths", "### Gaps", "### To research", "### Thank-you email"] {
+        try assertTrue(p.contains(heading), "the debrief has: \(heading)")
+    }
+    try assertTrue(p.contains("Not captured"), "no invented answers when the mic wasn't recorded")
+    try assertTrue(p.lowercased().contains("never invent"), "no invented facts")
+
+    let turns = [ChatTurn(role: .user, content: "Tell me about yourself"),
+                 ChatTurn(role: .assistant, content: "- suggested answer"),
+                 ChatTurn(role: .user, content: "Why Fabric over Synapse?")]
+    let input = MinutesGenerator.debriefUserPrompt(turns: turns,
+                                                   yourSpeech: ["I led the Fabric rollout."],
+                                                   sessionTitle: "Data platform interview")
+    try assertTrue(input.contains("Data platform interview"), "the title rides along")
+    try assertTrue(input.contains("Tell me about yourself") && input.contains("Why Fabric over Synapse?"),
+                   "the interviewer's questions are in")
+    try assertTrue(input.contains("I led the Fabric rollout."), "and the user's own words")
+    try assertFalse(input.contains("suggested answer"), "the copilot's suggestions are not what anyone said")
+    let none = MinutesGenerator.debriefUserPrompt(turns: turns, yourSpeech: [], sessionTitle: "x")
+    try assertTrue(none.contains("not captured"), "missing mic audio is stated, not implied")
+}
+
 func testMinutesRequestCarriesTheSessionTitle() throws {
     let turns = [ChatTurn(role: .user, content: "Hello there.")]
     let prompt = MinutesGenerator.userPrompt(turns: turns, sessionTitle: "Weekly sync")
@@ -3591,6 +3627,8 @@ struct TestsMain {
         TestRunner.run("Minutes truncate long transcripts from the front", testMinutesTruncateLongTranscriptsFromTheFront)
         TestRunner.run("Minutes prompt locks the structure", testMinutesPromptLocksTheStructure)
         TestRunner.run("Minutes request carries the session title", testMinutesRequestCarriesTheSessionTitle)
+        TestRunner.run("Session summary is saved, old files load", testSessionSummaryIsSavedAndOldFilesLoad)
+        TestRunner.run("Interview debrief prompt and input", testInterviewDebriefPromptAndInput)
         TestRunner.run("Name from a resume is extracted, not guessed", testNameFromResumeIsExtractedNotGuessed)
         TestRunner.run("Split capture plan puts the call first", testSplitCapturePlan)
         TestRunner.run("Transcript merges speech among questions", testTranscriptTimelineMergesSpeechAmongQuestions)

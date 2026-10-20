@@ -1152,6 +1152,9 @@ struct ChatSurfaceView: View {
                                    onRetry: { vm.retryLastResponse() })
                             .id(turn.id)
                     }
+                    if session.minutes != nil && !vm.isInterviewSession {
+                        viewSummaryRow(session: session)
+                    }
                     if showsContinueButton(session: session) {
                         continueSessionRow(session: session)
                     }
@@ -1217,6 +1220,24 @@ struct ChatSurfaceView: View {
     /// regular-call / legacy normal) and no live session is currently
     /// running — applies to both empty sessions (resumable shell with
     /// no turns yet) and sessions with prior messages.
+    /// Reopens the summary written when this session ended.
+    private func viewSummaryRow(session: ChatSession) -> some View {
+        HStack {
+            Spacer()
+            Button {
+                vm.showSummary(of: session)
+            } label: {
+                Label(session.kind == .regularCall ? "View call summary" : "View summary",
+                      systemImage: "list.clipboard")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .buttonStyle(.secondaryCompact)
+            .help("Open the summary written when this session ended")
+            Spacer()
+        }
+        .padding(.top, 12)
+    }
+
     private func showsContinueButton(session: ChatSession) -> Bool {
         guard !vm.isInterviewSession else { return false }
         switch session.kind {
@@ -1540,7 +1561,7 @@ struct SummarySurfaceView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(Design.Ink.primary)
                 Spacer(minLength: 6)
-                Text("Saved to Session notes")
+                Text("Saved with this session")
                     .font(.system(size: 10))
                     .foregroundColor(Design.Ink.secondary)
             }

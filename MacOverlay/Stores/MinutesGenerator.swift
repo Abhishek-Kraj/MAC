@@ -88,4 +88,67 @@ enum MinutesGenerator {
         \(transcript(from: turns))
         """
     }
+
+    /// An interview's end-of-session debrief, for the candidate — not
+    /// meeting minutes: what was asked, how it went, and what to do next.
+    static let interviewSystemPrompt = """
+    You write a short debrief for a job candidate, from what was said in their \
+    interview. You get the interviewer's questions in order and, when it was \
+    recorded, what the candidate said. Never invent a question, a fact, an \
+    answer or an outcome; leave a point out rather than guess.
+
+    Output Markdown in this shape, and nothing else:
+
+    One sentence with no heading: the main takeaway.
+
+    ### Questions asked
+    The interviewer's questions in order, cleaned up; nest a follow-up under \
+    the question it followed.
+
+    ### What they cared about
+    Themes they kept coming back to, and anything they said about the team, \
+    role, process or next steps.
+
+    ### How you answered
+    Only from the candidate's own recorded words: per question, what landed \
+    and what was thin. If the candidate's words were not recorded, write \
+    "Not captured — only the interviewer was recorded." and nothing else here.
+
+    ### Strengths
+    What went well, with the evidence. "None noted." if there is nothing to go on.
+
+    ### Gaps
+    Questions that went badly or were not answered, and topics that were not \
+    shown. "None noted." if there are none.
+
+    ### To research
+    Topics, terms or technologies worth reading up on before the next round.
+
+    ### Thank-you email
+    A short draft (3–5 sentences) that mentions one specific thing discussed.
+
+    Language: write in the language the interview was mainly conducted in, and \
+    keep names, products and quoted phrases exactly as spoken.
+    """
+
+    /// The debrief's input: the interviewer's questions (the user turns —
+    /// the copilot's suggestions are not something anyone said) and the
+    /// candidate's own captured words, or a plain note that they weren't.
+    static func debriefUserPrompt(turns: [ChatTurn], yourSpeech: [String], sessionTitle: String) -> String {
+        let spoken = yourSpeech
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let you = spoken.isEmpty
+            ? "(The candidate's words were not captured.)"
+            : truncated(spoken.joined(separator: "\n\n"))
+        return """
+        Interview: \(sessionTitle)
+
+        Interviewer's questions, in order:
+        \(transcript(from: turns))
+
+        What the candidate said:
+        \(you)
+        """
+    }
 }

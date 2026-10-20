@@ -114,6 +114,9 @@ struct ChatSession: Identifiable, Codable, Hashable {
     /// to the default workspace at load time.
     var workspaceID: UUID?
     var turns: [ChatTurn]
+    /// The summary written when the session ended (call minutes or an
+    /// interview debrief), kept so it can be reopened later.
+    var minutes: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -145,7 +148,7 @@ struct ChatSession: Identifiable, Codable, Hashable {
     // with a sensible default instead of throwing.
     private enum CodingKeys: String, CodingKey {
         case id, title, titleManuallySet, isPinned, kind, mode,
-             promptPresetID, workspaceID, turns, createdAt, updatedAt
+             promptPresetID, workspaceID, turns, minutes, createdAt, updatedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -159,6 +162,7 @@ struct ChatSession: Identifiable, Codable, Hashable {
         self.promptPresetID   = try c.decodeIfPresent(UUID.self,        forKey: .promptPresetID)
         self.workspaceID      = try c.decodeIfPresent(UUID.self,        forKey: .workspaceID)
         self.turns            = try c.decodeIfPresent([ChatTurn].self,  forKey: .turns) ?? []
+        self.minutes          = try c.decodeIfPresent(String.self,      forKey: .minutes)
         self.createdAt        = try c.decodeIfPresent(Date.self,        forKey: .createdAt) ?? Date()
         self.updatedAt        = try c.decodeIfPresent(Date.self,        forKey: .updatedAt) ?? Date()
     }

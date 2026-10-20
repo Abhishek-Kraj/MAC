@@ -443,6 +443,12 @@ final class SessionStore {
     }
 
     /// Manual rename by the user: locks the title so auto-retitle won't overwrite.
+    /// Keeps a session's end-of-session summary so it can be reopened.
+    func setMinutes(_ text: String, for id: UUID) {
+        guard let i = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[i].minutes = text
+    }
+
     func rename(id: UUID, to newTitle: String) {
         guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         sessions[idx].title = newTitle
