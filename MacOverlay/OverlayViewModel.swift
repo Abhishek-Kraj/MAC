@@ -834,9 +834,9 @@ final class OverlayViewModel {
     // MARK: - Shell layout (new UX)
     //
     // Settings is a surface again (it was a separate window from 5c97480):
-    // the panel widens while it is open (`AppDelegate.settingsSize`) so keys
-    // and the model catalogue fit, and ✕ returns to the surface it opened
-    // over, so a setup in progress is not lost.
+    // every screen shares one panel size (`AppDelegate.expandedSize`), wide
+    // enough for keys and the model catalogue, and ✕ returns to the surface
+    // it opened over, so a setup in progress is not lost.
     enum PrimarySurface: String, Hashable, CaseIterable, Codable {
         case chat       // live transcript + conversation bubbles (default)
         case interview  // interview setup + live interview surface

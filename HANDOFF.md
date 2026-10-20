@@ -308,7 +308,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | ID | Issue | Evidence | V |
 |---|---|---|---|
 | B20 ✅ | Pill drifts down ~(height−64)pt on each chat/live open-close (expand top-pinned, collapse bottom-pinned); origin persisted | AppDelegate:1519-1521 | S |
-| B21 | Reset panel size always targets 440×800 | AppDelegate:1379-1384 | C |
+| B21 ✅ | Reset panel size always targets 440×800 | AppDelegate:1379-1384 | C |
 | B22 | Model-visibility toggles ignored by the overlay picker; each catalogue fetch re-hides user picks | ModelFilterStore:71, OpenRouterCatalog:524-540 | C |
 | B23 | ⋯ "Model:" popover inside a Menu likely can't present | TopStripView:241 | S |
 | B24 | Header title edit applies to the active session on any surface; commit locks auto-title even when unchanged | TopStripView:40-44/499-505, SessionStore:437 | C |
@@ -360,6 +360,7 @@ B40 (new, user-reported): during a live session the bar showed only "Ask anythin
 B41 (user request): ✕ on a non-live surface goes to the home bar instead of the pill, and reopening stays home (`goHome`, `wentHome`); summary → chat and live → minimize are unchanged; Esc still minimizes and reopen restores.
 B42 (user decision, reverses 5c97480): Settings is an overlay surface again (`PrimarySurface.settings`, `openSettings`). The panel takes `settingsSize` 720×640 while it is open (min 640×520), never records it as the user's size, and restores the exact previous frame on close; ✕ returns to the surface it opened over; a mid-call auto-send does not close it; no separate window. Harness: opened from chat, interview setup, live and home — always 720×640, back to the same frame. Resize probe: settings PASS; the 8 edge checks need the real mouse idle (a live cursor shifted the synthesized down point by 10pt during this run).
 Settings reorganized by use: General = Privacy (screen-share hiding) → Recording (engine, audio source — was ⋯-only — call offer) → Appearance → Onboarding; AI tab renamed "Keys & Models"; key fields show "✓ Saved" / "Not set" (non-empty check, no network test); OpenCode hint shortened. All five tabs snapshot-checked at 720×640.
+B43 (user decision): one panel size for every screen — `expandedSize` 640×720 (or the user's manual size) for Interview, History, Browser, Settings, Chat and Summary; the home bar shares the width. Only the live focus card still hugs its content height. Replaces the 440×800 default, the 440×360 answer height and Settings' own 720×640; Reset panel size targets the same size (fixes B21). Harness: all screens 640×720, home 640×160. Setup form scrolls with Start pinned below it.
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

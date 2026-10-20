@@ -571,26 +571,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// The live views do not use this height: they compute their own (see
     /// `responseExpandedSize`, `expandedCompactSize`, and the focus-hug path),
     /// so raising it costs nothing during an interview.
-    static let expandedSize  = NSSize(width: 440, height: 800)
+    ///
+    /// One size for every screen (user's call, 2026-10-20): 640 wide fits
+    /// Settings' sidebar and keys, so switching tabs never resizes the panel.
+    static let expandedSize  = NSSize(width: 640, height: 720)
     /// `.expanded` while showing chat/interview answers. Fixed compact
     /// height keeps streaming stable; long answers scroll inside the card
     /// instead of resizing the native window on every token.
     static let responseExpandedSize = NSSize(width: 440, height: 360)
-    /// Settings needs room for keys and the model catalogue; the panel takes
-    /// this size while it is open and gives the previous one back after.
-    static let settingsSize    = NSSize(width: 720, height: 640)
+    /// Settings can't be dragged narrower than this: keys and the model
+    /// catalogue need the room.
     static let settingsMinSize = NSSize(width: 640, height: 520)
 
     /// Last-known full-state size. Captured whenever the user transitions
     /// from full → mini so we can restore exactly what they had on expand,
     /// and so the mini state preserves the user's manual panel width.
     private var lastFullSize: NSSize = expandedSize
-    /// The panel is at Settings' size: neither it nor a resize of it is the
-    /// user's size for the other screens.
-    private var settingsFrameActive = false
-    /// The panel's frame before Settings opened; closing Settings puts it back
-    /// exactly, instead of re-anchoring the smaller panel somewhere else.
-    private var frameBeforeSettings: NSRect?
 
     @MainActor
     func setupOverlayPanel() {
@@ -926,11 +922,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // content tracking. Without this the next Live Focus height
             // report animated the panel straight back — a visible
             // grow-then-snap flicker on every keyboard resize.
-            if vm.shellStage == .expanded && !settingsFrameActive {
-                lastFullSize = overlayPanel.frame.size
-                panelSizePreference.record(overlayPanel.frame.size)
-                vm.panelHasManualSize = true
-            }
+            if vm.shellStage == .expanded { lastFullSize = overlayPanel.frame.size }
+            panelSizePreference.record(overlayPanel.frame.size)
+            vm.panelHasManualSize = true
             // Placed by hand, so a resize that was still animating is no longer
             // the frame the panel is heading for.
             forgetPendingPanelResize()
@@ -1153,8 +1147,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSAnimationContext.endGrouping()
         // A drag is authoritative: nothing is on its way anywhere else.
         forgetPendingPanelResize()
-        // Settings has its own size; a drag there isn't the other screens'.
-        guard !settingsFrameActive else { return }
         lastFullSize = panel.frame.size
         // The user's hand outranks content tracking from here on.
         panelSizePreference.record(panel.frame.size)
@@ -1396,8 +1388,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var target = Self.expandedSize
         if vm.shellStage == .pill {
             target = vm.hasPillPopup ? Self.pillWithPopupSize : Self.collapsedSize
-        } else if surfaceOpen {
-            target = Self.expandedSize
+        } else if !surfaceOpen {
+            target = NSSize(width: Self.expandedSize.width, height: Self.expandedCompactMinSize.height)
         }
         guard let panel = overlayPanel else { return }
         panel.setFrame(NSRect(x: cur.origin.x,
@@ -1438,7 +1430,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // An answer hugs its text, so it can be short, but it's never
             // narrower than the other screens: going back to setup from an
             // answer doesn't resize the panel.
-            return vm.usesResponseHuggingPanel
+            return vm.focusHuggingActive
                 ? NSSize(width: Self.expandedMinSize.width, height: Self.expandedCompactMinSize.height)
                 : Self.expandedMinSize
         }
@@ -1461,70 +1453,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // hugging is the default only until the first drag of an edge.
         let cur = panel.frame
         let surfaceOpen = vm.primarySurface != nil
-        let responseHugging = stage == .expanded && surfaceOpen && vm.usesResponseHuggingPanel
-
-        // Capture the user's manual size whenever the panel is currently
-        // wider than the pill width. Without this, any drag-resize would
-        // be lost on the first pill collapse — and re-expanding would
-        // snap back to the default width.
-        let curIsExpandedLayout = cur.size.width >= Self.expandedCompactMinSize.width
-        if curIsExpandedLayout && !responseHugging && !settingsFrameActive { lastFullSize = cur.size }
-        let showsSettings = stage == .expanded && vm.primarySurface == .settings
-
-        let preservedWidth: CGFloat
-        if stage == .pill {
-            preservedWidth = Self.collapsedSize.width
-        } else if curIsExpandedLayout && !settingsFrameActive {
-            preservedWidth = cur.size.width
-        } else {
-            preservedWidth = lastFullSize.width
-        }
+        // Only the live focus card tracks its content's height (so it covers
+        // as little of the call as possible); every other screen shares one
+        // size, so switching tabs never resizes the panel.
+        let responseHugging = stage == .expanded && surfaceOpen && vm.focusHuggingActive
+        let minForStage = minimumPanelSize(for: stage)
+        panel.minSize = minForStage
+        // The size every screen uses: the user's manual size if they dragged
+        // one, otherwise `expandedSize`. A screen's minimum may enlarge it
+        // without erasing the choice.
+        let shared = panelSizePreference.expandedSize(automatic: Self.expandedSize,
+                                                      minimum: minForStage)
 
         var target: NSSize
         switch stage {
         case .pill:
             target = vm.hasPillPopup ? Self.pillWithPopupSize : Self.collapsedSize
         case .expanded:
-            if surfaceOpen {
-                if responseHugging {
-                    // Live Focus tracks the content height dynamically
-                    // (see handleFocusContentHeight); use the last report
-                    // so entering the mode lands at the right size, not
-                    // the fixed response height. Non-focus response mode
-                    // (scrolling conversation) keeps the fixed height.
-                    // A manual size wins over both: re-entering the mode
-                    // keeps the height the user dragged to.
-                    let h: CGFloat
-                    if vm.focusHuggingActive && lastFocusContentHeight > 0 {
-                        h = min(max(lastFocusContentHeight + Self.focusPanelChrome,
-                                    Self.expandedCompactMinSize.height),
-                                Self.expandedSize.height + 80)
-                    } else {
-                        h = Self.responseExpandedSize.height
-                    }
-                    target = NSSize(width: preservedWidth, height: h)
+            if surfaceOpen && responseHugging {
+                // Live Focus: the shared width, the content's height (see
+                // handleFocusContentHeight); a manual height wins.
+                let h: CGFloat
+                if let manual = panelSizePreference.manualSize {
+                    h = max(manual.height, minForStage.height)
+                } else if lastFocusContentHeight > 0 {
+                    h = min(max(lastFocusContentHeight + Self.focusPanelChrome,
+                                Self.expandedCompactMinSize.height),
+                            Self.expandedSize.height + 80)
                 } else {
-                    target = NSSize(
-                        width:  preservedWidth,
-                        height: max(lastFullSize.height, Self.expandedSize.height)
-                    )
+                    h = Self.responseExpandedSize.height
                 }
+                target = NSSize(width: shared.width, height: h)
+            } else if surfaceOpen {
+                target = shared
             } else {
-                target = NSSize(width: preservedWidth, height: Self.expandedCompactSize.height)
+                // Home: the bar alone, as wide as the screens it opens.
+                target = NSSize(width: shared.width, height: minForStage.height)
             }
-        }
-
-        let minForStage = minimumPanelSize(for: stage)
-        panel.minSize = minForStage
-        // A width the user dragged to under an older, smaller minimum (or
-        // kept from the compact bar) must not survive into this stage.
-        if showsSettings {
-            target = Self.settingsSize
-        } else if stage == .expanded && surfaceOpen {
-            target = panelSizePreference.expandedSize(automatic: target, minimum: minForStage)
-        } else {
-            target.width  = max(target.width,  minForStage.width)
-            target.height = max(target.height, minForStage.height)
         }
         // The resize bands are measured from the panel's size and only exist on
         // an expanded panel, so a stage change moves them even when the frame
@@ -1541,20 +1506,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // the pill down by (panel height − 64) on every open/close, until it
         // sat below the screen.
         let newX = cur.origin.x
+        let curIsExpandedLayout = cur.size.width >= Self.expandedCompactMinSize.width
         let newY: CGFloat = responseHugging && curIsExpandedLayout
             ? cur.maxY - target.height
             : cur.origin.y
         // AppKit runs `constrainFrameRect` for its own moves only, not for
         // `setFrame`, so the frame is kept on screen here.
-        var target_ = onScreen(NSRect(x: newX, y: newY, width: target.width, height: target.height))
-        if showsSettings && !settingsFrameActive {
-            frameBeforeSettings = cur
-        } else if !showsSettings && settingsFrameActive, let back = frameBeforeSettings,
-                  abs(back.width - target_.width) < 1, abs(back.height - target_.height) < 1 {
-            target_ = onScreen(back)
-        }
-        if !showsSettings { frameBeforeSettings = nil }
-        settingsFrameActive = showsSettings
+        let target_ = onScreen(NSRect(x: newX, y: newY, width: target.width, height: target.height))
         // `cur` is where the panel is *now*, which during the 0.18s window
         // animation below is still the old size. A second request for the size
         // already on its way would therefore look already satisfied and return
@@ -1737,9 +1695,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings
 
-    /// Settings open inside the overlay (`PrimarySurface.settings`). The panel
-    /// widens to `settingsSize` while it is up so keys and the model catalogue
-    /// fit, and the overlay is brought back if it was hidden.
+    /// Settings open inside the overlay (`PrimarySurface.settings`), at the
+    /// same size as every other screen; the overlay is brought back if hidden.
     @objc func showPreferences() {
         MainActor.assumeIsolated {
             if !overlayPanel.isVisible { overlayPanel.orderFrontRegardless() }
@@ -1933,8 +1890,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.vm.primarySurface = surface
             self.animateShellFrame(stage: .expanded)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                // Settings takes its own size and gives the manual one back.
-                let expected = surface == .settings ? Self.settingsSize : Self.expandedMinSize
+                // Settings can't go below its own minimum.
+                let expected = surface == .settings ? Self.settingsMinSize : Self.expandedMinSize
                 print("PROBE surface=\(surface.rawValue) \(panel.frame.size == expected ? "PASS" : "FAIL") frame=\(panel.frame)")
                 photograph("minimum-" + surface.rawValue)
                 checkSurface(index + 1)

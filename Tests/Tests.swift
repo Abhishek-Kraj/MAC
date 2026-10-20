@@ -2334,8 +2334,11 @@ func testSettingsOpensInsideTheOverlay() throws {
                    "and it opens the Settings surface")
     try assertTrue(!appDelegate.contains("TheCloserPreferences"),
                    "no separate Settings window is created")
-    try assertTrue(appDelegate.contains("settingsSize    = NSSize(width: 720, height: 640)"),
-                   "the panel widens to fit Settings")
+    // One size for every screen (user's call): switching tabs never resizes.
+    try assertTrue(appDelegate.contains("static let expandedSize  = NSSize(width: 640, height: 720)"),
+                   "every screen shares one panel size")
+    try assertTrue(!appDelegate.contains("settingsSize "),
+                   "Settings has no size of its own")
 
     // Reachable from everywhere it was.
     try assertTrue(menu.contains("Settings\\u{2026}") || menu.contains("Settings…"),
@@ -2453,9 +2456,9 @@ func testSettingsReturnsToWhereItOpened() throws {
     // An answer sent mid-call must not close Settings.
     try assertTrue(vm.contains("primarySurface != .interview && primarySurface != .settings"),
                    "auto-send leaves Settings open")
-    // Its own size never becomes the user's size for the other screens.
-    try assertTrue(appDelegate.contains("frameBeforeSettings"),
-                   "closing Settings restores the previous frame")
+    // Only the live focus card sizes itself; every other screen is the same.
+    try assertTrue(appDelegate.contains("let responseHugging = stage == .expanded && surfaceOpen && vm.focusHuggingActive"),
+                   "only live focus hugs its content")
     try assertTrue(!vm.contains("sidebarCollapsed"),
                    "the old in-panel sidebar flag is gone")
     try assertTrue(!appDelegate.contains("isPreferencesVisible"),
@@ -2611,12 +2614,14 @@ func testAppCanBeInspectedAndQuitFromInsideIt() throws {
     try assertTrue(inspector.contains("ScrollView"),
                    "and its contents scroll rather than clip")
 
-    // The setup form has to fit, or Start sits below a fold with no hint.
-    let height = try Int(appDelegate
-        .components(separatedBy: "static let expandedSize  = NSSize(width: 440, height: ")[1]
-        .prefix(3)) ?? 0
-    try assertTrue(height >= 760,
-                   "the setup panel is tall enough for its ten sections, got \(height)")
+    // Start is pinned below the scrolling setup form, so the form may
+    // scroll; the shared panel just has to be tall enough to read it.
+    let sizeLine = appDelegate
+        .components(separatedBy: "static let expandedSize  = NSSize(width: ").dropFirst().first ?? ""
+    let height = Int(sizeLine.components(separatedBy: "height: ").dropFirst().first?
+        .prefix(3) ?? "") ?? 0
+    try assertTrue(height >= 700,
+                   "the shared panel is tall enough for the setup form, got \(height)")
     // And it must still fit this screen.
     try assertTrue(height <= 940, "and not taller than the display")
 }
