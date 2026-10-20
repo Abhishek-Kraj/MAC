@@ -87,6 +87,7 @@ def live_rows(result: dict, script: dict, spoken: list[dict]) -> list[dict]:
     turns = result["turns"]
     user_turns = [(i, t) for i, t in enumerate(turns) if t["role"] == "user"]
     spoken_at = {s["index"]: parse_time(s["end"]) for s in spoken}
+    them = [i for i, line in enumerate(script["lines"]) if line["speaker"] == "them"]
     rows = []
     for idx, line in enumerate(script["lines"]):
         if line["speaker"] != "them":
@@ -98,6 +99,13 @@ def live_rows(result: dict, script: dict, spoken: list[dict]) -> list[dict]:
             if overlap > best_overlap:
                 best, best_overlap = (i, t), overlap
         sent = best is not None and best_overlap >= 0.6
+        # A line that waited goes out joined to the next one: it shares that
+        # turn, so it was held, not answered on its own.
+        later = [j for j in them if j > idx]
+        if sent and line["expect"] == "wait" and later:
+            following = tokens(script["lines"][later[0]]["text"])
+            if len(following & tokens(best[1]["content"])) >= 0.6 * len(following):
+                sent = False
         answer, latency = None, None
         if sent:
             i, t = best

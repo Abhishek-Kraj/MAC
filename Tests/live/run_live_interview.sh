@@ -11,14 +11,17 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-APP="$ROOT/build/TheCloser Dev.app/Contents/MacOS/thecloser-dev"
+APP="$ROOT/build/TheCloser Dev.app"
 SCRIPT="$ROOT/Tests/live/interview_script.json"
 OUT="${1:-$(mktemp -d -t interviewtest)}"
 mkdir -p "$OUT"
 
 pkill -x thecloser-dev || true
 sleep 1
-"$APP" -livetest "$OUT" > "$OUT/app.log" 2>&1 &
+# Through LaunchServices, not the binary: started from a shell, macOS holds
+# the shell responsible for the mic and speech requests, finds no usage
+# description there, and kills the app.
+open -n "$APP" --stdout "$OUT/app.log" --stderr "$OUT/app.err" --args -livetest "$OUT"
 
 for _ in $(seq 1 60); do
     [[ -f "$OUT/ready" || -f "$OUT/result.json" ]] && break
@@ -26,7 +29,7 @@ for _ in $(seq 1 60); do
 done
 if [[ ! -f "$OUT/ready" ]]; then
     echo "The interview did not start recording:"
-    cat "$OUT/result.json" 2>/dev/null || tail -20 "$OUT/app.log"
+    cat "$OUT/result.json" 2>/dev/null || tail -20 "$OUT/app.err"
     exit 1
 fi
 
