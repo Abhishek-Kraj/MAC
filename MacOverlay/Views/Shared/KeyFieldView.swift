@@ -11,7 +11,14 @@ struct KeyFieldView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption.weight(.medium)).foregroundColor(.secondary)
+            HStack(spacing: 6) {
+                Text(label).font(.caption.weight(.medium)).foregroundColor(.secondary)
+                // Saved, not verified: no request is made to check the key.
+                let saved = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                Text(saved ? "✓ Saved" : "Not set")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(saved ? Design.Accent.green : .secondary)
+            }
             HStack(spacing: 4) {
                 if visible {
                     TextField(placeholder, text: $text)

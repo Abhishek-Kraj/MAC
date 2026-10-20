@@ -35,7 +35,7 @@ struct PreferencesView: View {
     @AppStorage("bar.fontSize") private var barFontSize = 13.0
 
     enum Tab: String, CaseIterable, Identifiable {        case general    = "General"
-        case ai         = "AI"
+        case ai         = "Keys & Models"
         case quickAsk   = "Quick Ask"
         case prompts    = "Prompts"
         case memory     = "Memory"
@@ -46,7 +46,7 @@ struct PreferencesView: View {
         var icon: String {
             switch self {
             case .general:    return "gearshape.fill"
-            case .ai:         return "sparkles"
+            case .ai:         return "key.fill"
             case .quickAsk:   return "bolt.fill"
             case .prompts:    return "text.bubble.fill"
             case .memory:     return "brain.head.profile"
@@ -280,26 +280,15 @@ struct PreferencesView: View {
     @ViewBuilder
     private var generalTab: some View {
         @Bindable var vm = vm
-        section(title: "Appearance") {
-            sliderRow("Opacity", value: $vm.opacity, range: 0.2...1.0)
-            sliderRow("Background", value: $vm.backgroundOpacity, range: 0.0...1.0,
-                      display: { $0 == 0 ? "Off" : "\(Int($0 * 100))%" })
-            sliderRow("Text size", value: $vm.textScale, range: 0.8...1.6)
-            // The bar is small and sits over a call; it needs its own size
-            // rather than riding the answer text size. 1pt steps so the label
-            // always names the size that is set.
-            sliderRow("Bar text size", value: $barFontSize, range: 11...16, step: 1,
-                      display: { "\(Int($0))pt" })
-            keywordStyleRow
+        section(title: "Privacy") {
+            Toggle(isOn: $vm.screenShareInvisible) {
+                labelTwoLine(title: "Hide from screen sharing",
+                             subtitle: "Keeps the overlay out of screen shares and recordings.")
+            }
+            .toggleStyle(.switch)
         }
 
         section(title: "Recording") {
-            Toggle(isOn: $vm.suggestSessionOnCall) {
-                labelTwoLine(title: "Offer to start when a call begins",
-                             subtitle: "When Zoom, Meet or Teams starts using your mic.")
-            }
-            .toggleStyle(.switch)
-
             HStack(alignment: .top, spacing: 12) {
                     labelTwoLine(title: "Transcription engine",
                                  subtitle: "Apple runs on this Mac. ElevenLabs and Grok need a key.")
@@ -317,6 +306,27 @@ struct PreferencesView: View {
                     .labelsHidden()
                     .frame(width: 150)
             }
+
+            // Was only in the session ⋯ menu.
+            HStack(alignment: .top, spacing: 12) {
+                labelTwoLine(title: "Audio source",
+                             subtitle: "You + Them: only the call's audio is answered; your mic is shown.")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Picker("", selection: $vm.audioSource) {
+                    ForEach(AudioSource.allCases, id: \.self) { source in
+                        Text(source.label).tag(source)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 150)
+            }
+
+            Toggle(isOn: $vm.suggestSessionOnCall) {
+                labelTwoLine(title: "Offer to start when a call begins",
+                             subtitle: "When Zoom, Meet or Teams starts using your mic.")
+            }
+            .toggleStyle(.switch)
 
             // Shown instead of letting the macOS dialog reappear on every
             // launch. `x-apple.systempreferences:` is the supported way to
@@ -342,12 +352,17 @@ struct PreferencesView: View {
             }
         }
 
-        section(title: "Privacy") {
-            Toggle(isOn: $vm.screenShareInvisible) {
-                labelTwoLine(title: "Hide from screen sharing",
-                             subtitle: "Keeps the overlay out of screen shares and recordings.")
-            }
-            .toggleStyle(.switch)
+        section(title: "Appearance") {
+            sliderRow("Opacity", value: $vm.opacity, range: 0.2...1.0)
+            sliderRow("Background", value: $vm.backgroundOpacity, range: 0.0...1.0,
+                      display: { $0 == 0 ? "Off" : "\(Int($0 * 100))%" })
+            sliderRow("Text size", value: $vm.textScale, range: 0.8...1.6)
+            // The bar is small and sits over a call; it needs its own size
+            // rather than riding the answer text size. 1pt steps so the label
+            // always names the size that is set.
+            sliderRow("Bar text size", value: $barFontSize, range: 11...16, step: 1,
+                      display: { "\(Int($0))pt" })
+            keywordStyleRow
         }
 
         section(title: "Onboarding") {
@@ -487,7 +502,7 @@ struct PreferencesView: View {
             KeyFieldView(label: "OpenCode",
                          placeholder: "opencode.ai key",
                          text: $vm.openCodeAPIKey,
-                         hint: "A second gateway, billed per request like OpenRouter — useful when OpenRouter is busy or out of credit. Its free models only run inside OpenCode's own app, so for zero-cost interviews pick a Free model from the OpenRouter list below. Key at opencode.ai/console.")
+                         hint: "Optional second gateway, for when OpenRouter is busy. For free models use OpenRouter's Free list. Key at opencode.ai/console.")
             KeyFieldView(label: "ElevenLabs", placeholder: "sk_…",        text: $vm.elevenLabsAPIKey)
             KeyFieldView(label: "xAI (Grok)", placeholder: "xai-…",       text: $vm.grokAPIKey)
         }
