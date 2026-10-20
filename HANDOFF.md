@@ -307,7 +307,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 ### P2 — misaligned UX
 | ID | Issue | Evidence | V |
 |---|---|---|---|
-| B20 | Pill drifts down ~(height−64)pt on each chat/live open-close (expand top-pinned, collapse bottom-pinned); origin persisted | AppDelegate:1519-1521 | S |
+| B20 ✅ | Pill drifts down ~(height−64)pt on each chat/live open-close (expand top-pinned, collapse bottom-pinned); origin persisted | AppDelegate:1519-1521 | S |
 | B21 | Reset panel size always targets 440×800 | AppDelegate:1379-1384 | C |
 | B22 | Model-visibility toggles ignored by the overlay picker; each catalogue fetch re-hides user picks | ModelFilterStore:71, OpenRouterCatalog:524-540 | C |
 | B23 | ⋯ "Model:" popover inside a Menu likely can't present | TopStripView:241 | S |
@@ -354,6 +354,8 @@ B5: probe (alert sheet, popover, NSOpenPanel, read via CGWindowListCopyWindowInf
 B11: `stopInterviewSession` clears `transcription`; snapshot shows no THEM strip after End and the "Writing call summary…" status visible.
 B18: `ChatSession.isUntouched` / `prunedUntouched`; new sessions replace an untouched active one, launch drops untouched ones except the active. History on real data: Interview 24→16, Regular call 64→7. Pinned by testUntouchedSessionsArePruned.
 B38: not a current bug — the 12 stored ⏳ turns all predate 24b3fb6 (the drop logic, 2026-10-19 05:51Z); current code removes them. Legacy rows left as is.
+B20 (+ part of B31): expanding from the pill now pins the bottom, like collapsing; programmatic frames (animate, restore, ⌘⇧-arrow move) are clamped on screen (`ScreenPlacement.clamp(_:screenFrame:visibleFrame:)`). The user's pill had ended 33pt below the screen. Harness: 3 open/close cycles keep the pill at y=300 on the response-panel path (was −296pt per cycle); a pill at y=−33 returns to 0. Pinned by testPanelIsClampedOnScreen.
+B39 (new, user-reported): History was reachable only via ⋯ inside an open surface — now a History button on the bar.
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

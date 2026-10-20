@@ -1565,6 +1565,24 @@ func testSharedModelFilterStore() throws {
 ///
 /// Uses synthetic screen rects, so this runs without a second display
 /// attached.
+func testPanelIsClampedOnScreen() throws {
+    // 1512x949 display; the menu bar takes the top 33pt.
+    let screen = NSRect(x: 0, y: 0, width: 1512, height: 949)
+    let visible = NSRect(x: 0, y: 0, width: 1512, height: 916)
+    func clamp(_ f: NSRect) -> NSRect {
+        ScreenPlacement.clamp(f, screenFrame: screen, visibleFrame: visible)
+    }
+    // The pill a user found 33pt below the bottom edge comes back on.
+    try assertEq(clamp(NSRect(x: 1072, y: -33, width: 80, height: 64)).origin,
+                 NSPoint(x: 1072, y: 0))
+    // An 800pt panel opened near the bottom-right is pushed fully on.
+    try assertEq(clamp(NSRect(x: 1300, y: 500, width: 440, height: 800)),
+                 NSRect(x: 1072, y: 116, width: 440, height: 800))
+    // A frame already on screen is untouched.
+    let ok = NSRect(x: 200, y: 200, width: 440, height: 360)
+    try assertEq(clamp(ok), ok)
+}
+
 func testPanelCanMoveBetweenDisplays() throws {
     // Built-in on the left, external 1920x1080 to its right.
     let builtIn  = NSRect(x: 0,    y: 0, width: 1512, height: 945)
@@ -3506,6 +3524,7 @@ struct TestsMain {
         TestRunner.run("Answer depth scales the prompt", testAnswerDepthScalesThePrompt)
         TestRunner.run("Answer depth persists and feeds the prompt", testAnswerDepthPersistsAndFeedsThePrompt)
         TestRunner.run("Panel can move between displays", testPanelCanMoveBetweenDisplays)
+        TestRunner.run("Panel is clamped on screen", testPanelIsClampedOnScreen)
         TestRunner.run("Panel moves between stacked displays", testPanelMovesBetweenVerticallyStackedDisplays)
         TestRunner.run("Model tier rejects router pricing", testModelTierRejectsRouterPricing)
         TestRunner.run("Blended price conversion", testBlendedPriceConversion)

@@ -889,9 +889,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func movePanel(dx: CGFloat, dy: CGFloat) {
         DispatchQueue.main.async { [self] in
-            let o = overlayPanel.frame.origin
-            overlayPanel.setFrameOrigin(NSPoint(x: o.x + dx, y: o.y + dy))
+            overlayPanel.setFrameOrigin(onScreen(overlayPanel.frame.offsetBy(dx: dx, dy: dy)).origin)
         }
+    }
+
+    /// `frame` moved fully onto the screen it mostly overlaps.
+    private func onScreen(_ frame: NSRect) -> NSRect {
+        guard let screen = ScreenPlacement.screen(for: frame, hint: overlayPanel?.screen) else { return frame }
+        return ScreenPlacement.clamp(frame, to: screen)
     }
 
     private func resizePanel(dw: CGFloat, dh: CGFloat) {
@@ -1329,12 +1334,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let saved = NSPoint(x: arr[0], y: arr[1])
         // Only restore if the saved point lies on a currently-connected screen.
         // Otherwise the pill would land on a detached monitor and vanish.
-        let onScreen = NSScreen.screens.contains { $0.frame.contains(saved) }
-        guard onScreen else {
+        let onAScreen = NSScreen.screens.contains { $0.frame.contains(saved) }
+        guard onAScreen else {
             UserDefaults.standard.removeObject(forKey: Self.savedOriginDefaultsKey)
             return
         }
-        panel.setFrameOrigin(saved)
+        // A position saved half below the screen (the old open/close drift)
+        // must come back fully visible.
+        panel.setFrameOrigin(onScreen(NSRect(origin: saved, size: panel.frame.size)).origin)
     }
 
     /// Update which screen quadrant the panel is in so the sidebar can flip
@@ -1515,10 +1522,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // scrolls inside the card instead of resizing the native window.
         // The rest of the shell keeps the original bottom anchor so the
         // compact bar/pill still expands from its resting affordance.
+        // Top-pinning applies only within the expanded shell. Opening from the
+        // pill pins the bottom, like collapsing does — mixing the two moved
+        // the pill down by (panel height − 64) on every open/close, until it
+        // sat below the screen.
         let newX = cur.origin.x
-        let newY: CGFloat = responseHugging
+        let newY: CGFloat = responseHugging && curIsExpandedLayout
             ? cur.maxY - target.height
             : cur.origin.y
+        // AppKit runs `constrainFrameRect` for its own moves only, not for
+        // `setFrame`, so the frame is kept on screen here.
+        let target_ = onScreen(NSRect(x: newX, y: newY, width: target.width, height: target.height))
         // `cur` is where the panel is *now*, which during the 0.18s window
         // animation below is still the old size. A second request for the size
         // already on its way would therefore look already satisfied and return
@@ -1528,9 +1542,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // needs two requests in one animation to happen, which is why it read
         // as flaky. Compare against the frame the panel is heading for.
         let settled = panelResizeTarget ?? cur
-        if abs(settled.width - target.width) < 1,
-           abs(settled.height - target.height) < 1,
-           abs(settled.origin.y - newY) < 1 {
+        if abs(settled.width - target_.width) < 1,
+           abs(settled.height - target_.height) < 1,
+           abs(settled.origin.x - target_.origin.x) < 1,
+           abs(settled.origin.y - target_.origin.y) < 1 {
             return
         }
 
@@ -1540,7 +1555,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // (proportional to delta) which runs slower on big size changes
         // and visibly desyncs from SwiftUI — content jitters because the
         // panel is still resizing while SwiftUI has already settled.
-        let target_ = NSRect(x: newX, y: newY, width: target.width, height: target.height)
 
         // A screenshot harness run is unattended: nothing activates the app, and
         // a window-frame ANIMATION started in that state does not run at all —

@@ -49,9 +49,11 @@ enum ScreenPlacement {
     /// frame horizontally so the bottom can reach the absolute edge, and
     /// visibleFrame at the top so the menu bar stays reachable.
     static func clamp(_ frame: NSRect, to target: NSScreen) -> NSRect {
+        clamp(frame, screenFrame: target.frame, visibleFrame: target.visibleFrame)
+    }
+
+    static func clamp(_ frame: NSRect, screenFrame sf: NSRect, visibleFrame vf: NSRect) -> NSRect {
         var f = frame
-        let sf = target.frame
-        let vf = target.visibleFrame
         f.origin.x = min(max(f.origin.x, sf.minX), sf.maxX - f.size.width)
         f.origin.y = min(max(f.origin.y, sf.minY), vf.maxY - f.size.height)
         return f
