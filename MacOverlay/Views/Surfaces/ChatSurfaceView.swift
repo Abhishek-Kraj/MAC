@@ -198,7 +198,14 @@ struct ChatSurfaceView: View {
         let liveYou  = (vm.isSplitCapture ? vm.liveYourSpeech : "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return ScrollViewReader { proxy in
+        // A call's heard lines get no reply; a line with one is a question
+        // the user asked (typed, or a one-tap button), so it is theirs.
+        let asked = Set(zip(session.turns, session.turns.dropFirst())
+            .filter { $0.role == .user && $1.role == .assistant }
+            .map { $0.0.id })
+
+        return VStack(spacing: 0) {
+        ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if session.turns.isEmpty && liveThem.isEmpty && liveYou.isEmpty {
@@ -210,7 +217,8 @@ struct ChatSurfaceView: View {
                             // A spoken question, in the same lane styling the
                             // strip uses, so the card reads as one transcript
                             // with the strip rather than two different UIs.
-                            laneLine("THEM", turn.content, primary: true)
+                            laneLine(asked.contains(turn.id) ? "YOU" : "THEM", turn.content,
+                                     primary: !asked.contains(turn.id))
                                 .padding(.horizontal, 22)
                                 .padding(.top, 12)
                                 .padding(.bottom, 2)
@@ -261,6 +269,25 @@ struct ChatSurfaceView: View {
             .animation(vm.isUserResizingPanel ? nil : .easeOut(duration: 0.18),
                        value: callContentHeight)
         }
+            callAskChips
+        }
+    }
+
+    /// One-tap questions about the call so far, answered only when tapped.
+    private var callAskChips: some View {
+        HStack(spacing: 8) {
+            ForEach([("What did I miss?", "What did I miss in the last few minutes? Two or three short bullets."),
+                     ("Suggest a question", "Suggest one good question I could ask next, based on the call so far."),
+                     ("What should I say?", "What should I say next? One or two lines I could say naturally.")],
+                    id: \.0) { label, question in
+                Button(label) { vm.askAboutCall(question) }
+                    .buttonStyle(.secondaryCompact)
+                    .disabled(vm.isSendingToAI)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 10)
     }
 
     /// Cap on the call transcript before it starts scrolling.

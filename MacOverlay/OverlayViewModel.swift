@@ -2230,6 +2230,13 @@ final class OverlayViewModel {
     /// it rolls to a fresh recognition segment in place
     /// (`resetSegment`) — the engine and taps keep running, so there's
     /// no deaf window between question and answer.
+    /// A one-tap question during a call; the send carries the call transcript.
+    func askAboutCall(_ question: String) {
+        manualInput = question
+        showManualInput = true
+        sendToAI()
+    }
+
     /// Regular call: the finished line joins the call transcript with no AI
     /// reply. Cleared like a send, so Apple's growing segment can't repeat it.
     private func commitCallLine() {
