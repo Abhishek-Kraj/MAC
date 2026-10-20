@@ -252,27 +252,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if CommandLine.arguments.contains("-seedminutes"), !didSeedMinutes {
                     didSeedMinutes = true
                     vm.minutesText = """
-                    ## Summary
-                    The call covered the Fabric rollout schedule across four legal \
-                    entities. The March window is confirmed as long as the March \
-                    throttling fix holds, and the team agreed to share utilisation \
-                    numbers before the next sync so progress can be verified \
-                    independently.
+                    The call covered the Fabric rollout across four legal entities. The \
+                    March window holds as long as the throttling fix does, and \
+                    utilisation numbers go out before the next sync.
 
-                    ## Participants
-                    Gokul, Rucha, Abhishek.
+                    ### Rollout schedule
+                    - Two of four entities are already in production.
+                    - The March window stays; no change to the per-entity order.
 
-                    ## Decisions
-                    - Keep the March rollout window; no change to the per-entity schedule.
-                    - Hold the 20% headroom buffer for month-end reporting spikes.
-                    - Share CU utilisation numbers before the next sync.
+                    ### Capacity and throttling
+                    - The throttling issue from last month is fixed; CU use is stable.
+                    - Keep the 20% headroom for month-end reporting spikes.
+                        - Throttling only appeared below 10% headroom.
 
-                    ## Action items
-                    - Send the CU utilisation numbers — Abhishek — before the next sync
-                    - Confirm the remaining two entities are production-ready — Gokul — no date
-                    - Re-check throttling after the March workloads land — Rucha — March
+                    ### Next steps
+                    - (Abhishek) Send the CU utilisation numbers — before the next sync
+                    - (Gokul) Confirm the remaining two entities are production-ready
+                    - (Rucha) Re-check throttling after the March workloads land — March
 
-                    ## Open questions
+                    ### Decisions
+                    - Keep the March rollout window.
+                    - Hold the 20% headroom buffer.
+
+                    ### Open questions
                     - Whether the overflow pool stays shared or is split per entity.
                     """
                     vm.showMinutesSheet = true

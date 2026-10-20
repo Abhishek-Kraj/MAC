@@ -3292,11 +3292,14 @@ func testMinutesTruncateLongTranscriptsFromTheFront() throws {
 
 func testMinutesPromptLocksTheStructure() throws {
     let p = MinutesGenerator.systemPrompt
-    for heading in ["## Summary", "## Participants", "## Decisions", "## Action items", "## Open questions"] {
+    // A short opening, then the call by topic, then what happens next.
+    try assertTrue(p.contains("no heading"), "the opening summary has no heading")
+    try assertTrue(p.contains("one \"### \" section per topic"), "the body is grouped by topic")
+    for heading in ["### Next steps", "### Decisions", "### Open questions"] {
         try assertTrue(p.contains(heading), "the model is told the heading: \(heading)")
     }
-    try assertTrue(p.contains("unassigned"), "an unknown owner has a stated answer")
-    try assertTrue(p.contains("no date"), "so does an unknown date")
+    try assertTrue(p.contains("(Unassigned)"), "an unknown owner has a stated answer")
+    try assertTrue(p.contains("owner first"), "next steps lead with who owns them")
     try assertTrue(p.lowercased().contains("never invent"), "and guessing names is forbidden")
     try assertTrue(p.contains("None noted"), "empty sections must say so instead of vanishing")
 }

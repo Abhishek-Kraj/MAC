@@ -24,22 +24,27 @@ enum MinutesGenerator {
     states (people addressing each other by name, self-introductions). Never \
     invent a name.
 
-    Output exactly this Markdown, with these headings and no others:
+    Output Markdown in this shape, and nothing else:
 
-    ## Summary
-    3–5 sentences: what the call was about and where it landed.
+    First, 2–3 sentences with no heading: what the call was about and where \
+    it landed.
 
-    ## Participants
-    Names that actually appear in the transcript. If none do, write "Not identifiable from the transcript."
+    Then one "### " section per topic discussed, in the order it came up, \
+    headed with a short name for that topic. Under each, bullet points of \
+    what was said, agreed or raised; name the person only when the \
+    transcript does. Nest a bullet for a supporting detail.
 
-    ## Decisions
+    ### Next steps
+    One bullet per action, owner first: "(Name) task — due date". Write \
+    "(Unassigned)" when the transcript does not say who owns it, and leave \
+    the date out when none was stated. Write "None noted." if there were none.
+
+    ### Decisions
     Bullet points. Write "None noted." if none were made.
 
-    ## Action items
-    Bullet points in the form "task — owner — due date". When the transcript does not state who owns a task write "unassigned"; when it does not state a date write "no date". Never guess either.
-
-    ## Open questions
-    Anything raised and left unresolved. Write "None noted." if nothing was.
+    ### Open questions
+    Only when something was raised and left unresolved; otherwise leave this \
+    section out.
 
     Rules: use only what the transcript states. No pleasantries, no invented \
     owners, dates, or decisions.
