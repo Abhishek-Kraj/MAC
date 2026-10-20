@@ -1533,7 +1533,7 @@ final class OverlayViewModel {
                     // listening. Honors the "Auto-generate responses" toggle
                     // on the Interview setup — when OFF, the transcript
                     // stays accumulating until the user hits Send manually.
-                    guard self.interviewAutoGenerate else { return }
+                    guard self.interviewAutoGenerate || self.isRegularCallSession else { return }
                     // The ONLY filter is noise / filler-only commits ("um",
                     // coughs, [noise], a stray word or two) — they aren't
                     // worth an answer. Everything else transcribes and sends,
@@ -1774,6 +1774,7 @@ final class OverlayViewModel {
         // the model answers. Recorded sessions only — a text chat has nothing
         // to summarise, and an empty transcript returns early with a status.
         let shouldSummarise = isInterviewSession && !isInterviewTextOnly
+        let wasCall = isRegularCallSession
 
         isInterviewSession  = false
         isInterviewPaused   = false
@@ -1783,6 +1784,8 @@ final class OverlayViewModel {
         // Stop any answers still generating — ending the session means stop.
         cancelStreaming()
         endCapture()
+        // A call's last line belongs in its transcript (and so its minutes).
+        if wasCall { commitCallLine() }
         // The last unsent caption would otherwise stay on the finished
         // conversation as a live "THEM" line, and its presence also hides the
         // status row ("Writing call summary…", "Summary failed").
@@ -1836,7 +1839,9 @@ final class OverlayViewModel {
         // paused. Skip if the user has a manual draft in the bar (don't hijack
         // their typed text) or a request is already in flight.
         let pending = transcription.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !pending.isEmpty, TranscriptFilter.isMeaningful(pending),
+        if isRegularCallSession {
+            commitCallLine()
+        } else if !pending.isEmpty, TranscriptFilter.isMeaningful(pending),
            !isSendingToAI, !showManualInput {
             sendToAI()            // captures `transcription`, then clears it
         }
@@ -2070,9 +2075,17 @@ final class OverlayViewModel {
                 .map { "[Attached \($0.name)]\n\n\($0.extractedText)" }
                 .joined(separator: "\n\n")
             : nil
+        // Asked during a Regular call: the call so far is the context. Its
+        // lines carry no replies, so the history replay can't supply them.
+        // Sent only — not stored, or every question would carry a copy.
+        let callTranscript = isRegularCallSession
+            ? MinutesGenerator.transcript(from: sessionStore.activeSession.turns) : ""
         let prompt: String = {
-            guard let blocks = attachmentBlocks else { return userText }
-            return userText.isEmpty ? blocks : "\(blocks)\n\n\(userText)"
+            var parts: [String] = []
+            if !callTranscript.isEmpty { parts.append("[Call transcript so far]\n\n\(callTranscript)") }
+            if let blocks = attachmentBlocks { parts.append(blocks) }
+            if !userText.isEmpty { parts.append(userText) }
+            return parts.joined(separator: "\n\n")
         }()
 
         // Anything said on the mic since the last message is the user's
@@ -2200,6 +2213,16 @@ final class OverlayViewModel {
     /// it rolls to a fresh recognition segment in place
     /// (`resetSegment`) — the engine and taps keep running, so there's
     /// no deaf window between question and answer.
+    /// Regular call: the finished line joins the call transcript with no AI
+    /// reply. Cleared like a send, so Apple's growing segment can't repeat it.
+    private func commitCallLine() {
+        let line = TranscriptCleanup.clean(transcription)
+        if appleTranscriber.isRunning { appleTranscriber.resetSegment() }
+        transcription = ""
+        guard TranscriptFilter.isMeaningful(line) else { return }
+        sessionStore.appendUser(line)
+    }
+
     private func autoSendLiveTranscript() async {
         // No echo suppression: every meaningful segment is transcribed and
         // sent. In real use the mic runs on System audio (interviewer only),
@@ -2252,9 +2275,19 @@ final class OverlayViewModel {
             // No longer gated on !isSendingToAI: a new question may be sent
             // while an earlier answer is still streaming. runStream caps how
             // many answers run at once.
-            guard self.isInterviewSession, self.interviewAutoGenerate,
+            guard self.isInterviewSession,
+                  self.interviewAutoGenerate || self.isRegularCallSession,
                   !self.isInterviewPaused, self.isRecording else { return }
             guard TranscriptFilter.isMeaningful(self.transcription) else { return }
+
+            // A Regular call doesn't answer each line: the line joins the
+            // call transcript, answers come when asked, and End writes the
+            // minutes from the whole thing.
+            if self.isRegularCallSession {
+                self.pendingAutoSendTask = nil
+                self.commitCallLine()
+                return
+            }
 
             // Does this actually need an answer? "Okay", "yeah that makes
             // sense", and mid-thought asides used to sail through
@@ -2297,7 +2330,7 @@ final class OverlayViewModel {
     /// without this flush the queued question would sit unsent until the
     /// speaker happened to talk again.
     func flushPendingLiveTranscript() {
-        guard isInterviewSession, interviewAutoGenerate, !isInterviewPaused,
+        guard isInterviewSession, interviewAutoGenerate || isRegularCallSession, !isInterviewPaused,
               isRecording, !isSendingToAI else { return }
         let pending = transcription.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !pending.isEmpty, TranscriptFilter.isMeaningful(pending) else { return }
