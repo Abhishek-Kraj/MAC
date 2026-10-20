@@ -1220,8 +1220,10 @@ struct ChatSurfaceView: View {
     private func showsContinueButton(session: ChatSession) -> Bool {
         guard !vm.isInterviewSession else { return false }
         switch session.kind {
-        case .interview, .regularCall, .normal: return true
-        case .quickAsk:                          return false
+        case .interview, .regularCall: return true
+        // Legacy calls were `.normal`; a plain chat isn't a call to continue.
+        case .normal:                  return session.mode == .call
+        case .quickAsk:                return false
         }
     }
 
@@ -1268,7 +1270,7 @@ struct ChatSurfaceView: View {
                 .overlay(Capsule().strokeBorder(Design.Surface.strongHairline, lineWidth: 0.5))
             }
             .buttonStyle(.plain)
-            .help("Reopen the call controls in the bar — the mic stays off until you hit play.")
+            .help("Start listening again, adding to this session.")
             Spacer()
         }
         .padding(.top, 12)

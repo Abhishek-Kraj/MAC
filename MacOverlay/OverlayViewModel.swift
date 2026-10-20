@@ -394,14 +394,25 @@ final class OverlayViewModel {
     /// the continuation is answered as one complete question instead of
     /// each half getting its own reply.
     private(set) var heldQuestionFragment: String?
+    /// The attached résumé/JD that rode on a held fragment's turn. It goes
+    /// onto the next turn, or the session would lose it with the exchange.
+    @ObservationIgnored private(set) var heldHiddenContext: String?
 
     /// The ⏳ sentinel came back: that transcript was a fragment, not a
     /// question. Pull the exchange out of the session — the deck must not
     /// show it and later requests must not replay it — and hold the text
     /// for the continuation.
-    func dropIncompleteExchange(assistantTurnID: UUID, userText: String) {
+    func dropIncompleteExchange(assistantTurnID: UUID) {
+        let turns = sessionStore.activeSession.turns
+        let asked: ChatTurn? = turns.firstIndex { $0.id == assistantTurnID }
+            .flatMap { i in i > 0 && turns[i - 1].role == .user ? turns[i - 1] : nil }
         sessionStore.removeExchange(assistantTurnID: assistantTurnID)
-        let fragment = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let context = asked?.hiddenContext, !context.isEmpty {
+            heldHiddenContext = heldHiddenContext.map { $0 + "\n\n" + context } ?? context
+        }
+        // The turn's own words — not the model input, which also carried any
+        // attached résumé or JD and so glued them onto the next question.
+        let fragment = (asked?.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !fragment.isEmpty else { return }
         // Three pauses inside one sentence must not lose its start.
         heldQuestionFragment = heldQuestionFragment.map { $0 + " " + fragment } ?? fragment
@@ -1849,6 +1860,9 @@ final class OverlayViewModel {
         // to summarise, and an empty transcript returns early with a status.
         let shouldSummarise = isInterviewSession && !isInterviewTextOnly
         let wasCall = isRegularCallSession
+        // Setup context staged for a first question that never came: the
+        // next Start stages its own, so this would only double up.
+        pendingAttachments.removeAll()
         cancelCallEndCountdown()
         callAppInSession = nil
 
@@ -1918,7 +1932,8 @@ final class OverlayViewModel {
         if isRegularCallSession {
             commitCallLine()
         } else if !pending.isEmpty, TranscriptFilter.isMeaningful(pending),
-           !isSendingToAI, !showManualInput {
+                  interviewAutoGenerate, TranscriptFilter.warrantsResponse(pending) != .no,
+                  !isSendingToAI, !showManualInput {
             sendToAI()            // captures `transcription`, then clears it
         }
 
@@ -1955,7 +1970,12 @@ final class OverlayViewModel {
 
         if let pickedID = interviewResumeSessionID,
            sessionStore.sessions.contains(where: { $0.id == pickedID }) {
+            // Resuming a past session must not swap in its mode or its prompt:
+            // this is an interview, with the prompt picked on this form.
+            let pick = promptStore.activePresetID(for: .interview)
             continueSession(id: pickedID, stayInPrimarySurface: true)
+            sessionMode = .interview
+            promptStore.setActivePresetID(pick, for: .interview)
         } else {
             startNewSession(kind: .interview, stayInPrimarySurface: true)
         }
@@ -1991,6 +2011,7 @@ final class OverlayViewModel {
         }
         // Consumed — clear so the next interview setup starts clean.
         interviewContextFiles = []
+        interviewResumeSessionID = nil
 
         startInterviewSession()
     }
@@ -2146,11 +2167,15 @@ final class OverlayViewModel {
         // The blocks are also stored on the turn as `hiddenContext` so
         // later requests replay them — the AI keeps the resume/JD in
         // scope for the whole session, not just the first exchange.
-        let attachmentBlocks: String? = hasAttachments
+        let newBlocks: String? = hasAttachments
             ? attachments
                 .map { "[Attached \($0.name)]\n\n\($0.extractedText)" }
                 .joined(separator: "\n\n")
             : nil
+        // Context a held fragment's dropped turn carried rides on this one.
+        let blocks = [heldHiddenContext, newBlocks].compactMap { $0 }.joined(separator: "\n\n")
+        heldHiddenContext = nil
+        let attachmentBlocks: String? = blocks.isEmpty ? nil : blocks
         // Asked during (or about) a Regular call: the call is the context. Its
         // lines carry no replies, so the history replay can't supply them.
         // Sent only — not stored, or every question would carry a copy.
@@ -2842,6 +2867,7 @@ final class OverlayViewModel {
         cancelStreaming()
         // A held half-question belongs to the session that heard it.
         heldQuestionFragment = nil
+        heldHiddenContext = nil
         // Before closing the current session, ask the AI to give it a nicer title.
         let closingID = sessionStore.activeSessionID
         let closing = sessionStore.activeSession

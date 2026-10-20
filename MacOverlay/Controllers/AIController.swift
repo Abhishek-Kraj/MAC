@@ -193,8 +193,7 @@ final class AIController {
                     // exchange it created and hold the fragment so the
                     // speaker's continuation is sent as one whole
                     // question. Nothing on screen, no note, no title.
-                    vm.dropIncompleteExchange(assistantTurnID: assistantTurnID,
-                                              userText: userText)
+                    vm.dropIncompleteExchange(assistantTurnID: assistantTurnID)
                     mirrorIfCurrent("")
                 } else {
                     // Final flush so the trailing tokens land even if they

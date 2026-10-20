@@ -297,12 +297,12 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | B11 ✅ | Post-call stale THEM caption; it also hides every post-End status ("Writing…", "Summary failed") | VM endCapture, ChatSurfaceView:128-149 | C (seen in snapshot) |
 | B12 | The summary lands up to 90s later and overrides whatever surface the user is on, even a new session | VM:2613-2614 | C |
 | B13 | The summary can't be reopened once left, and is lost on quit; "Saved to Session notes" points to in-memory notes with no UI | NotesManager.swift, CSV:1514, NotesPanelView unreferenced | R |
-| B14 | A ⏳ on the first exchange holds the attached JD/résumé blob as the question fragment | AIController.swift:197-198, VM:1992-1996 | C |
+| B14 ✅ | A ⏳ on the first exchange holds the attached JD/résumé blob as the question fragment | AIController.swift:197-198, VM:1992-1996 | C |
 | B15 ✅ | TranscriptCleanup splits `Node.js`, `3.5`, `10:30`, `1,000` | TranscriptCleanup.swift:88-94 | R |
-| B16 | Setup leaks: pendingAttachments duplicate across Start/End/Start; interviewResumeSessionID never cleared; a resumed session overrides sessionMode and the prompt pick | VM:1836/1858-1874/2670-2671, :368 | C |
+| B16 ✅ | Setup leaks: pendingAttachments duplicate across Start/End/Start; interviewResumeSessionID never cleared; a resumed session overrides sessionMode and the prompt pick | VM:1836/1858-1874/2670-2671, :368 | C |
 | B17 ✅ | No text field outside a live session: ⌘N and starter cards lead to a chat with nothing to type into | InputBarView:270-288, CSV:1011 | C (matches §10 snapshot) |
 | B18 ✅ | Empty-session litter: 65 of 88 sessions have 0 turns; History lists them | SessionStore.startNewSession:304-314 | R |
-| B19 | "Continue call/interview" starts the mic at once, contrary to its tooltip; it shows for plain chats too | CSV:1229/1244 | C |
+| B19 ✅ | "Continue call/interview" starts the mic at once, contrary to its tooltip; it shows for plain chats too | CSV:1229/1244 | C |
 
 ### P2 — misaligned UX
 | ID | Issue | Evidence | V |
@@ -320,7 +320,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | B30 | ⌘⏎/⌘⇧⏎ and menu-bar-icon hiding are tied to isRecording, not the session (pause/text-only) | AppDelegate:403-406/2143 | C |
 | B31 | ⌃⇧-arrow resize hotkeys grabbed globally even when hidden; hotkey move unclamped | HotkeyManager:82-85, AppDelegate:892 | C/S |
 | B32 | Detached browser: closing its window doesn't re-show it; window level set in wrong order (ends at 3) | BrowserWindow.swift:51-53/119-125 | C |
-| B33 | Pause sends the pending transcript ignoring auto-generate and the gate | VM:1802-1806 | C |
+| B33 ✅ | Pause sends the pending transcript ignoring auto-generate and the gate | VM:1802-1806 | C |
 | B34 | Screen Recording notice never clears until relaunch | AppDelegate:2127/2131 | C |
 | B35 | Summary: interviews use the meeting-minutes prompt; YOU speech excluded; title follows the tab, not the session | MinutesGenerator, VM:2543 | C |
 | B36 | Export/copy status invisible off the chat surface | CSV:143-149 | C |
@@ -364,6 +364,7 @@ B43 (user decision): one panel size for every screen — `expandedSize` 640×720
 B44 (user decision): a Regular call no longer sends each finished line to the AI (the Call prompt turned every line into a 3-bullet mini-MOM). Lines are committed to the call transcript with no reply (`commitCallLine`, Apple segment reset like a send), also on Pause and End, so the minutes include the last line; questions typed or sent with ⌘⏎ during a call carry a "[Call transcript so far]" block (sent, not stored); End still writes the MOM. Interview mode unchanged. Harness: two lines + End → 3 transcript lines, no AI requests. Asking with context not exercised against a live model.
 B17: `showsConversationComposer` — Chat, or a past interview/call opened from History, shows Ask anything + send beside the bar buttons; a question about a past Regular call carries its transcript. Snapshot-checked on a past interview, a past call, chat (field shown) and home (not shown).
 Calls, modelled on Wispr Flow's Notetaker (behaviour studied via REA and the user's own Wispr notes; nothing copied): the call prompt closes itself after 20s; minutes are a TL;DR, one section per topic, Next steps owner-first, Decisions, Open questions only if any; a live call has one-tap "What did I miss? / Suggest a question / What should I say?" chips (answered from the transcript) and labels the user's asked lines YOU; when the call app releases the mic during a recorded session a 15s "Call ended? Writing notes in Ns · Keep recording" countdown ends the session (the call app returning, Keep recording or End cancel it). Each harness-verified; no live model call made.
+Interview reliability: B14 holds only the spoken words of a ⏳ fragment and carries its turn's résumé/JD context to the next turn (harness-verified); B16 Start keeps interview mode and the form's prompt pick when resuming, consumes the picked session, End clears unsent staged context (harness-verified: cleared); B19 Continue is offered only on interview/call sessions (legacy .normal calls via mode), tooltip says it starts listening; B33 Pause only answers when auto-answer is on and the line warrants a reply (code-reviewed — mic path not exercised).
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,
