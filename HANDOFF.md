@@ -301,7 +301,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | B15 ✅ | TranscriptCleanup splits `Node.js`, `3.5`, `10:30`, `1,000` | TranscriptCleanup.swift:88-94 | R |
 | B16 | Setup leaks: pendingAttachments duplicate across Start/End/Start; interviewResumeSessionID never cleared; a resumed session overrides sessionMode and the prompt pick | VM:1836/1858-1874/2670-2671, :368 | C |
 | B17 | No text field outside a live session: ⌘N and starter cards lead to a chat with nothing to type into | InputBarView:270-288, CSV:1011 | C (matches §10 snapshot) |
-| B18 | Empty-session litter: 65 of 88 sessions have 0 turns; History lists them | SessionStore.startNewSession:304-314 | R |
+| B18 ✅ | Empty-session litter: 65 of 88 sessions have 0 turns; History lists them | SessionStore.startNewSession:304-314 | R |
 | B19 | "Continue call/interview" starts the mic at once, contrary to its tooltip; it shows for plain chats too | CSV:1229/1244 | C |
 
 ### P2 — misaligned UX
@@ -326,7 +326,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | B36 | Export/copy status invisible off the chat surface | CSV:143-149 | C |
 | B37 | Regenerate on an older bubble retries the last request | AIController:287-298 | S |
 
-| B38 | ⏳ sentinel leaks into session title/preview in History | History snapshot 2026-10-19 | R |
+| B38 — legacy | ⏳ sentinel leaks into session title/preview in History | History snapshot 2026-10-19 | R |
 
 Decisions (user, 2026-10-19): B13 save the summary with its session and make it
 reopenable ("Saved with this session"); B17 show the "Ask anything" field
@@ -352,6 +352,8 @@ B4: browser mic requests get WebKit's per-site prompt; camera and camera+mic are
 B6: confirmed worse than suspected: the launch migration saved the empty store at once. `JSONStore.load` now moves an undecodable file to `<name>.corrupt-<time>.json` (all stores). Pinned by testJSONStoreKeepsUndecodableFile; not reproduced on real data.
 B5: probe (alert sheet, popover, NSOpenPanel, read via CGWindowListCopyWindowInfo) found the sheet and popover capturable (sharing=1); swizzling `order(_:relativeTo:)` too makes all of them 0. Menu-bar item stays capturable (hidden during calls by design). Note: the dev build's saved "Hide from screen sharing" is OFF on this Mac (user setting, left as is).
 B11: `stopInterviewSession` clears `transcription`; snapshot shows no THEM strip after End and the "Writing call summary…" status visible.
+B18: `ChatSession.isUntouched` / `prunedUntouched`; new sessions replace an untouched active one, launch drops untouched ones except the active. History on real data: Interview 24→16, Regular call 64→7. Pinned by testUntouchedSessionsArePruned.
+B38: not a current bug — the 12 stored ⏳ turns all predate 24b3fb6 (the drop logic, 2026-10-19 05:51Z); current code removes them. Legacy rows left as is.
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

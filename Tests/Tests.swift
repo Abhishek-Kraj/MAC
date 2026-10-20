@@ -159,6 +159,20 @@ func testJSONStoreRoundTrip() throws {
     try? FileManager.default.removeItem(at: JSONStore.url(for: filename))
 }
 
+func testUntouchedSessionsArePruned() throws {
+    let empty = ChatSession()
+    var pinned = ChatSession(); pinned.isPinned = true
+    var renamed = ChatSession(); renamed.titleManuallySet = true
+    var used = ChatSession(); used.turns.append(ChatTurn(role: .user, content: "hello"))
+    let active = ChatSession()
+    try assertTrue(empty.isUntouched, "empty session should be untouched")
+    try assertFalse(pinned.isUntouched, "pinned counts as kept")
+    try assertFalse(renamed.isUntouched, "renamed counts as kept")
+    try assertFalse(used.isUntouched, "a session with turns is kept")
+    let kept = ChatSession.prunedUntouched([empty, pinned, renamed, used, active], keeping: active.id)
+    try assertEq(kept.map(\.id), [pinned.id, renamed.id, used.id, active.id])
+}
+
 func testJSONStoreKeepsUndecodableFile() throws {
     // A file that exists but won't decode (a newer build's format, a torn
     // write) must survive: callers treat nil as "nothing saved" and their
@@ -3391,6 +3405,7 @@ struct TestsMain {
         TestRunner.run("model: Workspace codable", testWorkspace)
         TestRunner.run("JSONStore round-trip on disk", testJSONStoreRoundTrip)
         TestRunner.run("JSONStore keeps an undecodable file", testJSONStoreKeepsUndecodableFile)
+        TestRunner.run("Untouched sessions are pruned", testUntouchedSessionsArePruned)
         TestRunner.run("AIManager routes OpenAI models", testAIManagerModelRouting)
         TestRunner.run("ResumeScore parses raw format", testResumeScoreParser)
         TestRunner.run("ResumeScore verdict colors + copy", testResumeScoreVerdictColors)

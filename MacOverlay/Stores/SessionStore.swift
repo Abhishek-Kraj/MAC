@@ -58,14 +58,17 @@ final class SessionStore {
     }
 
     private init() {
-        let loaded = JSONStore.load([ChatSession].self, from: Self.filename) ?? []
+        let stored = JSONStore.load([ChatSession].self, from: Self.filename) ?? []
         let restoredActiveID: UUID? = {
             guard let raw = UserDefaults.standard.string(forKey: "activeSessionID"),
                   let uuid = UUID(uuidString: raw),
-                  loaded.contains(where: { $0.id == uuid })
+                  stored.contains(where: { $0.id == uuid })
             else { return nil }
             return uuid
         }()
+        // Earlier builds left a new empty session behind on every ⌘N, Start
+        // and launch; clear them out.
+        let loaded = ChatSession.prunedUntouched(stored, keeping: restoredActiveID)
 
         // If nothing restored, spin up a fresh session.
         if loaded.isEmpty || restoredActiveID == nil {
@@ -309,7 +312,10 @@ final class SessionStore {
                                 mode: mode,
                                 promptPresetID: promptPresetID,
                                 workspaceID: workspaceID)
-        sessions.append(fresh)
+        // An untouched active session would be left behind as an empty row.
+        var next = sessions.filter { !($0.id == activeSessionID && $0.isUntouched) }
+        next.append(fresh)
+        sessions = next
         activeSessionID = fresh.id
     }
 

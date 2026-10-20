@@ -97,6 +97,16 @@ struct ChatSession: Identifiable, Codable, Hashable {
     /// JSON stores that don't have the key.
     var isPinned: Bool = false
     var kind: Kind = .normal
+
+    /// Never used: no turns, not pinned, never renamed. Dropping one loses
+    /// nothing; keeping them filled History with empty rows.
+    var isUntouched: Bool { turns.isEmpty && !isPinned && !titleManuallySet }
+
+    /// `sessions` without the untouched ones, except `activeID`.
+    static func prunedUntouched(_ sessions: [ChatSession], keeping activeID: UUID?) -> [ChatSession] {
+        sessions.filter { !$0.isUntouched || $0.id == activeID }
+    }
+
     var mode: SessionMode
     var promptPresetID: UUID?
     /// The workspace this session belongs to. Optional for back-compat with
