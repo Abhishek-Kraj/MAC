@@ -184,9 +184,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // no permission to use.
             var didSeedCall = false
             var didSeedMinutes = false
+            // The seeds write turns and `-fresh` starts a session. Both go into
+            // one throwaway session, deleted once the picture is taken: they
+            // used to land in whatever session was active, and runs had left
+            // 52 fixture exchanges across 8 real sessions. The store is used
+            // directly because the view model's startNewSession also asks the
+            // AI to retitle the session being closed — the user's own.
+            let originalSessionID = vm.sessionStore.activeSessionID
+            var throwawaySessionID: UUID?
+            func useThrowawaySession(kind: ChatSession.Kind) {
+                guard throwawaySessionID == nil else { return }
+                self.vm.sessionStore.startNewSession(mode: self.vm.sessionMode, kind: kind)
+                throwawaySessionID = self.vm.sessionStore.activeSessionID
+            }
+            func discardThrowawaySession() {
+                guard let id = throwawaySessionID else { return }
+                throwawaySessionID = nil
+                let store = self.vm.sessionStore
+                store.delete(id: id)
+                store.continueSession(id: originalSessionID)
+                store.flushPendingPersist()
+            }
             func seedLiveCallIfRequested(_ seed: () -> Void) {
                 guard CommandLine.arguments.contains("-seedcall"), !didSeedCall else { return }
                 didSeedCall = true
+                useThrowawaySession(kind: .regularCall)
                 seed()
             }
             if let surfIdx = CommandLine.arguments.firstIndex(of: "-surface"),
@@ -298,7 +320,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // would litter the store with empty sessions.
                 if CommandLine.arguments.contains("-fresh"), !didFresh {
                     didFresh = true
-                    self.vm.startNewSession()
+                    useThrowawaySession(kind: .normal)
                 }
                 // `-seedtranscript` puts a fixed You + Them exchange in the
                 // strip and transcript panel so the split layout can be
@@ -306,6 +328,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // Once only, like -fresh.
                 if CommandLine.arguments.contains("-seedtranscript"), !didSeed {
                     didSeed = true
+                    useThrowawaySession(kind: .interview)
                     self.vm.audioSource        = .both
                     self.vm.sessionMode        = .interview
                     self.vm.interviewSurfaceMode = .interview
@@ -367,6 +390,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // Final assertion, then draw before the dwell fires.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
                         capture()
+                        discardThrowawaySession()
                         if CommandLine.arguments.contains("-resizeprobe") {
                             self.probePanelResize()
                         }
