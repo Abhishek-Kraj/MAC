@@ -150,10 +150,19 @@ enum PrepMatcher {
                              against questions: [PrepQuestion]) -> Match? {
         let ranked = semanticRank(query: embedding, against: questions)
         guard let top = ranked.first else { return nil }
-        // Semantic scores are cosine similarities in [0,1] and margins are much
-        // smaller than the lexical scale, so the gate is checked on margin only.
-        return top.margin >= semanticMinimumMargin ? top : nil
+        // A clear lead is not enough: "Tell me about a time you disagreed with
+        // a stakeholder" led the bank by +0.078 on a question about data-silo
+        // pushback it only resembles (similarity 0.45). The question itself
+        // has to be close, too.
+        return top.score >= semanticMinimumScore && top.margin >= semanticMinimumMargin ? top : nil
     }
+
+    /// Similarity the best question must reach before its answer is shown.
+    /// Measured 2026-10-20 on the 62-question Fabric bank with 20 live-style
+    /// queries: 8 paraphrases of bank questions scored 0.756–0.941; 12 other
+    /// interview questions, including two the margin gate alone let through
+    /// (0.453 and 0.513), scored at most 0.539. This sits in the gap.
+    static let semanticMinimumScore: Double = 0.65
 
     /// Margin required before a semantic match is trusted. Calibrated on a
     /// 50-question bank: every correct retrieval cleared +0.071, every wrong

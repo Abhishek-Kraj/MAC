@@ -55,6 +55,8 @@ def verdict(expect: str, actual: str) -> bool:
         return actual in ("nothing", "oneLine")
     if expect == "oneLine":
         return actual == "oneLine"
+    if expect == "prepared":
+        return actual == "prepared"
     if expect in ("answer", "list"):
         return actual in ("answer", "oneLine") if expect == "list" else actual == "answer"
     return False
@@ -106,15 +108,19 @@ def live_rows(result: dict, script: dict, spoken: list[dict]) -> list[dict]:
             following = tokens(script["lines"][later[0]]["text"])
             if len(following & tokens(best[1]["content"])) >= 0.6 * len(following):
                 sent = False
-        answer, latency = None, None
+        answer, latency, prepared = None, None, False
         if sent:
             i, t = best
+            sent_at = parse_time(t["at"])
+            prepared = any(d["text"].startswith("prepared answer")
+                           and abs((parse_time(d["at"]) - sent_at).total_seconds()) <= 5
+                           for d in result["decisions"])
             nxt = turns[i + 1] if i + 1 < len(turns) else None
             answer = nxt["content"] if nxt and nxt["role"] == "assistant" else None
             if idx in spoken_at:
                 latency = (parse_time(t["at"]) - spoken_at[idx]).total_seconds()
         rows.append({"text": line["text"], "expect": line["expect"], "answer": answer, "sent": sent,
-                     "decisions": [f"heard {best_overlap:.0%}"], "latency": latency, "prepared": False})
+                     "decisions": [f"heard {best_overlap:.0%}"], "latency": latency, "prepared": prepared})
     return rows
 
 
@@ -149,7 +155,7 @@ def main() -> None:
 
     passed = 0
     for n, r in enumerate(rows, 1):
-        actual = classify(r["answer"], r["sent"])
+        actual = "prepared" if r["sent"] and r["prepared"] else classify(r["answer"], r["sent"])
         ok = verdict(r["expect"], actual)
         passed += ok
         extra = []

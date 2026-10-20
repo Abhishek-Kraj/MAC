@@ -2468,6 +2468,28 @@ func testNewSessionIsRefusedWhileLive() throws {
                    "the pencil is disabled while live")
 }
 
+/// A prepared answer needs a close question, not just a clear lead.
+///
+/// The margin gate alone answered "structure the rollout plan across the four
+/// entities?" with the bank's answer about ERP version mismatches: that entry
+/// led the runner-up by +0.096, at a similarity of only 0.51.
+func testSemanticMatchNeedsACloseQuestion() throws {
+    let bank = [
+        PrepQuestion(question: "How do you size capacity?", bankID: "b", embedding: [1, 0, 0]),
+        PrepQuestion(question: "How do you handle pushback?", bankID: "b", embedding: [0, 1, 0]),
+    ]
+    // Far ahead of the runner-up, but not the same question.
+    let resembles = PrepMatcher.semanticBest(query: [0.45, 0, 0.893], against: bank)
+    try assertTrue(resembles == nil, "a lead at similarity 0.45 is refused")
+    // Close and clearly ahead.
+    let paraphrase = PrepMatcher.semanticBest(query: [0.9, 0.1, 0.42], against: bank)
+    try assertTrue(paraphrase?.question.question == "How do you size capacity?",
+                   "a paraphrase at similarity 0.90 is answered")
+    // Close, but tied with another entry.
+    let tied = PrepMatcher.semanticBest(query: [0.7, 0.7, 0.1], against: bank)
+    try assertTrue(tied == nil, "a near tie is still refused")
+}
+
 /// A line judged not to need an answer stays in the strip, so the next line
 /// is judged on its own: "Can you hear me okay?" was answered together with
 /// the statement that followed it.
@@ -3705,6 +3727,7 @@ struct TestsMain {
         TestRunner.run("New session is refused while live", testNewSessionIsRefusedWhileLive)
         TestRunner.run("Interview test uses the live path", testInterviewTestUsesTheLivePath)
         TestRunner.run("Only the unjudged tail is judged", testOnlyTheUnjudgedTailIsJudged)
+        TestRunner.run("Semantic match needs a close question", testSemanticMatchNeedsACloseQuestion)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)

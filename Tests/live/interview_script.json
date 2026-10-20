@@ -14,6 +14,7 @@
     {"speaker": "them", "text": "So what I'd like to understand is how you would", "expect": "wait", "pause": 1.2},
     {"speaker": "them", "text": "structure the rollout plan across the four entities?", "expect": "answer", "pause": 16},
     {"speaker": "them", "text": "Okay, makes sense.", "expect": "ignore", "pause": 4},
+    {"speaker": "them", "text": "How would you charge back Fabric costs to each legal entity?", "expect": "prepared", "pause": 10},
     {"speaker": "them", "text": "Do you have any questions for us?", "expect": "list", "pause": 14}
   ]
 }
