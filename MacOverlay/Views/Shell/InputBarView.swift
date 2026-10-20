@@ -268,11 +268,11 @@ struct InputBarView: View {
                 HStack(alignment: .center, spacing: 4) {
                     divider
                     if vm.isInterviewSession {
-                        // Live row: the field + send, then End and Settings.
-                        // Pause and the model picker stay in the session ⋯
-                        // menu; End and Settings were there too, and with
-                        // nothing on screen saying how to stop, a live call
-                        // read as a window that could not be closed.
+                        // Live row: the field + send, then Pause/Resume, End
+                        // and Settings. They lived only in the session ⋯
+                        // menu, and with nothing on screen saying how to
+                        // pause or stop, a live call read as a window that
+                        // could not be closed. The model picker stays in ⋯.
                         textInputField
                         if vm.isInterviewTextOnly {
                             sendButton
@@ -282,6 +282,9 @@ struct InputBarView: View {
                             // right now (also ⌘⏎), without waiting for a
                             // silence boundary. The mic keeps running.
                             liveSendButton
+                        }
+                        if !vm.isInterviewTextOnly {
+                            pauseResumeButton
                         }
                         endSessionButton
                         settingsButton
@@ -470,6 +473,26 @@ struct InputBarView: View {
     /// (see `AppDelegate.showPreferences`). So this does not set
     /// `primarySurface`: it brings a window forward and tints while that
     /// window is up, which is where the state lives.
+    /// Pause and resume in one button, as in the ⋯ menu.
+    private var pauseResumeButton: some View {
+        let paused = vm.isInterviewPaused
+        let noun = vm.isRegularCallSession ? "call" : "interview"
+        return Button {
+            if paused {
+                vm.resumeInterviewSession()
+            } else {
+                vm.pauseInterviewSession()
+            }
+        } label: {
+            SurfaceIcon(systemName: paused ? "play.fill" : "pause.fill",
+                        tint: paused ? Design.Accent.amber : Design.Ink.secondary,
+                        active: paused, attention: false)
+        }
+        .buttonStyle(.plain)
+        .help(paused ? "Resume \(noun)" : "Pause \(noun)")
+        .accessibilityLabel(Text(paused ? "Resume \(noun)" : "Pause \(noun)"))
+    }
+
     /// Ends the live session: the same action as ⋯ → End call.
     private var endSessionButton: some View {
         let label = vm.isRegularCallSession ? "End call" : "End interview"
