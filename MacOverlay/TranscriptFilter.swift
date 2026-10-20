@@ -125,8 +125,12 @@ enum TranscriptFilter {
         let words = tokenize(t).filter { !fillers.contains($0) }
         guard !words.isEmpty else { return .no }
 
-        // The engine heard an actual question.
-        if t.contains("?") { return .yes }
+        // The engine heard an actual question — unless it's a tag check
+        // ("you led that, right?"), which is worth one line, not an answer.
+        if t.contains("?") {
+            if isTagQuestion(t, firstWord: words.first) { return .unsure }
+            return .yes
+        }
 
         // Nothing but backchannel — "okay", "yeah that makes sense",
         // "right, got it", "hold on one second".
@@ -138,15 +142,44 @@ enum TranscriptFilter {
             return .yes
         }
 
-        // Long enough to be a substantive prompt. Interviewers routinely
-        // pose scenarios as statements ("So your team is on call and the
-        // pager goes off at 3am and the database is down").
-        if words.count >= 8 { return .yes }
+        // Length alone used to mean "answer it", so remarks like "You spent
+        // four years getting your degree…" got a full answer. A long line
+        // without question shape now goes to the check, which tells a
+        // scenario apart from a remark.
 
         // Short, unpunctuated, no question shape — a fragment or an aside.
         if words.count < 4 { return .no }
 
         return .unsure
+    }
+
+    /// "…, right?" and friends: a confirmation, not a question to answer in
+    /// full. A line that itself opens as a question ("Is that right?") isn't.
+    private static func isTagQuestion(_ text: String, firstWord: String?) -> Bool {
+        if let firstWord, interrogativeLeads.contains(firstWord) { return false }
+        let lower = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return ["right?", "correct?", "yeah?", "isn't it?", "wasn't it?", "didn't you?",
+                "don't you?", "no?", "okay?", "ok?"].contains { lower.hasSuffix($0) }
+    }
+
+    /// Fallback when the check can't answer: question shape only — a "?",
+    /// or a line that opens like a question or a request.
+    static func looksLikeQuestion(_ raw: String) -> Bool {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.contains("?") { return true }
+        guard let first = tokenize(t).first(where: { !fillers.contains($0) }) else { return false }
+        return interrogativeLeads.contains(first) || requestLeads.contains(first)
+    }
+
+    /// The check's reply: `{"act": "<label>"}`, possibly fenced or wrapped in
+    /// prose. Nil for anything without a known act.
+    static func parseAct(_ reply: String) -> ResponseAct? {
+        guard let open = reply.firstIndex(of: "{"),
+              let close = reply.lastIndex(of: "}"), open < close,
+              let data = String(reply[open...close]).data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let label = object["act"] as? String else { return nil }
+        return ResponseAct(rawValue: label.trimmingCharacters(in: .whitespaces).lowercased())
     }
 
     /// Canonical form of a transcript for change detection: lowercase
@@ -211,5 +244,24 @@ enum TranscriptFilter {
             !CharacterSet.whitespacesAndNewlines.contains($0) && $0.value != 0xFE0F
         }
         return meaningful.count == 1 && meaningful.first?.value == 0x23F3
+    }
+}
+
+/// What an interviewer line is, as the response check judges it.
+enum ResponseAct: String, CaseIterable {
+    case question, request, scenario
+    case followUp = "follow_up", confirmation
+    case smallTalk = "small_talk", statement
+    case incomplete
+
+    enum Action: Equatable { case full, oneLine, ignore, wait }
+
+    var action: Action {
+        switch self {
+        case .question, .request, .scenario: return .full
+        case .followUp, .confirmation:       return .oneLine
+        case .smallTalk, .statement:         return .ignore
+        case .incomplete:                    return .wait
+        }
     }
 }

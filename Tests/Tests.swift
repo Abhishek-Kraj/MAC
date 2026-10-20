@@ -564,8 +564,14 @@ func testTranscriptFilterWarrantsResponse() throws {
     try assertTrue(isYes("Can you give an example"))
     // A question mark wins even when the line opens with acknowledgement.
     try assertTrue(isYes("Okay, so what's next?"))
-    // Long unpunctuated scenario prompts are substantive.
-    try assertTrue(isYes("So your team is on call and the pager goes off at 3am and the database is down"))
+    // A long line without question shape is no longer answered on length
+    // alone ("You spent four years getting your degree…" was): the check
+    // decides whether it's a scenario, a remark or small talk.
+    try assertTrue(isUnsure("So your team is on call and the pager goes off at 3am and the database is down"))
+    try assertTrue(isUnsure("You spent four years getting your engineering degree and you learned Python"))
+    // Tag questions are usually checks, which deserve one line, not an essay.
+    try assertTrue(isUnsure("So you led that migration, right?"))
+    try assertTrue(isUnsure("You owned the rollout, correct?"))
 
     // Backchannel never sends, at any length.
     try assertTrue(isNo("Okay"))
@@ -579,6 +585,25 @@ func testTranscriptFilterWarrantsResponse() throws {
 
     // The narrow ambiguous band — these are what the model resolves.
     try assertTrue(isUnsure("give me a second there"))
+}
+
+func testResponseActParsingAndActions() throws {
+    try assertEq(TranscriptFilter.parseAct(#"{"act":"question"}"#), .question)
+    try assertEq(TranscriptFilter.parseAct("```json\n{\"act\": \"small_talk\"}\n```"), .smallTalk)
+    try assertEq(TranscriptFilter.parseAct(#"Sure: {"act": "follow_up"} done"#), .followUp)
+    try assertTrue(TranscriptFilter.parseAct("I think it's a question") == nil, "no JSON, no verdict")
+    try assertTrue(TranscriptFilter.parseAct(#"{"act":"poem"}"#) == nil, "unknown act, no verdict")
+
+    for act in [ResponseAct.question, .request, .scenario] { try assertEq(act.action, .full) }
+    for act in [ResponseAct.followUp, .confirmation] { try assertEq(act.action, .oneLine) }
+    for act in [ResponseAct.smallTalk, .statement] { try assertEq(act.action, .ignore) }
+    try assertEq(ResponseAct.incomplete.action, .wait)
+
+    // The fallback when the check can't answer: question shape only.
+    try assertTrue(TranscriptFilter.looksLikeQuestion("How would you shard this"))
+    try assertTrue(TranscriptFilter.looksLikeQuestion("we were wondering, does that scale?"))
+    try assertTrue(TranscriptFilter.looksLikeQuestion("Walk me through the design"))
+    try assertFalse(TranscriptFilter.looksLikeQuestion("We use Kafka for all our events"))
 }
 
 @MainActor
@@ -3469,6 +3494,7 @@ struct TestsMain {
         TestRunner.run("TranscriptFilter question completeness", testTranscriptFilterSeemsComplete)
         TestRunner.run("Incomplete-question sentinel", testIncompleteSentinelDetection)
         TestRunner.run("Transcript cleanup", testTranscriptCleanupRemovesSpeechNoise)
+        TestRunner.run("Response act parsing and actions", testResponseActParsingAndActions)
         TestRunner.run("Transcript cleanup keeps dotted and numeric tokens", testTranscriptCleanupKeepsDottedAndNumericTokens)
         TestRunner.run("Prompt placeholders resolve or drop", testPromptPlaceholdersResolveOrDrop)
         TestRunner.run("TranscriptFilter response gate triage", testTranscriptFilterWarrantsResponse)
