@@ -1,0 +1,19 @@
+{
+  "lines": [
+    {"speaker": "them", "text": "Hi, thanks for joining us today. Can you hear me okay?", "expect": "brief", "pause": 7},
+    {"speaker": "you", "text": "Yes, I can hear you clearly, thanks for having me.", "pause": 2},
+    {"speaker": "them", "text": "Great. So today we'll go through your platform work first, and then leave some time for your questions at the end.", "expect": "ignore", "pause": 4},
+    {"speaker": "them", "text": "Tell me about yourself.", "expect": "answer", "pause": 14},
+    {"speaker": "you", "text": "I lead data platform work, most recently a Microsoft Fabric rollout across four legal entities.", "pause": 2},
+    {"speaker": "them", "text": "Imagine a client wants to move four legal entities from Synapse to Fabric with a hard March deadline and finance is already worried about capacity costs", "expect": "answer", "pause": 16},
+    {"speaker": "them", "text": "You've worked with Fabric capacities before, right?", "expect": "oneLine", "pause": 7},
+    {"speaker": "them", "text": "And how did you handle throttling when it showed up?", "expect": "answer", "pause": 14},
+    {"speaker": "you", "text": "We kept a twenty percent headroom buffer and split billing back out per entity.", "pause": 2},
+    {"speaker": "them", "text": "That's interesting, we ran into the same problem last year.", "expect": "ignore", "pause": 4},
+    {"speaker": "them", "text": "Tell me about a time you disagreed with a stakeholder.", "expect": "answer", "pause": 16},
+    {"speaker": "them", "text": "So what I'd like to understand is how you would", "expect": "wait", "pause": 1.2},
+    {"speaker": "them", "text": "structure the rollout plan across the four entities?", "expect": "answer", "pause": 16},
+    {"speaker": "them", "text": "Okay, makes sense.", "expect": "ignore", "pause": 4},
+    {"speaker": "them", "text": "Do you have any questions for us?", "expect": "list", "pause": 14}
+  ]
+}

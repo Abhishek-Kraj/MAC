@@ -16,3 +16,5 @@ DerivedData/
 
 # Claude Code local state
 .claude/
+
+__pycache__/

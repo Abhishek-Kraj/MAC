@@ -397,6 +397,14 @@ final class OverlayViewModel {
     /// The attached résumé/JD that rode on a held fragment's turn. It goes
     /// onto the next turn, or the session would lose it with the exchange.
     @ObservationIgnored private(set) var heldHiddenContext: String?
+    /// Each auto-answer decision as one short line (verdict, act, action,
+    /// sent or skipped). Nil in normal use; set by `InterviewTestDriver`.
+    @ObservationIgnored var testObserver: ((String) -> Void)?
+    /// The live transcript up to the end of a line judged not to need an
+    /// answer. It stays in the strip, so the next line is judged — and sent —
+    /// without it; otherwise "Can you hear me okay?" rode along and was
+    /// answered with whatever came next.
+    @ObservationIgnored private var judgedPrefix: String?
     /// The next answer should be one line: the check judged the line a
     /// follow-up or confirmation. Read once by `prepareThenSend`.
     @ObservationIgnored private var pendingAnswerOneLine = false
@@ -1613,43 +1621,7 @@ final class OverlayViewModel {
         }
 
         let silenceHandler: () -> Void = { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self, !self.transcription.isEmpty else { return }
-
-                // Quick ask is handled by QuickRecorder (SFSpeechRecognizer) — ignore here
-                if self.isQuickAsking { return }
-
-                guard self.isRecording else { return }
-
-                if self.isInterviewSession {
-                    // Continuous mode: send the committed segment and keep
-                    // listening. Honors the "Auto-generate responses" toggle
-                    // on the Interview setup — when OFF, the transcript
-                    // stays accumulating until the user hits Send manually.
-                    guard self.interviewAutoGenerate || self.isRegularCallSession else { return }
-                    // The ONLY filter is noise / filler-only commits ("um",
-                    // coughs, [noise], a stray word or two) — they aren't
-                    // worth an answer. Everything else transcribes and sends,
-                    // even if it overlaps the last answer: in real use the mic
-                    // runs on System audio (interviewer only, nothing to echo),
-                    // and during mic testing the user's own follow-ups must
-                    // still go through.
-                    guard TranscriptFilter.isMeaningful(self.transcription) else {
-                        self.transcription = ""
-                        return
-                    }
-                    // A new question committed while an earlier answer may
-                    // still be streaming — let it finish. We do NOT cancel
-                    // here: runStream caps concurrency at
-                    // AIController.maxConcurrentStreams and evicts the oldest
-                    // answer only when that cap is exceeded.
-                    // Debounced: a VAD commit isn't proof the question is
-                    // over. scheduleAutoSend waits a short grace window
-                    // (longer when the text trails off mid-thought) and
-                    // is cancelled by any new speech.
-                    self.scheduleAutoSend()
-                }
-            }
+            Task { @MainActor [weak self] in self?.handleThemSilence() }
         }
         transcriptionManager.onSilence = silenceHandler
         appleTranscriber.onSilence    = silenceHandler
@@ -1999,32 +1971,32 @@ final class OverlayViewModel {
         // the manual-input draft (the old approach) made the first silence
         // boundary send the context INSTEAD of the interviewer's opening
         // question, which was then dropped.
-        let resumeText     = readInterviewResumeText()
-        let trimmedContext = interviewContext.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if !trimmedContext.isEmpty {
-            pendingAttachments.append(
-                PendingAttachment(name: "Interview context", extractedText: trimmedContext)
-            )
-        }
-
-        if !resumeText.isEmpty {
-            let name = interviewResumeFileURL?.lastPathComponent ?? "resume"
-            pendingAttachments.append(
-                PendingAttachment(name: name, extractedText: resumeText)
-            )
-        }
-
-        for ctx in interviewContextFiles where !ctx.extractedText.isEmpty {
-            pendingAttachments.append(
-                PendingAttachment(name: ctx.name, extractedText: ctx.extractedText)
-            )
-        }
+        pendingAttachments.append(contentsOf: interviewSetupAttachments())
         // Consumed — clear so the next interview setup starts clean.
         interviewContextFiles = []
         interviewResumeSessionID = nil
 
         startInterviewSession()
+    }
+
+    /// The setup form's context, résumé and extra files as attachments for the
+    /// first send. Also staged by `InterviewTestDriver`, which leaves the form
+    /// as it was.
+    func interviewSetupAttachments() -> [PendingAttachment] {
+        var out: [PendingAttachment] = []
+        let resumeText     = readInterviewResumeText()
+        let trimmedContext = interviewContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedContext.isEmpty {
+            out.append(PendingAttachment(name: "Interview context", extractedText: trimmedContext))
+        }
+        if !resumeText.isEmpty {
+            let name = interviewResumeFileURL?.lastPathComponent ?? "resume"
+            out.append(PendingAttachment(name: name, extractedText: resumeText))
+        }
+        for ctx in interviewContextFiles where !ctx.extractedText.isEmpty {
+            out.append(PendingAttachment(name: ctx.name, extractedText: ctx.extractedText))
+        }
+        return out
     }
 
     /// Resume text for the interview payload. Prefers the copy we already
@@ -2271,6 +2243,7 @@ final class OverlayViewModel {
             sessionStore.finalizeAssistant(turnID: assistantID,
                                            inputTokens: 0, outputTokens: 0)
             showPreparedAnswer(hit, matchedQuestion: source)
+            testObserver?("prepared answer, matched: \(source)")
             return
         }
 
@@ -2376,6 +2349,48 @@ final class OverlayViewModel {
         if hadDraft { showManualInput = true }
     }
 
+    /// A finished line on the THEM lane: the engines' silence callback, and
+    /// the scripted interview test (`InterviewTestDriver`), which feeds lines
+    /// through this exact path.
+    func handleThemSilence() {
+        guard !transcription.isEmpty else { return }
+
+        // Quick ask is handled by QuickRecorder (SFSpeechRecognizer) — ignore here
+        if isQuickAsking { return }
+
+        guard isRecording else { return }
+
+        if isInterviewSession {
+            // Continuous mode: send the committed segment and keep
+            // listening. Honors the "Auto-generate responses" toggle
+            // on the Interview setup — when OFF, the transcript
+            // stays accumulating until the user hits Send manually.
+            guard interviewAutoGenerate || isRegularCallSession else { return }
+            // The ONLY filter is noise / filler-only commits ("um",
+            // coughs, [noise], a stray word or two) — they aren't
+            // worth an answer. Everything else transcribes and sends,
+            // even if it overlaps the last answer: in real use the mic
+            // runs on System audio (interviewer only, nothing to echo),
+            // and during mic testing the user's own follow-ups must
+            // still go through.
+            guard TranscriptFilter.isMeaningful(transcription) else {
+                testObserver?("filler, dropped")
+                transcription = ""
+                return
+            }
+            // A new question committed while an earlier answer may
+            // still be streaming — let it finish. We do NOT cancel
+            // here: runStream caps concurrency at
+            // AIController.maxConcurrentStreams and evicts the oldest
+            // answer only when that cap is exceeded.
+            // Debounced: a VAD commit isn't proof the question is
+            // over. scheduleAutoSend waits a short grace window
+            // (longer when the text trails off mid-thought) and
+            // is cancelled by any new speech.
+            scheduleAutoSend()
+        }
+    }
+
     /// Debounced auto-send for interview mode. A VAD commit doesn't
     /// necessarily mean the question is over — interviewers pause
     /// mid-sentence to think. Wait a grace window before sending: short
@@ -2430,16 +2445,22 @@ final class OverlayViewModel {
             // mode.
             let candidate = self.transcription
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            switch TranscriptFilter.warrantsResponse(candidate) {
+            let tail = TranscriptFilter.unjudgedTail(candidate, after: self.judgedPrefix)
+            if tail == nil { self.judgedPrefix = nil }
+            let judged = tail ?? candidate
+            guard !judged.isEmpty else { return }
+            switch TranscriptFilter.warrantsResponse(judged) {
             case .no:
                 // Not cleared: the text stays in the strip, so if the
                 // speaker continues ("Okay… so tell me about X") the
                 // next commit re-schedules with the full segment.
+                self.judgedPrefix = candidate
+                self.testObserver?("verdict=no, skipped")
                 return
             case .yes:
-                break
+                self.testObserver?("verdict=yes")
             case .unsure:
-                let act = await self.classifyAct(candidate)
+                let act = await self.classifyAct(judged)
                 // New speech during the round-trip cancels this task;
                 // and if the transcript grew anyway, let the fresher
                 // commit make the call instead of sending stale text.
@@ -2450,22 +2471,29 @@ final class OverlayViewModel {
                 // alone decides, rather than answering everything.
                 let action = act?.action
                     ?? (TranscriptFilter.looksLikeQuestion(candidate) ? .full : .ignore)
+                self.testObserver?("verdict=unsure, act=\(act?.rawValue ?? "none"), action=\(action)")
                 switch action {
                 case .full:
                     break
                 case .oneLine:
                     self.pendingAnswerOneLine = true
-                case .ignore, .wait:
-                    // Left in the strip: if the speaker goes on, the next
-                    // commit is judged with this line in front of it.
+                case .ignore:
+                    self.judgedPrefix = candidate
+                    return
+                case .wait:
+                    // Left in the strip: when the speaker goes on, the next
+                    // commit is judged with this half-line in front of it.
                     return
                 }
             }
+            if tail != nil { self.transcription = judged }
+            self.judgedPrefix = nil
 
             // Detach before sending — sendToAI cancels pendingAutoSendTask
             // (to supersede stale sends), and that must not self-cancel
             // this task mid-flight.
             self.pendingAutoSendTask = nil
+            self.testObserver?("sent")
             await self.autoSendLiveTranscript()
         }
     }

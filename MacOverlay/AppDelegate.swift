@@ -96,6 +96,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastFrontAppPID: pid_t = 0
     private let callDetector = CallDetector()
     private var callPrompt: CallPromptPanel?
+    /// Set while `-scriptedinterview` or `-livetest` drives an interview.
+    private var interviewTestDriver: InterviewTestDriver?
     private var menuBar: MenuBarController?
     private var isOnCall = false
     private let moveStep:   CGFloat = 20
@@ -448,6 +450,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         callDetector.start()
+
+        // Dev and Beta only: drive an interview for Tests/live (see
+        // InterviewTestDriver).
+        if AppChannel.current != .production {
+            interviewTestDriver = InterviewTestDriver.startIfRequested(vm: vm)
+        }
 
         // Dev and Beta only: `open -a "TheCloser Dev" --args -simulateCall Zoom`
         // fakes a call, to check the prompt and the menu-bar icon without

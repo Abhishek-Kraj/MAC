@@ -2468,6 +2468,42 @@ func testNewSessionIsRefusedWhileLive() throws {
                    "the pencil is disabled while live")
 }
 
+/// A line judged not to need an answer stays in the strip, so the next line
+/// is judged on its own: "Can you hear me okay?" was answered together with
+/// the statement that followed it.
+func testOnlyTheUnjudgedTailIsJudged() throws {
+    let judged = "Hi, can you hear me okay?"
+    try assertTrue(TranscriptFilter.unjudgedTail(judged + " Tell me about yourself.", after: judged)
+                   == "Tell me about yourself.", "only the new line is judged")
+    try assertTrue(TranscriptFilter.unjudgedTail(judged, after: judged) == "", "nothing new, nothing judged")
+    try assertTrue(TranscriptFilter.unjudgedTail("Hey can you hear me? Tell me", after: judged) == nil,
+                   "a revised transcript is judged whole again")
+    try assertTrue(TranscriptFilter.unjudgedTail("Tell me about yourself.", after: nil) == nil,
+                   "nothing judged yet")
+}
+
+/// The interview test drives the production path, and can see its decisions.
+///
+/// Tests/live feeds interviewer lines through `handleThemSilence` — the same
+/// function the engines' silence callback runs — and reads each auto-answer
+/// decision through `testObserver`. If the callback ever stops calling it, the
+/// test would be checking a path the app no longer takes.
+func testInterviewTestUsesTheLivePath() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let vm = try String(contentsOf: root.appending(path: "MacOverlay/OverlayViewModel.swift"), encoding: .utf8)
+    let driver = try String(contentsOf: root.appending(path: "MacOverlay/Testing/InterviewTestDriver.swift"),
+                            encoding: .utf8)
+    try assertTrue(vm.contains("Task { @MainActor [weak self] in self?.handleThemSilence() }"),
+                   "the engines' silence callback runs handleThemSilence")
+    try assertTrue(driver.contains("vm.handleThemSilence()"), "and the test calls the same function")
+    let schedule = vm.components(separatedBy: "private func scheduleAutoSend()").dropFirst().first?
+        .components(separatedBy: "func flushPendingLiveTranscript").first ?? ""
+    for decision in ["verdict=no, skipped", "verdict=yes", "verdict=unsure", "\"sent\""] {
+        try assertTrue(schedule.contains(decision), "scheduleAutoSend reports \(decision)")
+    }
+}
+
 /// Every Settings tab shares one frame.
 ///
 /// Prompts used to be special-cased to zero outer padding because its list is
@@ -3667,6 +3703,8 @@ struct TestsMain {
         TestRunner.run("Settings tabs share one frame", testEverySettingsTabSharesOneFrame)
         TestRunner.run("Interview controls have one home", testInterviewControlsHaveOneHome)
         TestRunner.run("New session is refused while live", testNewSessionIsRefusedWhileLive)
+        TestRunner.run("Interview test uses the live path", testInterviewTestUsesTheLivePath)
+        TestRunner.run("Only the unjudged tail is judged", testOnlyTheUnjudgedTailIsJudged)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)

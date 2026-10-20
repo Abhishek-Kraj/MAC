@@ -112,6 +112,14 @@ enum TranscriptFilter {
         case unsure
     }
 
+    /// What follows a stretch already judged not to need an answer. Nil
+    /// when nothing was judged, or the engine has since revised that
+    /// stretch, so the whole text is judged again.
+    static func unjudgedTail(_ text: String, after judged: String?) -> String? {
+        guard let judged, !judged.isEmpty, text.hasPrefix(judged) else { return nil }
+        return String(text.dropFirst(judged.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Local, instant triage of "does this need an answer?". Deciding the
     /// obvious cases here is what keeps auto-send fast: real questions go
     /// straight through, backchannel is dropped for free, and only the
