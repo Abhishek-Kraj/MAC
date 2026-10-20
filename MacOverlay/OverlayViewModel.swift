@@ -397,6 +397,9 @@ final class OverlayViewModel {
     /// The attached résumé/JD that rode on a held fragment's turn. It goes
     /// onto the next turn, or the session would lose it with the exchange.
     @ObservationIgnored private(set) var heldHiddenContext: String?
+    /// The next answer should be one line: the check judged the line a
+    /// follow-up or confirmation. Read once by `prepareThenSend`.
+    @ObservationIgnored private var pendingAnswerOneLine = false
 
     /// The ⏳ sentinel came back: that transcript was a fragment, not a
     /// question. Pull the exchange out of the session — the deck must not
@@ -2181,11 +2184,17 @@ final class OverlayViewModel {
         // Sent only — not stored, or every question would carry a copy.
         let callTranscript = isRegularCallSession || sessionStore.activeSession.kind == .regularCall
             ? MinutesGenerator.transcript(from: sessionStore.activeSession.turns) : ""
+        // Interview: the chosen depth — or one line, for a follow-up — closes
+        // the message, where it wins over a saved prompt's own length rules.
+        let lengthRule: String? = sessionMode == .interview
+            ? answerDepth.lengthRule(oneLine: pendingAnswerOneLine) : nil
+        pendingAnswerOneLine = false
         let prompt: String = {
             var parts: [String] = []
             if !callTranscript.isEmpty { parts.append("[Call transcript so far]\n\n\(callTranscript)") }
             if let blocks = attachmentBlocks { parts.append(blocks) }
             if !userText.isEmpty { parts.append(userText) }
+            if let lengthRule { parts.append(lengthRule) }
             return parts.joined(separator: "\n\n")
         }()
 

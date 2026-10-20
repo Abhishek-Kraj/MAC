@@ -48,6 +48,25 @@ enum AnswerDepth: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    /// Closing instruction appended to every interview question. Placed at
+    /// the end of the message, it wins over a saved prompt's own length
+    /// rules, which is where the depth setting used to lose.
+    func lengthRule(oneLine: Bool) -> String {
+        if oneLine {
+            return "[Length: this is a follow-up or a check, not a new question. Reply with one natural sentence the user can say, and nothing else. This overrides any other length guidance.]"
+        }
+        let size: String
+        switch self {
+        case .brief:
+            size = "Brief — about 25–45 words: the line to say, then one supporting point."
+        case .standard:
+            size = "Standard — about 60–110 words: the line to say, then up to 3 short points; for a behavioural question, a compact situation → action → result."
+        case .deep:
+            size = "Deep — about 150–250 words: the line to say, then the full approach or situation → action → result, one trade-off, and one concrete example."
+        }
+        return "[Length: \(size) The first line is a complete first-person sentence the user can say aloud straight away. Use only facts from the user's own material. This overrides any other length guidance.]"
+    }
+
     /// The block spliced into the interview system prompt. Only the depth
     /// clause changes — everything else about the interview prompt is
     /// unchanged, so turning depth up does not alter the persona.

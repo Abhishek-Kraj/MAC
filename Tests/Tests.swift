@@ -275,6 +275,22 @@ func testSessionModeQuickActionsExist() throws {
 }
 
 @MainActor
+func testAnswerDepthLengthRule() throws {
+    // Appended to every interview question, so the chosen depth wins over
+    // whatever a saved prompt says about length.
+    try assertTrue(AnswerDepth.brief.lengthRule(oneLine: false).contains("25–45 words"))
+    try assertTrue(AnswerDepth.standard.lengthRule(oneLine: false).contains("60–110 words"))
+    try assertTrue(AnswerDepth.deep.lengthRule(oneLine: false).contains("150–250 words"))
+    for depth in AnswerDepth.allCases {
+        let rule = depth.lengthRule(oneLine: false)
+        try assertTrue(rule.contains("first line"), "\(depth) asks for a say-aloud first line")
+        try assertTrue(rule.contains("overrides"), "\(depth) says it wins over other length rules")
+    }
+    // A follow-up or confirmation gets one line, whatever the depth.
+    try assertTrue(AnswerDepth.deep.lengthRule(oneLine: true).contains("one natural sentence"))
+    try assertFalse(AnswerDepth.deep.lengthRule(oneLine: true).contains("150–250"))
+}
+
 func testAudioSourceDefaultsToSplitCapture() throws {
     let suite = "thecloser.tests.audioSource"
     let defaults = UserDefaults(suiteName: suite)!
@@ -3440,6 +3456,7 @@ struct TestsMain {
         TestRunner.run("SessionMode has quick actions", testSessionModeQuickActionsExist)
         TestRunner.run("AudioSource labels + cases", testAudioSourceLabels)
         TestRunner.run("Audio source defaults to split capture", testAudioSourceDefaultsToSplitCapture)
+        TestRunner.run("Answer depth length rule", testAnswerDepthLengthRule)
         TestRunner.run("AppChannel resolves from Info.plist", testAppChannelResolution)
         TestRunner.run("AppChannel keeps data apart", testAppChannelKeepsDataApart)
         TestRunner.run("CallDetector recognises call apps", testCallDetectorRecognisesCallApps)
