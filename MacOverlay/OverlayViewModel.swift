@@ -895,7 +895,10 @@ final class OverlayViewModel {
     /// it's active toggles back to nil.
     var primarySurface: PrimarySurface? = nil {
         didSet {
-            if let primarySurface { lastPrimarySurface = primarySurface }
+            if let primarySurface {
+                lastPrimarySurface = primarySurface
+                wentHome = false
+            }
             if oldValue != primarySurface {
                 onPrimarySurfaceChange?(primarySurface)
             }
@@ -905,13 +908,16 @@ final class OverlayViewModel {
     /// The last surface shown this run. Collapsing clears `primarySurface`,
     /// so reopening from the pill restores this instead of a bare bar.
     @ObservationIgnored private var lastPrimarySurface: PrimarySurface?
+    /// The user closed the surface to the home bar on purpose, so reopening
+    /// from the pill shows home rather than bringing that surface back.
+    @ObservationIgnored private var wentHome = false
 
     /// Pill → expanded from the brand (hover or click). Brings back the
     /// last surface, or the conversation when the session has one — never
     /// an empty bar over a session with content. Surface first, so the
     /// panel resizes once, straight to its full size.
     func expandShell() {
-        if primarySurface == nil {
+        if primarySurface == nil && !wentHome {
             primarySurface = lastPrimarySurface
                 ?? (sessionStore.activeSession.turns.isEmpty ? nil : .chat)
         }
@@ -919,14 +925,24 @@ final class OverlayViewModel {
     }
 
     /// The header ✕: closes what's showing. The summary was generated from
-    /// the conversation, so it goes back there like "← Conversation" does;
-    /// every other surface collapses the shell as before.
+    /// the conversation, so it goes back there like "← Conversation" does.
+    /// A live session minimizes (its bar has no way back to the transcript);
+    /// everything else goes home — the bar with Interview, History, Browser
+    /// and Settings.
     func closeSurface() {
         if primarySurface == .summary {
             primarySurface = .chat
-        } else {
+        } else if isInterviewSession {
             collapseShell()
+        } else {
+            goHome()
         }
+    }
+
+    /// The bar alone, with the surface buttons — and it stays home on reopen.
+    func goHome() {
+        primarySurface = nil
+        wentHome = true
     }
 
     /// The whole shell back to the brand pill (Esc). A soft close, not a quit.

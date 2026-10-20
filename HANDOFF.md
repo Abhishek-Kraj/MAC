@@ -357,6 +357,7 @@ B38: not a current bug — the 12 stored ⏳ turns all predate 24b3fb6 (the drop
 B20 (+ part of B31): expanding from the pill now pins the bottom, like collapsing; programmatic frames (animate, restore, ⌘⇧-arrow move) are clamped on screen (`ScreenPlacement.clamp(_:screenFrame:visibleFrame:)`). The user's pill had ended 33pt below the screen. Harness: 3 open/close cycles keep the pill at y=300 on the response-panel path (was −296pt per cycle); a pill at y=−33 returns to 0. Pinned by testPanelIsClampedOnScreen.
 B39 (new, user-reported): History was reachable only via ⋯ inside an open surface — now a History button on the bar.
 B40 (new, user-reported): during a live session the bar showed only "Ask anything" + send; End call, Settings and History were only in ⋯, so a live call read as an unclosable window. The live bar now has Pause/Resume (hidden for typed sessions), a red End button (same action as ⋯ → End call) and the Settings gear (user decision), in interview and call alike.
+B41 (user request): ✕ on a non-live surface goes to the home bar instead of the pill, and reopening stays home (`goHome`, `wentHome`); summary → chat and live → minimize are unchanged; Esc still minimizes and reopen restores.
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

@@ -542,7 +542,7 @@ struct InputBarView: View {
             // the bar visibly bouncing on surface open.
             withAnimation(Design.Motion.expand) {
                 if active {
-                    vm.primarySurface = nil
+                    vm.goHome()
                 } else if surface == .interview {
                     // Interview icon resumes the most-recent interview /
                     // regular-call session when one exists, rather than

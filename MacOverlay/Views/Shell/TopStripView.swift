@@ -75,10 +75,10 @@ struct TopStripView: View {
     }
 
     /// The reference UI's top-left ✕: closes the surface (`closeSurface` —
-    /// the summary returns to its conversation, anything else collapses to
-    /// the brand pill). Esc always collapses the whole shell, so it has its
-    /// own hidden button, except while the title is being edited (Esc
-    /// cancels the edit then).
+    /// the summary returns to its conversation, a live session minimizes,
+    /// anything else goes to the home bar). Esc always collapses the whole
+    /// shell, so it has its own hidden button, except while the title is
+    /// being edited (Esc cancels the edit then).
     @ViewBuilder
     private var closeButton: some View {
         let button = Button {
@@ -97,7 +97,8 @@ struct TopStripView: View {
                 .overlay(Circle().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
-        .help(vm.primarySurface == .summary ? "Back to conversation" : "Close (Esc)")
+        .help(vm.primarySurface == .summary ? "Back to conversation"
+              : vm.isInterviewSession ? "Minimize (Esc)" : "Close")
 
         if editingTitle {
             button
