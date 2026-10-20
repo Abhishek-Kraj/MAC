@@ -430,6 +430,9 @@ struct InputBarView: View {
         // The rest (mode picker, model picker, history, mic) is parked —
         // flows start by clicking one of these icons.
         surfaceButton(.interview, icon: "desktopcomputer", label: "Interview")
+        // History lived only in the header's ⋯ menu, which exists only once a
+        // surface is open — users couldn't find their past calls.
+        surfaceButton(.sessions, icon: "clock.arrow.circlepath", label: "History")
         if FeatureFlags.resumesEnabled {
             surfaceButton(.resumes, icon: "doc.richtext", label: "Resumes")
         }
