@@ -513,7 +513,12 @@ struct InputBarView: View {
         let attention = !vm.missingRequiredKeys.isEmpty || vm.lacksCloudTranscriptionKey
         let active = vm.preferencesWindowOpen
         return Button {
-            (NSApp.delegate as? AppDelegate)?.showPreferences()
+            // A toggle, like the other bar buttons.
+            if active {
+                vm.closeSurface()
+            } else {
+                (NSApp.delegate as? AppDelegate)?.showPreferences()
+            }
         } label: {
             SurfaceIcon(systemName: "gearshape.fill",
                         tint: attention ? Design.Accent.amber

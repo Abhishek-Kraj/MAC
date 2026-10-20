@@ -2314,7 +2314,7 @@ func testGapClassificationUsesRiskNotProse() throws {
 /// 471-model catalogue — does not fit in a 440pt panel without wrapping every
 /// subtitle onto three lines and pushing the rest below a fold. Opening it
 /// inside the overlay also discarded the setup you were in the middle of.
-func testSettingsIsItsOwnWindow() throws {
+func testSettingsOpensInsideTheOverlay() throws {
     let root = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent()
     func read(_ p: String) throws -> String {
@@ -2326,28 +2326,24 @@ func testSettingsIsItsOwnWindow() throws {
     let interview = try read("MacOverlay/Views/Surfaces/InterviewSurfaceView.swift")
     let menu = try read("MacOverlay/MenuBarController.swift")
 
+    // Settings is a surface of the overlay again (the user's call, reversing
+    // 5c97480): opened in place, at a size wide enough for keys and models.
     try assertTrue(appDelegate.contains("func showPreferences"),
-                   "AppDelegate can open the Settings window")
-    try assertTrue(appDelegate.contains("contentMinSize = NSSize(width: 720, height: 520)"),
-                   "it is a real, resizable window with a usable minimum")
-    // Sized after the controller is installed, or NSHostingController's
-    // fitting size wins and it opens at the minimum.
-    try assertTrue(appDelegate.contains("w.setContentSize(NSSize(width: 880, height: 700))"),
-                   "and opens at a size with room to read")
+                   "AppDelegate still has the one entry point")
+    try assertTrue(appDelegate.contains("vm.openSettings()"),
+                   "and it opens the Settings surface")
+    try assertTrue(!appDelegate.contains("TheCloserPreferences"),
+                   "no separate Settings window is created")
+    try assertTrue(appDelegate.contains("settingsSize    = NSSize(width: 720, height: 640)"),
+                   "the panel widens to fit Settings")
 
-    // Reachable without going through the overlay, which can be hidden.
+    // Reachable from everywhere it was.
     try assertTrue(menu.contains("Settings\\u{2026}") || menu.contains("Settings…"),
                    "the menu bar can open it")
     try assertTrue(bar.contains("showPreferences"),
                    "so can the bar")
     try assertTrue(interview.contains("showPreferences"),
                    "and the missing-keys warning on the setup form")
-
-    // Nothing may open Settings as a surface again.
-    try assertTrue(!bar.contains("surfaceButton(.settings"),
-                   "the bar no longer routes Profile into the panel")
-    try assertTrue(!interview.contains("primarySurface = .settings"),
-                   "and neither does the setup form")
 }
 
 /// Every Settings tab shares one frame.
@@ -2397,14 +2393,12 @@ func testTheAccentIsAlwaysTheBrandOne() throws {
                    "no file reads the system accent: \(offenders.joined(separator: ", "))")
 
     // Both roots must carry the tint, or a control falls back to the OS accent.
-    let appDelegate = try String(
-        contentsOf: root.appending(path: "MacOverlay/AppDelegate.swift"), encoding: .utf8)
     let content = try String(
         contentsOf: root.appending(path: "MacOverlay/OverlayContentView.swift"), encoding: .utf8)
     try assertTrue(content.contains(".tint(Design.Accent.brand)"),
                    "the overlay root tints with the brand accent")
-    try assertTrue(appDelegate.contains(".tint(Design.Accent.brand)"),
-                   "and so does the Settings window root")
+    try assertTrue(content.contains("PreferencesView()"),
+                   "and Settings renders under that root, so it inherits the tint")
 }
 
 /// The prep card's actions sit on their own row.
@@ -2437,8 +2431,8 @@ func testPrepActionsAreOnTheirOwnRow() throws {
                    "nor duplicates the View button")
 }
 
-/// No trace of Settings-as-a-surface, and the gear reflects the window.
-func testSettingsLeavesNoDeadSurfaceBehind() throws {
+/// Settings returns to where it opened, and nothing yanks it away.
+func testSettingsReturnsToWhereItOpened() throws {
     let root = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent()
     func read(_ p: String) throws -> String {
@@ -2451,20 +2445,25 @@ func testSettingsLeavesNoDeadSurfaceBehind() throws {
     let appDelegate = try read("MacOverlay/AppDelegate.swift")
     let bar = try read("MacOverlay/Views/Shell/InputBarView.swift")
 
-    try assertTrue(!vm.contains("case settings"),
-                   "the surface enum has no settings case left")
-    try assertTrue(!content.contains("PreferencesView()"),
-                   "the panel cannot render Preferences")
-    try assertTrue(!strip.contains("case .settings?"),
-                   "nor name it in the header")
+    try assertTrue(vm.contains("case settings"), "the surface enum has a settings case")
+    try assertTrue(content.contains("PreferencesView()"), "the panel renders Preferences")
+    try assertTrue(strip.contains("case .settings?"), "and the header names it")
+    // Opening Settings mid-setup must not lose the setup: ✕ goes back.
+    try assertTrue(vm.contains("surfaceBeforeSettings"), "the surface it opened over is kept")
+    // An answer sent mid-call must not close Settings.
+    try assertTrue(vm.contains("primarySurface != .interview && primarySurface != .settings"),
+                   "auto-send leaves Settings open")
+    // Its own size never becomes the user's size for the other screens.
+    try assertTrue(appDelegate.contains("frameBeforeSettings"),
+                   "closing Settings restores the previous frame")
     try assertTrue(!vm.contains("sidebarCollapsed"),
-                   "the in-panel sidebar flag is gone")
+                   "the old in-panel sidebar flag is gone")
     try assertTrue(!appDelegate.contains("isPreferencesVisible"),
                    "and so is the dead visibility accessor")
 
-    // The gear must light while the window is up, or it reads as inert.
-    try assertTrue(vm.contains("var preferencesWindowOpen"),
-                   "the model tracks the window's visibility")
+    // The gear lights while Settings is open, or it reads as inert.
+    try assertTrue(vm.contains("var preferencesWindowOpen: Bool { primarySurface == .settings }"),
+                   "the model derives the gear's state from the surface")
     try assertTrue(bar.contains("active: active"),
                    "and the gear reads it")
 }
@@ -3498,8 +3497,8 @@ struct TestsMain {
         TestRunner.run("The bar offers Quit", testTheBarOffersQuit)
         TestRunner.run("Accent is always the brand one", testTheAccentIsAlwaysTheBrandOne)
         TestRunner.run("Prep actions sit on their own row", testPrepActionsAreOnTheirOwnRow)
-        TestRunner.run("Settings leaves no dead surface", testSettingsLeavesNoDeadSurfaceBehind)
-        TestRunner.run("Settings is its own window", testSettingsIsItsOwnWindow)
+        TestRunner.run("Settings returns to where it opened", testSettingsReturnsToWhereItOpened)
+        TestRunner.run("Settings opens inside the overlay", testSettingsOpensInsideTheOverlay)
         TestRunner.run("Settings tabs share one frame", testEverySettingsTabSharesOneFrame)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)

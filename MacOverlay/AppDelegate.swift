@@ -177,7 +177,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // `-surface settings` opens the Settings window instead, since
             // settings are no longer a surface of this panel.
             var forceExpanded = false
-            var openSettingsWindow = false
             var surface: OverlayViewModel.PrimarySurface?
             // `-seedcall` photographs a Regular call IN PROGRESS. The call
             // live view (a growing transcript) is otherwise unreachable from
@@ -195,8 +194,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let raw = CommandLine.arguments[surfIdx + 1]
                 if raw == "none" {
                     forceExpanded = true
-                } else if raw == "settings" {
-                    openSettingsWindow = true
                 } else if raw == "regularCall" {
                     // The Interview surface's other tab. It only switches by
                     // clicking the mode bar, so without this the Regular call
@@ -250,7 +247,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             var didFresh = false
             var didSeed  = false
             func openSurface() {
-                if openSettingsWindow { self.showPreferences() }
                 // `-seedminutes` opens the summary surface with sample content.
                 // Keep the requested mode (e.g. regularCall) for its title.
                 if CommandLine.arguments.contains("-seedminutes"), !didSeedMinutes {
@@ -580,11 +576,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// height keeps streaming stable; long answers scroll inside the card
     /// instead of resizing the native window on every token.
     static let responseExpandedSize = NSSize(width: 440, height: 360)
+    /// Settings needs room for keys and the model catalogue; the panel takes
+    /// this size while it is open and gives the previous one back after.
+    static let settingsSize    = NSSize(width: 720, height: 640)
+    static let settingsMinSize = NSSize(width: 640, height: 520)
 
     /// Last-known full-state size. Captured whenever the user transitions
     /// from full → mini so we can restore exactly what they had on expand,
     /// and so the mini state preserves the user's manual panel width.
     private var lastFullSize: NSSize = expandedSize
+    /// The panel is at Settings' size: neither it nor a resize of it is the
+    /// user's size for the other screens.
+    private var settingsFrameActive = false
+    /// The panel's frame before Settings opened; closing Settings puts it back
+    /// exactly, instead of re-anchoring the smaller panel somewhere else.
+    private var frameBeforeSettings: NSRect?
 
     @MainActor
     func setupOverlayPanel() {
@@ -920,9 +926,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // content tracking. Without this the next Live Focus height
             // report animated the panel straight back — a visible
             // grow-then-snap flicker on every keyboard resize.
-            if vm.shellStage == .expanded { lastFullSize = overlayPanel.frame.size }
-            panelSizePreference.record(overlayPanel.frame.size)
-            vm.panelHasManualSize = true
+            if vm.shellStage == .expanded && !settingsFrameActive {
+                lastFullSize = overlayPanel.frame.size
+                panelSizePreference.record(overlayPanel.frame.size)
+                vm.panelHasManualSize = true
+            }
             // Placed by hand, so a resize that was still animating is no longer
             // the frame the panel is heading for.
             forgetPendingPanelResize()
@@ -1145,6 +1153,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSAnimationContext.endGrouping()
         // A drag is authoritative: nothing is on its way anywhere else.
         forgetPendingPanelResize()
+        // Settings has its own size; a drag there isn't the other screens'.
+        guard !settingsFrameActive else { return }
         lastFullSize = panel.frame.size
         // The user's hand outranks content tracking from here on.
         panelSizePreference.record(panel.frame.size)
@@ -1424,6 +1434,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return Self.pillMinSize
         case .expanded:
             guard vm.primarySurface != nil else { return Self.expandedCompactMinSize }
+            if vm.primarySurface == .settings { return Self.settingsMinSize }
             // An answer hugs its text, so it can be short, but it's never
             // narrower than the other screens: going back to setup from an
             // answer doesn't resize the panel.
@@ -1457,12 +1468,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // be lost on the first pill collapse — and re-expanding would
         // snap back to the default width.
         let curIsExpandedLayout = cur.size.width >= Self.expandedCompactMinSize.width
-        if curIsExpandedLayout && !responseHugging { lastFullSize = cur.size }
+        if curIsExpandedLayout && !responseHugging && !settingsFrameActive { lastFullSize = cur.size }
+        let showsSettings = stage == .expanded && vm.primarySurface == .settings
 
         let preservedWidth: CGFloat
         if stage == .pill {
             preservedWidth = Self.collapsedSize.width
-        } else if curIsExpandedLayout {
+        } else if curIsExpandedLayout && !settingsFrameActive {
             preservedWidth = cur.size.width
         } else {
             preservedWidth = lastFullSize.width
@@ -1506,7 +1518,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.minSize = minForStage
         // A width the user dragged to under an older, smaller minimum (or
         // kept from the compact bar) must not survive into this stage.
-        if stage == .expanded && surfaceOpen {
+        if showsSettings {
+            target = Self.settingsSize
+        } else if stage == .expanded && surfaceOpen {
             target = panelSizePreference.expandedSize(automatic: target, minimum: minForStage)
         } else {
             target.width  = max(target.width,  minForStage.width)
@@ -1532,7 +1546,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             : cur.origin.y
         // AppKit runs `constrainFrameRect` for its own moves only, not for
         // `setFrame`, so the frame is kept on screen here.
-        let target_ = onScreen(NSRect(x: newX, y: newY, width: target.width, height: target.height))
+        var target_ = onScreen(NSRect(x: newX, y: newY, width: target.width, height: target.height))
+        if showsSettings && !settingsFrameActive {
+            frameBeforeSettings = cur
+        } else if !showsSettings && settingsFrameActive, let back = frameBeforeSettings,
+                  abs(back.width - target_.width) < 1, abs(back.height - target_.height) < 1 {
+            target_ = onScreen(back)
+        }
+        if !showsSettings { frameBeforeSettings = nil }
+        settingsFrameActive = showsSettings
         // `cur` is where the panel is *now*, which during the 0.18s window
         // animation below is still the old size. A second request for the size
         // already on its way would therefore look already satisfied and return
@@ -1713,108 +1735,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return w
     }
 
-    // MARK: - Settings window
+    // MARK: - Settings
 
-    private var preferencesWindow: NSWindow?
-
-    /// Settings live in their own window, not inside the overlay panel.
-    ///
-    /// Everything the app has to explain — keys, the prep bank, gap analysis,
-    /// the résumé, a 465-model catalogue — does not fit in a 440pt panel
-    /// without wrapping every subtitle onto three lines and pushing half of it
-    /// below a fold. Opening it inside the overlay also threw away the setup
-    /// you were in the middle of. A normal resizable window has room for a
-    /// labelled sidebar and a column wide enough to read.
+    /// Settings open inside the overlay (`PrimarySurface.settings`). The panel
+    /// widens to `settingsSize` while it is up so keys and the model catalogue
+    /// fit, and the overlay is brought back if it was hidden.
     @objc func showPreferences() {
         MainActor.assumeIsolated {
-            if let w = preferencesWindow {
-                vm.preferencesWindowOpen = true
-                w.makeKeyAndOrderFront(nil)
-                NSApp.activate(ignoringOtherApps: true)
-                return
-            }
-
-            // Read the saved frame BEFORE the window exists. `setFrameAutosaveName`
-            // (below) writes the window's *current* frame into this key, and at
-            // that point the window is still a degenerate 1×titlebar rect — so
-            // it overwrote the very value it was meant to restore, which is why
-            // the saved size never came back. AppKit stores "x y w h …" with the
-            // screen frame appended; NSRectFromString reads the first four.
-            let savedFrame = UserDefaults.standard
-                .string(forKey: "NSWindow Frame TheCloserPreferences")
-                .map(NSRectFromString) ?? .zero
-
-            let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 880, height: 700),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                backing: .buffered, defer: false)
-            w.title = "Settings"
-            w.isReleasedWhenClosed = false
-            // The app is designed dark — every surface is built from white
-            // overlays on a dark ground — and the overlay never follows the
-            // system appearance. A standalone window would, so on a Mac in
-            // light mode this rendered white-on-white. Pin it to match.
-            w.appearance = NSAppearance(named: .darkAqua)
-            w.backgroundColor = NSColor(Design.Surface.shellFill)
-            w.contentViewController = NSHostingController(
-                rootView: PreferencesView()
-                    .environment(vm)
-                    // Same tint the overlay root carries
-                    // (`OverlayContentView`). Without it this window falls
-                    // back to the *system* accent for every Toggle, Slider and
-                    // Picker while the overlay uses the brand blue — the same
-                    // control drawn two different colours depending on which
-                    // window it is in.
-                    .tint(Design.Accent.brand)
-                    // Self-contained ground. The hosting view is transparent,
-                    // so without this the window's own background shows
-                    // through and, in light mode, that is white — with the
-                    // darkAqua text drawn white on top of it.
-                    .background(Design.Surface.shellFill))
-            // Set after installing the controller: NSHostingController's fitting
-            // size otherwise wins over the initial content rect.
-            w.contentMinSize = NSSize(width: 720, height: 520)
-            // The saved frame wins when there is a usable one; otherwise the
-            // default. The hosting controller's fitting size would otherwise
-            // win over the initial content rect, which is why a size is set at
-            // all.
-            let onScreen = NSScreen.main?.visibleFrame ?? .zero
-            if savedFrame.width  >= w.contentMinSize.width,
-               savedFrame.height >= w.contentMinSize.height,
-               onScreen.isEmpty || savedFrame.intersects(onScreen) {
-                w.setFrame(savedFrame, display: false)
-            } else {
-                w.setContentSize(NSSize(width: 880, height: 700))
-            }
-            // Holds API keys and the résumé, so it follows the same
-            // hide-from-screen-sharing rule as the overlay.
-            w.sharingType = NSWindow.desiredSharingType
-            if w.frame.origin == .zero { w.center() }
-            // Only now, with a real frame in hand, hand the frame to AppKit to
-            // keep up to date.
-            w.setFrameAutosaveName("TheCloserPreferences")
-
-            preferencesWindow = w
-            vm.preferencesWindowOpen = true
-            // The overlay's gear tints while this window is up. The window is
-            // not released on close, so its lifecycle is observed rather than
-            // assumed: `didMiniaturize`/`didDeminiaturize` matter because
-            // `isVisible` goes false when it is in the Dock.
-            for name in [NSWindow.willCloseNotification,
-                         NSWindow.didMiniaturizeNotification,
-                         NSWindow.didDeminiaturizeNotification] {
-                NotificationCenter.default.addObserver(
-                    self, selector: #selector(preferencesWindowVisibilityChanged),
-                    name: name, object: w)
-            }
-            w.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-        }
-    }
-
-    @objc private func preferencesWindowVisibilityChanged() {
-        MainActor.assumeIsolated {
-            vm.preferencesWindowOpen = preferencesWindow?.isVisible ?? false
+            if !overlayPanel.isVisible { overlayPanel.orderFrontRegardless() }
+            vm.openSettings()
         }
     }
 
@@ -1842,10 +1771,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let w = inspector, w.isVisible,
            let v = w.contentView, v.bounds.width > 1, v.bounds.height > 1 {
             views.append(("inspector", v))
-        }
-        if let w = preferencesWindow, w.isVisible,
-           let v = w.contentView, v.bounds.width > 1, v.bounds.height > 1 {
-            views.append(("settings", v))
         }
         // Sheets (prep setup, minutes, editors) are separate attached
         // windows, so the panel's contentView never contains them — without
@@ -2008,7 +1933,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.vm.primarySurface = surface
             self.animateShellFrame(stage: .expanded)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                print("PROBE surface=\(surface.rawValue) \(panel.frame.size == Self.expandedMinSize ? "PASS" : "FAIL") frame=\(panel.frame)")
+                // Settings takes its own size and gives the manual one back.
+                let expected = surface == .settings ? Self.settingsSize : Self.expandedMinSize
+                print("PROBE surface=\(surface.rawValue) \(panel.frame.size == expected ? "PASS" : "FAIL") frame=\(panel.frame)")
                 photograph("minimum-" + surface.rawValue)
                 checkSurface(index + 1)
             }

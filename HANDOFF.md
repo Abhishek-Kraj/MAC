@@ -358,6 +358,7 @@ B20 (+ part of B31): expanding from the pill now pins the bottom, like collapsin
 B39 (new, user-reported): History was reachable only via ⋯ inside an open surface — now a History button on the bar.
 B40 (new, user-reported): during a live session the bar showed only "Ask anything" + send; End call, Settings and History were only in ⋯, so a live call read as an unclosable window. The live bar now has Pause/Resume (hidden for typed sessions), a red End button (same action as ⋯ → End call) and the Settings gear (user decision), in interview and call alike.
 B41 (user request): ✕ on a non-live surface goes to the home bar instead of the pill, and reopening stays home (`goHome`, `wentHome`); summary → chat and live → minimize are unchanged; Esc still minimizes and reopen restores.
+B42 (user decision, reverses 5c97480): Settings is an overlay surface again (`PrimarySurface.settings`, `openSettings`). The panel takes `settingsSize` 720×640 while it is open (min 640×520), never records it as the user's size, and restores the exact previous frame on close; ✕ returns to the surface it opened over; a mid-call auto-send does not close it; no separate window. Harness: opened from chat, interview setup, live and home — always 720×640, back to the same frame. Resize probe: settings PASS; the 8 edge checks need the real mouse idle (a live cursor shifted the synthesized down point by 10pt during this run).
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

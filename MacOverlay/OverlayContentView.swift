@@ -372,6 +372,8 @@ struct OverlayView: View {
                 CalendarPanelView()
             case .browser:
                 BrowserShellSurface()
+            case .settings:
+                PreferencesView()
             case .none:
                 EmptyView()
             }

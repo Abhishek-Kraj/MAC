@@ -70,6 +70,7 @@ struct TopStripView: View {
         case .prompts?:   return "Prompts"
         case .calendar?:  return "Calendar"
         case .browser?:   return "Browser"
+        case .settings?:  return "Settings"
         case .none:       return vm.sessionStore.activeSession.displayTitle
         }
     }
