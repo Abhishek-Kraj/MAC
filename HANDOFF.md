@@ -300,7 +300,7 @@ suspected, needs a runtime check. One fix at a time, snapshot proof +
 | B14 | A ⏳ on the first exchange holds the attached JD/résumé blob as the question fragment | AIController.swift:197-198, VM:1992-1996 | C |
 | B15 ✅ | TranscriptCleanup splits `Node.js`, `3.5`, `10:30`, `1,000` | TranscriptCleanup.swift:88-94 | R |
 | B16 | Setup leaks: pendingAttachments duplicate across Start/End/Start; interviewResumeSessionID never cleared; a resumed session overrides sessionMode and the prompt pick | VM:1836/1858-1874/2670-2671, :368 | C |
-| B17 | No text field outside a live session: ⌘N and starter cards lead to a chat with nothing to type into | InputBarView:270-288, CSV:1011 | C (matches §10 snapshot) |
+| B17 ✅ | No text field outside a live session: ⌘N and starter cards lead to a chat with nothing to type into | InputBarView:270-288, CSV:1011 | C (matches §10 snapshot) |
 | B18 ✅ | Empty-session litter: 65 of 88 sessions have 0 turns; History lists them | SessionStore.startNewSession:304-314 | R |
 | B19 | "Continue call/interview" starts the mic at once, contrary to its tooltip; it shows for plain chats too | CSV:1229/1244 | C |
 
@@ -362,6 +362,7 @@ B42 (user decision, reverses 5c97480): Settings is an overlay surface again (`Pr
 Settings reorganized by use: General = Privacy (screen-share hiding) → Recording (engine, audio source — was ⋯-only — call offer) → Appearance → Onboarding; AI tab renamed "Keys & Models"; key fields show "✓ Saved" / "Not set" (non-empty check, no network test); OpenCode hint shortened. All five tabs snapshot-checked at 720×640.
 B43 (user decision): one panel size for every screen — `expandedSize` 640×720 (or the user's manual size) for Interview, History, Browser, Settings, Chat and Summary; the home bar shares the width. Only the live focus card still hugs its content height. Replaces the 440×800 default, the 440×360 answer height and Settings' own 720×640; Reset panel size targets the same size (fixes B21). Harness: all screens 640×720, home 640×160. Setup form scrolls with Start pinned below it.
 B44 (user decision): a Regular call no longer sends each finished line to the AI (the Call prompt turned every line into a 3-bullet mini-MOM). Lines are committed to the call transcript with no reply (`commitCallLine`, Apple segment reset like a send), also on Pause and End, so the minutes include the last line; questions typed or sent with ⌘⏎ during a call carry a "[Call transcript so far]" block (sent, not stored); End still writes the MOM. Interview mode unchanged. Harness: two lines + End → 3 transcript lines, no AI requests. Asking with context not exercised against a live model.
+B17: `showsConversationComposer` — Chat, or a past interview/call opened from History, shows Ask anything + send beside the bar buttons; a question about a past Regular call carries its transcript. Snapshot-checked on a past interview, a past call, chat (field shown) and home (not shown).
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

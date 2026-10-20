@@ -288,6 +288,13 @@ struct InputBarView: View {
                         }
                         endSessionButton
                         settingsButton
+                    } else if vm.showsConversationComposer {
+                        // A conversation is open (a past one from History
+                        // included): ask about it here, with the bar's
+                        // buttons still to hand.
+                        textInputField
+                        sendButton
+                        surfaceButtons
                     } else {
                         surfaceButtons
                     }

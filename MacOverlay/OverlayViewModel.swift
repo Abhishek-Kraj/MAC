@@ -2075,10 +2075,10 @@ final class OverlayViewModel {
                 .map { "[Attached \($0.name)]\n\n\($0.extractedText)" }
                 .joined(separator: "\n\n")
             : nil
-        // Asked during a Regular call: the call so far is the context. Its
+        // Asked during (or about) a Regular call: the call is the context. Its
         // lines carry no replies, so the history replay can't supply them.
         // Sent only — not stored, or every question would carry a copy.
-        let callTranscript = isRegularCallSession
+        let callTranscript = isRegularCallSession || sessionStore.activeSession.kind == .regularCall
             ? MinutesGenerator.transcript(from: sessionStore.activeSession.turns) : ""
         let prompt: String = {
             var parts: [String] = []
@@ -2777,6 +2777,18 @@ final class OverlayViewModel {
     /// header title (TopStripView) and the surface body in lockstep so
     /// they never disagree about whether the user is in setup or in a
     /// session.
+    /// A conversation is on screen without a live session — a chat, or a
+    /// past interview or call opened from History. The bar offers Ask
+    /// anything there, so a question doesn't need a session to be started.
+    var showsConversationComposer: Bool {
+        guard !isInterviewSession, shellStage == .expanded else { return false }
+        switch primarySurface {
+        case .chat:      return true
+        case .interview: return interviewSurfaceShowsChat
+        default:         return false
+        }
+    }
+
     var interviewSurfaceShowsChat: Bool {
         if isInterviewSession { return true }
         if forceInterviewSetup { return false }
