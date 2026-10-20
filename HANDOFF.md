@@ -356,6 +356,7 @@ B18: `ChatSession.isUntouched` / `prunedUntouched`; new sessions replace an unto
 B38: not a current bug — the 12 stored ⏳ turns all predate 24b3fb6 (the drop logic, 2026-10-19 05:51Z); current code removes them. Legacy rows left as is.
 B20 (+ part of B31): expanding from the pill now pins the bottom, like collapsing; programmatic frames (animate, restore, ⌘⇧-arrow move) are clamped on screen (`ScreenPlacement.clamp(_:screenFrame:visibleFrame:)`). The user's pill had ended 33pt below the screen. Harness: 3 open/close cycles keep the pill at y=300 on the response-panel path (was −296pt per cycle); a pill at y=−33 returns to 0. Pinned by testPanelIsClampedOnScreen.
 B39 (new, user-reported): History was reachable only via ⋯ inside an open surface — now a History button on the bar.
+B40 (new, user-reported): during a live session the bar showed only "Ask anything" + send; End call, Settings and History were only in ⋯, so a live call read as an unclosable window. The live bar now has a red End button (same action as ⋯ → End call) and the Settings gear (user decision).
 
 ### P3 — cleanup (ask before deleting)
 Dead or orphaned: NotesPanelView, ManualInputPanelView, ScreenshotPanelView,

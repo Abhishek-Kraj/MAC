@@ -268,10 +268,11 @@ struct InputBarView: View {
                 HStack(alignment: .center, spacing: 4) {
                     divider
                     if vm.isInterviewSession {
-                        // Minimal live row: just the field + send. Pause,
-                        // End session, and the model picker live in the
-                        // session ⋯ menu so nothing competes with the
-                        // answer during an interview.
+                        // Live row: the field + send, then End and Settings.
+                        // Pause and the model picker stay in the session ⋯
+                        // menu; End and Settings were there too, and with
+                        // nothing on screen saying how to stop, a live call
+                        // read as a window that could not be closed.
                         textInputField
                         if vm.isInterviewTextOnly {
                             sendButton
@@ -282,6 +283,8 @@ struct InputBarView: View {
                             // silence boundary. The mic keeps running.
                             liveSendButton
                         }
+                        endSessionButton
+                        settingsButton
                     } else {
                         surfaceButtons
                     }
@@ -467,6 +470,22 @@ struct InputBarView: View {
     /// (see `AppDelegate.showPreferences`). So this does not set
     /// `primarySurface`: it brings a window forward and tints while that
     /// window is up, which is where the state lives.
+    /// Ends the live session: the same action as ⋯ → End call.
+    private var endSessionButton: some View {
+        let label = vm.isRegularCallSession ? "End call" : "End interview"
+        return Button {
+            vm.stopInterviewSession()
+        } label: {
+            SurfaceIcon(systemName: "stop.fill", tint: Design.Accent.red,
+                        active: false, attention: false)
+        }
+        .buttonStyle(.plain)
+        .help(vm.isRegularCallSession
+              ? "End call: stop recording and write the summary"
+              : "End interview: stop and write the summary")
+        .accessibilityLabel(Text(label))
+    }
+
     private var settingsButton: some View {
         let attention = !vm.missingRequiredKeys.isEmpty || vm.lacksCloudTranscriptionKey
         let active = vm.preferencesWindowOpen
