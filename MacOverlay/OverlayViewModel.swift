@@ -1131,9 +1131,18 @@ final class OverlayViewModel {
     /// Fed by `CallDetector`: the call app now using the mic, or nil when
     /// no call app is.
     func callAppDidChange(_ app: String?) {
+        currentCallApp = app
+        let recordedSession = isInterviewSession && !isInterviewTextOnly
+        if let app, recordedSession {
+            // The call is (back) on: tie it to the session; a countdown from
+            // a brief mic drop stops.
+            callAppInSession = app
+            cancelCallEndCountdown()
+        }
         guard let app else {
             detectedCallApp = nil
             callPromptDismissed = false
+            if recordedSession, callAppInSession != nil { startCallEndCountdown() }
             return
         }
         guard suggestSessionOnCall, !isRecording, !callPromptDismissed else {
@@ -1142,6 +1151,51 @@ final class OverlayViewModel {
             return
         }
         detectedCallApp = app
+    }
+
+    // MARK: - Call end
+
+    /// The call app holding the mic right now, as `CallDetector` last said.
+    @ObservationIgnored private var currentCallApp: String?
+    /// The call app this live session is running alongside, if any.
+    @ObservationIgnored private var callAppInSession: String?
+    /// Seconds left before a session whose call app let go of the mic ends
+    /// itself and writes its notes; nil when no countdown is running.
+    var callEndCountdown: Int?
+    @ObservationIgnored private var callEndTask: Task<Void, Never>?
+
+    /// The call app released the mic: the call has probably ended. Count down
+    /// (a mic blip or hold mustn't end the session), then end it and write
+    /// the notes. "Keep recording" or the call app coming back cancels.
+    private func startCallEndCountdown() {
+        guard callEndTask == nil else { return }
+        callEndCountdown = 15
+        if shellStage == .pill { expandShell() }
+        callEndTask = Task { @MainActor [weak self] in
+            while true {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, !Task.isCancelled, let left = self.callEndCountdown else { return }
+                if left > 1 { self.callEndCountdown = left - 1; continue }
+                self.callEndTask = nil
+                self.callEndCountdown = nil
+                self.callAppInSession = nil
+                if self.isInterviewSession { self.stopInterviewSession() }
+                return
+            }
+        }
+    }
+
+    /// "Keep recording": stay in the session; no new countdown until a call
+    /// app is seen holding the mic again.
+    func keepRecording() {
+        cancelCallEndCountdown()
+        callAppInSession = nil
+    }
+
+    private func cancelCallEndCountdown() {
+        callEndTask?.cancel()
+        callEndTask = nil
+        callEndCountdown = nil
     }
 
     func dismissCallPrompt() {
@@ -1760,6 +1814,9 @@ final class OverlayViewModel {
         }
         isInterviewSession = true
         isInterviewPaused  = false
+        // Started during a call (from its prompt, or by hand): that call's
+        // end can end the session.
+        callAppInSession = isInterviewTextOnly ? nil : currentCallApp
         interviewFocusMode = true
         showLiveTranscript = true
         transcription = ""
@@ -1792,6 +1849,8 @@ final class OverlayViewModel {
         // to summarise, and an empty transcript returns early with a status.
         let shouldSummarise = isInterviewSession && !isInterviewTextOnly
         let wasCall = isRegularCallSession
+        cancelCallEndCountdown()
+        callAppInSession = nil
 
         isInterviewSession  = false
         isInterviewPaused   = false

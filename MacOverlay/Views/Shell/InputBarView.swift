@@ -273,6 +273,9 @@ struct InputBarView: View {
                         // menu, and with nothing on screen saying how to
                         // pause or stop, a live call read as a window that
                         // could not be closed. The model picker stays in ⋯.
+                        if let left = vm.callEndCountdown {
+                            callEndBanner(left)
+                        } else {
                         textInputField
                         if vm.isInterviewTextOnly {
                             sendButton
@@ -282,6 +285,7 @@ struct InputBarView: View {
                             // right now (also ⌘⏎), without waiting for a
                             // silence boundary. The mic keeps running.
                             liveSendButton
+                        }
                         }
                         if !vm.isInterviewTextOnly {
                             pauseResumeButton
@@ -480,6 +484,21 @@ struct InputBarView: View {
     /// (see `AppDelegate.showPreferences`). So this does not set
     /// `primarySurface`: it brings a window forward and tints while that
     /// window is up, which is where the state lives.
+    /// The call app let go of the mic: say what's about to happen, and offer
+    /// to stay. End still ends at once.
+    private func callEndBanner(_ left: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("Call ended? Writing notes in \(left)s")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(Design.Ink.primary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button("Keep recording") { vm.keepRecording() }
+                .buttonStyle(.secondaryCompact)
+        }
+        .padding(.leading, 6)
+    }
+
     /// Pause and resume in one button, as in the ⋯ menu.
     private var pauseResumeButton: some View {
         let paused = vm.isInterviewPaused
