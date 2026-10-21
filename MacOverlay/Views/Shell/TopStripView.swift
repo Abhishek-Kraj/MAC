@@ -77,6 +77,18 @@ struct TopStripView: View {
         }
     }
 
+    /// What ✕ will do here, said plainly: it only ever closes this screen.
+    private var closeHelp: String {
+        switch vm.primarySurface {
+        case .summary?:  return "Back to the conversation"
+        case .settings?: return "Close Settings"
+        default:
+            return vm.isInterviewSession
+                ? "Minimize — the session keeps going (Esc)"
+                : "Close this screen"
+        }
+    }
+
     /// The reference UI's top-left ✕: closes the surface (`closeSurface` —
     /// the summary returns to its conversation, a live session minimizes,
     /// anything else goes to the home bar). Esc always collapses the whole
@@ -100,8 +112,7 @@ struct TopStripView: View {
                 .overlay(Circle().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
-        .help(vm.primarySurface == .summary ? "Back to conversation"
-              : vm.isInterviewSession ? "Minimize (Esc)" : "Close")
+        .help(closeHelp)
 
         if editingTitle {
             button
@@ -154,7 +165,9 @@ struct TopStripView: View {
     /// as "close", so it was not something anyone reached for.
     private var minimizeButton: some View {
         Button {
-            withAnimation(Design.Motion.spring) { vm.collapseShell() }
+            // The panel's own resize curve, like ✕ and the pill: a spring
+            // overshoots the AppKit resize and the bar visibly bounces.
+            withAnimation(Design.Motion.expand) { vm.collapseShell() }
         } label: {
             Image(systemName: "minus")
                 .font(.system(size: 12, weight: .semibold))

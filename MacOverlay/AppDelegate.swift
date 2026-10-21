@@ -1637,8 +1637,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func toggleOverlay() {
         let showing = overlayPanel.isVisible
-        if showing { overlayPanel.orderOut(nil) }
-        else       { overlayPanel.orderFrontRegardless() }
+        MainActor.assumeIsolated { if showing { fadeOutOverlay() } else { fadeInOverlay() } }
         // The detached browser window goes with it. ⌃⌥Space is the key you
         // hit when someone walks up; leaving a browser on screen because it
         // happens to live in its own window would defeat the whole point.
@@ -1660,8 +1659,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// "Close" in the ⋯ menu: hide everything but keep running in
     /// the menu bar, so calls are still noticed. Quitting for real lives in
     /// the menu-bar menu.
+    /// Show and hide fade over a short beat instead of popping, like any
+    /// other window coming and going. The panel's alpha is also the
+    /// Opacity setting, so it fades back to that, not to 1.
+    @MainActor
+    private func fadeInOverlay() {
+        guard !overlayPanel.isVisible || overlayPanel.alphaValue < CGFloat(vm.opacity) else { return }
+        if !overlayPanel.isVisible { overlayPanel.alphaValue = 0 }
+        overlayPanel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.15
+            overlayPanel.animator().alphaValue = CGFloat(vm.opacity)
+        }
+    }
+
+    @MainActor
+    private func fadeOutOverlay() {
+        guard overlayPanel.isVisible else { return }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.12
+            overlayPanel.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.overlayPanel.alphaValue == 0 else { return }
+                self.overlayPanel.orderOut(nil)
+                self.overlayPanel.alphaValue = CGFloat(self.vm.opacity)
+            }
+        }
+    }
+
     @objc func closeToMenuBar() {
-        overlayPanel.orderOut(nil)
+        MainActor.assumeIsolated { fadeOutOverlay() }
         MainActor.assumeIsolated { BrowserWindow.shared.setVisible(false) }
     }
 
@@ -2032,7 +2060,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showOverlay() {
-        overlayPanel.orderFrontRegardless()
+        MainActor.assumeIsolated { fadeInOverlay() }
         MainActor.assumeIsolated { BrowserWindow.shared.setVisible(true) }
     }
 

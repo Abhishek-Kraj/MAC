@@ -2514,6 +2514,13 @@ func testTheHeaderCanMinimize() throws {
     let button = strip.components(separatedBy: "private var minimizeButton").dropFirst().first?
         .components(separatedBy: "private var composeButton").first ?? ""
     try assertTrue(button.contains("vm.collapseShell()"), "and goes down to the pill, like Esc")
+    try assertTrue(button.contains("Design.Motion.expand") && !button.contains("Design.Motion.spring"),
+                   "on the panel's resize curve, like ✕ and the pill (a spring bounces the bar)")
+    let app = try String(contentsOf: root.appending(path: "MacOverlay/AppDelegate.swift"), encoding: .utf8)
+    let toggle = app.components(separatedBy: "@objc func toggleOverlay()").dropFirst().first?
+        .components(separatedBy: "\n    }").first ?? ""
+    try assertTrue(toggle.contains("fadeOutOverlay()") && toggle.contains("fadeInOverlay()"),
+                   "show / hide fades instead of popping")
 }
 
 /// A prepared answer needs a close question, not just a clear lead.
