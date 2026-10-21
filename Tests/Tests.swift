@@ -2505,6 +2505,17 @@ func testTheCallPromptOffersCallNotes() throws {
                    "which records a Regular call")
 }
 
+/// The header has a minimize button, not just ✕.
+func testTheHeaderCanMinimize() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let strip = try String(contentsOf: root.appending(path: "MacOverlay/Views/Shell/TopStripView.swift"), encoding: .utf8)
+    try assertTrue(strip.contains("minimizeButton\n            composeButton"), "minimize sits in the header row")
+    let button = strip.components(separatedBy: "private var minimizeButton").dropFirst().first?
+        .components(separatedBy: "private var composeButton").first ?? ""
+    try assertTrue(button.contains("vm.collapseShell()"), "and goes down to the pill, like Esc")
+}
+
 /// A prepared answer needs a close question, not just a clear lead.
 ///
 /// The margin gate alone answered "structure the rollout plan across the four
@@ -3767,6 +3778,7 @@ struct TestsMain {
         TestRunner.run("Semantic match needs a close question", testSemanticMatchNeedsACloseQuestion)
         TestRunner.run("The header title is a drag handle", testTheHeaderTitleIsADragHandle)
         TestRunner.run("The call prompt offers call notes", testTheCallPromptOffersCallNotes)
+        TestRunner.run("The header can minimize", testTheHeaderCanMinimize)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)

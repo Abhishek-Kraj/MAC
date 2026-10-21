@@ -15,6 +15,7 @@ struct TopStripView: View {
             titleField
             Spacer()
             browserPopOutButton
+            minimizeButton
             composeButton
             sessionMenu
         }
@@ -146,6 +147,25 @@ struct TopStripView: View {
             .buttonStyle(.plain)
             .help("Open the browser in its own window")
         }
+    }
+
+    /// Down to the pill, like Esc; a live session keeps running and
+    /// reopening comes back to it. ✕ already did this while live, but read
+    /// as "close", so it was not something anyone reached for.
+    private var minimizeButton: some View {
+        Button {
+            withAnimation(Design.Motion.spring) { vm.collapseShell() }
+        } label: {
+            Image(systemName: "minus")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Design.Ink.secondary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Design.Surface.controlFill))
+                .overlay(Circle().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .help("Minimize (Esc)")
+        .accessibilityLabel(Text("Minimize"))
     }
 
     private var composeButton: some View {
