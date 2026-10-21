@@ -13,20 +13,29 @@ import AppKit
 /// The brand button retains its separate simultaneous click/drag gesture.
 struct PanelDragArea: NSViewRepresentable {
     @Environment(OverlayViewModel.self) private var vm
+    /// A double-click on the area (the header uses it to rename).
+    var onDoubleClick: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> DragView { DragView() }
 
     func updateNSView(_ view: DragView, context: Context) {
         view.onDrag = { [vm] dx, dy, ended in vm.onPanelDrag?(dx, dy, ended) }
+        view.onDoubleClick = onDoubleClick
+        view.toolTip = onDoubleClick == nil ? nil : "Drag to move · double-click to rename"
     }
 
     final class DragView: NSView {
         var onDrag: ((CGFloat, CGFloat, Bool) -> Void)?
+        var onDoubleClick: (() -> Void)?
         override var mouseDownCanMoveWindow: Bool { false }
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
         override func mouseDown(with event: NSEvent) {
             guard let window else { return }
+            if event.clickCount == 2, let onDoubleClick {
+                onDoubleClick()
+                return
+            }
             let anchor = window.convertPoint(toScreen: event.locationInWindow)
             var dragged = false
             while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {

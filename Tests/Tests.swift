@@ -2468,6 +2468,26 @@ func testNewSessionIsRefusedWhileLive() throws {
                    "the pencil is disabled while live")
 }
 
+/// The header drags from end to end, title included.
+///
+/// The title was a click-to-rename button. With a long session title it filled
+/// the header, so a press there renamed instead of dragging and the panel
+/// could only be grabbed by a thin gap at the right. Measured by hit-testing
+/// the header during a live interview: x 60–300 hit the button before, the
+/// drag area after.
+func testTheHeaderTitleIsADragHandle() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let strip = try String(contentsOf: root.appending(path: "MacOverlay/Views/Shell/TopStripView.swift"), encoding: .utf8)
+    let drag = try String(contentsOf: root.appending(path: "MacOverlay/Views/Shared/PanelDragArea.swift"), encoding: .utf8)
+    let title = strip.components(separatedBy: "private var titleField").dropFirst().first?
+        .components(separatedBy: "private func beginRename").first ?? ""
+    try assertTrue(!title.contains("Button {"), "the title is not a button")
+    try assertTrue(title.contains(".allowsHitTesting(false)"), "presses on it reach the drag area")
+    try assertTrue(strip.contains("PanelDragArea(onDoubleClick: beginRename)"), "a double-click on the header renames")
+    try assertTrue(drag.contains("event.clickCount == 2"), "the drag area tells a double-click from a drag")
+}
+
 /// A prepared answer needs a close question, not just a clear lead.
 ///
 /// The margin gate alone answered "structure the rollout plan across the four
@@ -3728,6 +3748,7 @@ struct TestsMain {
         TestRunner.run("Interview test uses the live path", testInterviewTestUsesTheLivePath)
         TestRunner.run("Only the unjudged tail is judged", testOnlyTheUnjudgedTailIsJudged)
         TestRunner.run("Semantic match needs a close question", testSemanticMatchNeedsACloseQuestion)
+        TestRunner.run("The header title is a drag handle", testTheHeaderTitleIsADragHandle)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)

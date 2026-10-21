@@ -20,10 +20,10 @@ struct TopStripView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        // The header doubles as the panel's title bar: empty space in it
-        // drags the whole overlay. Behind the row, so the ✕, the title, and
-        // the right-hand buttons keep taking their own clicks.
-        .background(PanelDragArea())
+        // The header doubles as the panel's title bar: it drags the whole
+        // overlay, title included, and a double-click renames. Behind the
+        // row, so the ✕ and the right-hand buttons keep their own clicks.
+        .background(PanelDragArea(onDoubleClick: beginRename))
     }
 
     @ViewBuilder
@@ -36,19 +36,21 @@ struct TopStripView: View {
                 .frame(maxWidth: 320)
                 .onExitCommand(perform: cancelEdit)
         } else {
-            Button {
-                draftTitle = vm.sessionStore.activeSession.displayTitle
-                editingTitle = true
-            } label: {
-                Text(headerTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .tracking(-0.2)
-                    .foregroundColor(Design.Ink.primary)
-                    .lineLimit(1)
-                    .help("Click to rename")
-            }
-            .buttonStyle(.plain)
+            // Not a button: a click-to-rename title covered most of the
+            // header, so a press on it renamed instead of dragging, and with
+            // a long session title there was almost nothing left to grab.
+            Text(headerTitle)
+                .font(.system(size: 14, weight: .semibold))
+                .tracking(-0.2)
+                .foregroundColor(Design.Ink.primary)
+                .lineLimit(1)
+                .allowsHitTesting(false)
         }
+    }
+
+    private func beginRename() {
+        draftTitle = vm.sessionStore.activeSession.displayTitle
+        editingTitle = true
     }
 
     /// Header label — names the active surface so the user always knows
@@ -203,10 +205,7 @@ struct TopStripView: View {
                 Label("History", systemImage: "clock.arrow.circlepath")
             }
 
-            Button {
-                draftTitle = vm.sessionStore.activeSession.displayTitle
-                editingTitle = true
-            } label: {
+            Button(action: beginRename) {
                 Label("Rename…", systemImage: "pencil")
             }
 
