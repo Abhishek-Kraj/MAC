@@ -444,6 +444,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if let app {
                 self.callPrompt?.show(appName: app, vm: self.vm,
                                      onStart: { [weak self] in self?.startInterviewFromCallPrompt() },
+                                     onCallNotes: FeatureFlags.regularCallEnabled
+                                         ? { [weak self] in self?.startCallNotesFromCallPrompt() } : nil,
                                      onDismiss: { [weak self] in self?.vm.dismissCallPrompt() })
             } else {
                 self.callPrompt?.hide()
@@ -2067,6 +2069,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func startInterviewFromCallPrompt() {
         showOverlay()
         MainActor.assumeIsolated { vm.startInterviewFromCallPrompt() }
+    }
+
+    private func startCallNotesFromCallPrompt() {
+        showOverlay()
+        MainActor.assumeIsolated { vm.startCallNotesFromCallPrompt() }
     }
 
     /// The menu-bar icon shows only while idle: the menu bar is part of

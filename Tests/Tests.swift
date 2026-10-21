@@ -2488,6 +2488,23 @@ func testTheHeaderTitleIsADragHandle() throws {
     try assertTrue(drag.contains("event.clickCount == 2"), "the drag area tells a double-click from a drag")
 }
 
+/// The call prompt offers both kinds of session, not just an interview.
+func testTheCallPromptOffersCallNotes() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent()
+    func read(_ p: String) throws -> String { try String(contentsOf: root.appending(path: p), encoding: .utf8) }
+    let card = try read("MacOverlay/Views/CallPromptPanel.swift")
+    let app = try read("MacOverlay/AppDelegate.swift")
+    let vm = try read("MacOverlay/OverlayViewModel.swift")
+    try assertTrue(card.contains("Text(\"Call notes\")"), "the prompt has a Call notes button")
+    try assertTrue(app.contains("startCallNotesFromCallPrompt"), "wired to its own start")
+    try assertTrue(app.contains("FeatureFlags.regularCallEnabled"), "only where Regular call exists")
+    let start = vm.components(separatedBy: "func startCallNotesFromCallPrompt()").dropFirst().first?
+        .components(separatedBy: "\n    }").first ?? ""
+    try assertTrue(start.contains("interviewSurfaceMode = .regularCall") && start.contains("beginRegularCallFromSetup()"),
+                   "which records a Regular call")
+}
+
 /// A prepared answer needs a close question, not just a clear lead.
 ///
 /// The margin gate alone answered "structure the rollout plan across the four
@@ -3749,6 +3766,7 @@ struct TestsMain {
         TestRunner.run("Only the unjudged tail is judged", testOnlyTheUnjudgedTailIsJudged)
         TestRunner.run("Semantic match needs a close question", testSemanticMatchNeedsACloseQuestion)
         TestRunner.run("The header title is a drag handle", testTheHeaderTitleIsADragHandle)
+        TestRunner.run("The call prompt offers call notes", testTheCallPromptOffersCallNotes)
         TestRunner.run("Gap classification uses risk", testGapClassificationUsesRiskNotProse)
         TestRunner.run("Long answers get a speakable form", testLongAnswersGetASpeakableFormAndTheOriginalIsKept)
         TestRunner.run("Placeholder bank adopts the detected role", testPlaceholderBankAdoptsTheDetectedRole)

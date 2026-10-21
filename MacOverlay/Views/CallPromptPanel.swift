@@ -12,11 +12,13 @@ final class CallPromptPanel {
     /// `vm` goes into the SwiftUI environment: `WaveformLogo` reads it, and
     /// a missing environment object is a crash, not a blank view.
     func show(appName: String, vm: OverlayViewModel,
-              onStart: @escaping () -> Void, onDismiss: @escaping () -> Void) {
+              onStart: @escaping () -> Void, onCallNotes: (() -> Void)?,
+              onDismiss: @escaping () -> Void) {
         let panel = self.panel ?? makePanel()
         self.panel = panel
 
-        let card = CallPromptCard(appName: appName, onStart: onStart, onDismiss: onDismiss)
+        let card = CallPromptCard(appName: appName, onStart: onStart,
+                                  onCallNotes: onCallNotes, onDismiss: onDismiss)
             .environment(vm)
         let host = NSHostingView(rootView: card)
         panel.contentView = host
@@ -62,10 +64,13 @@ final class CallPromptPanel {
 struct CallPromptCard: View {
     let appName: String
     let onStart: () -> Void
+    /// Records the call as a Regular call instead. Nil where Regular call is
+    /// not available (it is a preview feature).
+    let onCallNotes: (() -> Void)?
     let onDismiss: () -> Void
 
-    /// One slim row: logo, question, Start, ✕ ("Not now"). Width follows the
-    /// app name so "Microsoft Teams" fits without wrapping.
+    /// One slim row: logo, question, Interview, Call notes, ✕ ("Not now").
+    /// Width follows the app name so "Microsoft Teams" fits without wrapping.
     var body: some View {
         HStack(spacing: 10) {
             WaveformLogo()
@@ -77,7 +82,7 @@ struct CallPromptCard: View {
                 .fixedSize()
             Spacer(minLength: 4)
             Button(action: onStart) {
-                Text("Start interview")
+                Text(onCallNotes == nil ? "Start interview" : "Interview")
                     .font(.system(size: 11.5, weight: .semibold))
                     .foregroundColor(Design.Ink.inverse)
                     .padding(.horizontal, 12)
@@ -85,6 +90,20 @@ struct CallPromptCard: View {
                     .background(Capsule().fill(Design.Ink.primary))
             }
             .buttonStyle(.plain)
+            .help("Start an interview: answers as they ask")
+            if let onCallNotes {
+                Button(action: onCallNotes) {
+                    Text("Call notes")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundColor(Design.Ink.primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Design.Surface.controlFill))
+                        .overlay(Capsule().strokeBorder(Design.Surface.hairline, lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+                .help("Record the call: transcript now, notes when it ends")
+            }
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))

@@ -1240,9 +1240,22 @@ final class OverlayViewModel {
     func startInterviewFromCallPrompt() {
         dismissCallPrompt()
         shellStage = .expanded
+        interviewSurfaceMode = .interview
         openInterviewSurface()
         guard missingRequiredKeys.isEmpty else { return }
         beginInterviewFromSetup()
+    }
+
+    /// The call prompt's other choice: record the call as a Regular call
+    /// (transcript, notes at the end) rather than answer it as an interview.
+    func startCallNotesFromCallPrompt() {
+        dismissCallPrompt()
+        shellStage = .expanded
+        interviewSurfaceMode = .regularCall
+        regularCallAsCall = true
+        openInterviewSurface()
+        guard missingRequiredKeys.isEmpty else { return }
+        beginRegularCallFromSetup()
     }
 
     /// How see-through the open screen is. The Background setting is for
